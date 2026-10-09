@@ -1,6 +1,6 @@
 # Test report
 
-Everything below was executed on 2026-10-09 for commit `010376e` (`Self-test WebGPU before using it…`). Numbers are
+Everything below was executed on 2026-10-09 for commit `d6cc360`. Numbers are
 copied from the runs; nothing here is estimated. Re-run the commands in [TESTING.md](TESTING.md) to reproduce them.
 
 ## Environments
@@ -8,7 +8,7 @@ copied from the runs; nothing here is estimated. Re-run the commands in [TESTING
 | Environment | Details |
 | --- | --- |
 | Local | macOS 26.7.1 (25G241), Apple M5 Pro, Node.js v26.0.0, Playwright 1.64.0 with Chromium 156.0.8078.4 (Chrome for Testing) and Chromium headless shell 156.0.8078.4 |
-| CI | GitHub Actions `ubuntu-24.04`, Node.js v22.23.3, the same Playwright and Chromium builds; [run 37952460933](https://github.com/swiftugandan/powerstudio/actions/runs/37952460933) |
+| CI | GitHub Actions `ubuntu-24.04`, Node.js v22.23.3, the same Playwright and Chromium builds; [run 37953787556](https://github.com/swiftugandan/powerstudio/actions/runs/37953787556) |
 | Oracles | Python 3.12 (uv), pandapower 3.5.6, PYPOWER 5.1.21, numpy 2.4.6, scipy 1.18.1, run locally to produce `tests/oracle/golden/` |
 
 ## Results
@@ -16,10 +16,16 @@ copied from the runs; nothing here is estimated. Re-run the commands in [TESTING
 | Suite | Local (macOS) | CI (Ubuntu) |
 | --- | --- | --- |
 | Type checking (`npm run check`, both configs) | passed | passed |
-| Unit and engine tests (`npm test`) | 61 passed, 0 failed, 151 ms | 61 passed, 0 failed, 577 ms |
-| Browser tests, `webgpu` project | 12 passed, 0 failed | 12 passed, 0 failed |
-| Browser tests, `canvas` project | 12 passed, 0 failed | 12 passed, 0 failed |
-| Browser suite wall time | 7.5 s | 14.1 s |
+| Unit and engine tests (`npm test`) | 61 passed, 0 failed, 152 ms | 61 passed, 0 failed, 792 ms |
+| Browser tests, `webgpu` project | 14 passed, 0 failed | 14 passed, 0 failed |
+| Browser tests, `canvas` project | 14 passed, 0 failed | 14 passed, 0 failed |
+| Browser suite wall time | 10.2 s | 24.0 s |
+
+The browser tests cover the WebGPU and fallback backends, the load flow against MATPOWER, inspector editing with
+undo and redo, drawing a network with the insert tools, copy and paste, switching in and out of service, keyboard
+nudging, marquee selection, resizing, rerouting and reconnecting with the diagram handles, reload persistence, short
+circuit, contingency and stability runs, MATPOWER import, JSON export and re-import, the theme switch, forcing Canvas
+2D, network isolation and the phone layout.
 
 The 8 skipped tests per project are the documentation screenshot captures, which run only with `PS_SCREENSHOTS=1`.
 They were run locally (8 passed) to produce `docs/screenshots/`.
@@ -40,7 +46,8 @@ adapter whose instance was gone within seconds ("A valid external Instance refer
 `requestDevice`, on `mapAsync` or as a lost device), and in no case did a WebGPU frame reach a screenshot. On macOS
 the same probe draws correctly with both the Metal adapter and the SwiftShader adapter. Because of this, the app now
 self-tests a new WebGPU device (clear a texel, read it back within 3 s) before using it, and it switches to Canvas 2D
-if the device is lost later.
+when the device is lost later or a GPU read-back fails. In the CI run above, the device passed the self-test and was
+lost moments later; the app recovered to Canvas 2D and the test confirmed the badge and the drawing.
 
 The WebGPU rendering path is therefore verified on macOS (Metal and SwiftShader) only. Firefox, Safari, Windows and
 real GPUs on Linux were not tested.
@@ -75,10 +82,10 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Check | Result |
 | --- | --- |
 | Build determinism | Two builds of the same source are byte-identical (`tests/build.test.mjs`); the local build (Node 26) and the CI build (Node 22) of this commit have the same SHA-256 |
-| Build output | `dist/PowerStudio.html`, 538.3 KiB, sha256 `3e2b30e6c2516dccd47e904861367d2ab5dcf55d73a6f35605a24b5b32860342` |
+| Build output | `dist/PowerStudio.html`, 539.3 KiB, sha256 `1a23924cbfbf47d64ff9b7b96db653778bdbfaa73ada2c639cdc16c02cbf0a56` |
 | Published page | The workflow's verify job fetched https://swiftugandan.github.io/powerstudio/ and got the same SHA-256 on the first attempt |
 | Independent check | `curl` of the live page from this machine after deployment returned the same SHA-256 |
-| Live page in a browser | Opened from the Pages origin in local Chromium: it drew with WebGPU (Apple, metal-3), the IEEE 14 load flow converged in 3 iterations, and the only requests were the page itself and the worker's `blob:` URL |
+| Live page in a browser | Opened from the Pages origin in local Chromium (commit `3e2b30e…` build): it drew with WebGPU (Apple, metal-3), the IEEE 14 load flow converged in 3 iterations, and the only requests were the page itself and the worker's `blob:` URL |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
 ## Not verified
