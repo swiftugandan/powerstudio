@@ -74,12 +74,15 @@ elements out for one calculation without editing the model.
 Jacobian comes from ∂S/∂θ and ∂S/∂|V| (the formulation of MATPOWER's `dSbus_dV`) on a fixed sparse pattern, so the
 ordering and symbolic factorisation (`ps-sparse`, faer's sparse LU with COLAMD ordering) are computed once per solve
 and each iteration only refactorises. Iterations stop when the largest power mismatch is below the study case
-tolerance (1 kVA by default). When a full Newton step makes the mismatch markedly worse, the step is halved, up to
-four times.
+tolerance (1 kVA by default). A step that does not reduce the squared mismatch enough (Armijo's condition) is
+shortened to the minimum of a quadratic fitted along the Newton direction, up to eight times; a start far from the
+solution then stalls at a mismatch it reports, bus by bus, instead of diverging.
 
-- **Start.** Voltage magnitudes start at their setpoints or 1 p.u., angles at the nominal angles (every transformer
-  phase shift applied outward from the reference). A DC load flow that includes the phase shifts then sets the
-  angles. The Riverside sample, a meshed 20 kV ring with Yd5 and Dy5 transformers, needs it: pandapower's flat start
+- **Start.** Voltage magnitudes start at the no-load profile: every bus no control fixes takes the average of its
+  neighbours' voltages, weighted by branch susceptance and scaled by the transformers' off-nominal ratios, with the
+  controlled buses at their targets (OpenLoadFlow's voltage magnitude initialiser). Angles start at the nominal angles
+  (every transformer phase shift applied outward from the reference), then a DC load flow that includes the phase
+  shifts sets them. The Riverside sample, a meshed 20 kV ring with Yd5 and Dy5 transformers, needs it: pandapower's flat start
   does not converge on it in 50 iterations; with a DC start both programs converge in 3. The study case can switch to
   a flat start. A warm start (contingency cases, models that carry a solution) starts from the previous voltages.
 - **Voltage control.** A machine holds the voltage of the busbar its data name (its own, or a remote one with

@@ -249,6 +249,7 @@ impl Work {
         br.ytf = tp.ytf;
         br.ytt = tp.ytt;
         br.shift = tp.shift;
+        br.ratio = tp.ratio;
     }
 }
 

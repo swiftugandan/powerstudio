@@ -6,6 +6,8 @@ import { riverside } from '../src/samples/riverside.js';
 
 test('every outage equals a load flow with that element switched out', () => {
   const doc = ieee14();
+  // Both sides solve tightly, so they agree whatever path each takes to the solution.
+  doc.study.loadflow.tolerance = 1e-8;
   const r = studies.contingency(doc);
   assert.equal(r.cases.length, 20, 'fifteen lines and five transformers');
   for (const c of r.cases) {

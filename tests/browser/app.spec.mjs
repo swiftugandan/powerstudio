@@ -60,7 +60,7 @@ test('draws the diagram with the backend it reports, and that backend is the exp
 test('runs a load flow from the keyboard and matches MATPOWER case14', async ({ page }) => {
   await open(page);
   await loadFlow(page);
-  await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('Converged in 3 iterations');
+  await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('Converged in 2 iterations');
   const row = page.locator('table.grid tbody tr[data-id="B14"]');
   await expect(row).toContainText('1.0355');
   await expect(row).toContainText('−16.034');

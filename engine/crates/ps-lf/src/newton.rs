@@ -171,6 +171,9 @@ pub struct Solution {
     pub controls: Vec<ControlLog>,
     /// Controls that could not do what was asked, in plain words.
     pub notes: Vec<String>,
+    /// When the load flow did not converge: the buses with the largest remaining mismatch, largest first, as
+    /// (bus, active mismatch, reactive mismatch) in p.u.
+    pub worst: Vec<(usize, f64, f64)>,
     /// Time spent, milliseconds.
     pub timing: Timing,
 }
@@ -304,6 +307,13 @@ pub fn solve(net: &PuNetwork, opt: &Options) -> Solution {
     }
     let groups = work.groups(opt, &vm);
     let st = Structure::new(n, &reference, &groups);
+    // A cold start takes its magnitudes from the no-load voltage profile the controls and transformer ratios set.
+    let mut vm = vm;
+    if !opt.warm_start
+        && let Some(init) = crate::init::magnitudes(&work.net, &st.v_fixed)
+    {
+        vm = init;
+    }
     let y = Ybus::build(&work.net, &[]);
     let ta = clock::now_ms();
     let lay = Layout::new(&y, &st);
@@ -652,6 +662,10 @@ impl Work {
             .collect();
         let shunt_sections = self.net.shunt_controls.iter().map(|c| c.index).collect();
         let notes = std::mem::take(&mut self.notes);
+        let worst_buses = match s {
+            Some(s) if !converged && n > 0 => s.worst_buses(10),
+            _ => Vec::new(),
+        };
         Solution {
             converged,
             message: if converged { "Converged.".into() } else { message },
@@ -671,6 +685,7 @@ impl Work {
             distributed,
             controls,
             notes,
+            worst: worst_buses,
             timing,
         }
     }
@@ -861,11 +876,14 @@ impl Solver {
                     "The Jacobian is singular: check for isolated machines or zero impedances.".into(),
                 );
             }
-            // Full step first; halve it while the mismatch grows markedly (at most four times).
+            // Full step first. While it does not reduce the squared mismatch g = ‖F‖² enough (Armijo's condition), take
+            // the step that minimises the quadratic through g(0), its slope −2·g(0) along the Newton direction and
+            // g(μ), within [μ/10, μ/2], at most eight times.
+            let g0: f64 = f.iter().map(|x| x * x).sum();
             let mut step = 1.0;
             let (va0, vm0) = (self.va.clone(), self.vm.clone());
             let mut accepted = f64::INFINITY;
-            for _ in 0..5 {
+            for attempt in 0..9 {
                 for i in 0..n {
                     let (ca, cm) = (self.st.col_a[i], self.st.col_m[i]);
                     if ca != NONE {
@@ -877,10 +895,17 @@ impl Solver {
                     v[i] = C64::from_polar(self.vm[i], self.va[i]);
                 }
                 accepted = mismatch(&self.y, &self.st, &self.sch, &v, &self.vm, &mut trial_cur, &mut trial_f);
-                if accepted.is_finite() && (accepted < worst * 1.5 || step < 0.1) {
+                let g: f64 = trial_f.iter().map(|x| x * x).sum();
+                if g.is_finite() && g <= (1.0 - 2e-4 * step) * g0 || attempt == 8 {
                     break;
                 }
-                step *= 0.5;
+                let curvature = g - g0 + 2.0 * step * g0;
+                let best = if curvature > 0.0 && g.is_finite() {
+                    step * step * g0 / curvature
+                } else {
+                    step / 2.0
+                };
+                step = best.clamp(step / 10.0, step / 2.0);
             }
             std::mem::swap(&mut f, &mut trial_f);
             std::mem::swap(&mut cur, &mut trial_cur);
@@ -903,6 +928,31 @@ impl Solver {
             worst,
             format!("No convergence after {} iterations.", opt.max_iter),
         )
+    }
+
+    /// The `k` buses with the largest mismatch at the present voltages: (bus, active, reactive), p.u. A bus's
+    /// reactive mismatch counts only where its reactive power is scheduled.
+    fn worst_buses(&self, k: usize) -> Vec<(usize, f64, f64)> {
+        let n = self.y.n;
+        let v: Vec<C64> = (0..n).map(|i| C64::from_polar(self.vm[i], self.va[i])).collect();
+        let mut cur = vec![C64::ZERO; n];
+        let mut f = vec![0.0; self.st.dim];
+        mismatch(&self.y, &self.st, &self.sch, &v, &self.vm, &mut cur, &mut f);
+        let mut rows: Vec<(usize, f64, f64)> = (0..n)
+            .map(|i| {
+                let p = if self.st.col_a[i] != NONE {
+                    f[self.st.col_a[i]]
+                } else {
+                    0.0
+                };
+                let q = self.st.q_uses[i].iter().find(|u| u.1 == 1.0).map_or(0.0, |u| f[u.0]);
+                (i, p, q)
+            })
+            .filter(|r| r.1.is_finite() && r.2.is_finite())
+            .collect();
+        rows.sort_by(|a, b| b.1.hypot(b.2).total_cmp(&a.1.hypot(a.2)));
+        rows.truncate(k);
+        rows
     }
 
     /// Bus injections at the present voltages, p.u.

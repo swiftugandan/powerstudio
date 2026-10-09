@@ -14,6 +14,7 @@ mod dc;
 mod discrete;
 mod equations;
 mod flows;
+mod init;
 mod network;
 mod newton;
 mod ybus;

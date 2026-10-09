@@ -203,6 +203,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 tolerance: tolerance.unwrap_or(1e-6),
                 enforce_q_limits: flag(args, "--qlim"),
                 dc_start: !flag(args, "--flat"),
+                load_scale: value(args, "--scale").and_then(|v| v.parse().ok()).unwrap_or(100.0),
                 ..ps_model::study::LoadFlowSettings::plain()
             };
             let warm = flag(args, "--warm");
@@ -222,7 +223,7 @@ fn run(args: &[String]) -> Result<String, String> {
             if cmd == "lf" {
                 let r = ps_study::loadflow::run(model, &lf_run);
                 let buses: Vec<Value> = r.buses.iter().map(|b| json!([b.id, b.vm, b.va])).collect();
-                return Ok(json!({ "size": size, "converged": r.converged, "message": r.message, "iterations": r.iterations, "mismatch": r.mismatch, "timing": r.timing, "bus": buses }).to_string());
+                return Ok(json!({ "size": size, "converged": r.converged, "message": r.message, "iterations": r.iterations, "mismatch": r.mismatch, "timing": r.timing, "log": r.log, "worst": r.worst, "bus": buses }).to_string());
             }
             let repeat: usize = value(args, "--repeat")
                 .map(str::parse)

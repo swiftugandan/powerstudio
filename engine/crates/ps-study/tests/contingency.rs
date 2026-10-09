@@ -10,7 +10,9 @@ use ps_study::{LoadFlowRun, Silent, loadflow, outages_by_id};
 
 #[test]
 fn every_outage_equals_a_load_flow_with_that_element_switched_out() {
-    let imp = input("ieee14");
+    let mut imp = input("ieee14");
+    // Both sides solve tightly, so they agree whatever path each takes to the solution.
+    imp.study.loadflow.tolerance = 1e-8;
     let r = contingency::run(&imp.model, &imp.study, &mut Silent).unwrap();
     assert_eq!(r.cases.len(), 20, "fifteen lines and five transformers");
     for c in &r.cases {
@@ -33,8 +35,10 @@ fn every_outage_equals_a_load_flow_with_that_element_switched_out() {
         let worst = worst.unwrap();
         assert!(
             (c.max_loading.unwrap() - worst.loading.unwrap()).abs() < 1e-3,
-            "{}",
-            c.id
+            "{}: {:?} vs {:?}",
+            c.id,
+            c.max_loading,
+            worst.loading
         );
         assert_eq!(c.max_loading_id, worst.id);
     }

@@ -141,6 +141,20 @@ pub struct SectionResult {
     pub max: u32,
 }
 
+/// A bus with a large remaining mismatch when the load flow did not converge.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MismatchResult {
+    /// Bus identifier.
+    pub id: String,
+    /// Active power mismatch, MW.
+    pub p: f64,
+    /// Reactive power mismatch, Mvar.
+    pub q: f64,
+    /// Voltage at the last iteration, p.u.
+    pub vm: f64,
+}
+
 /// What one control did.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -243,6 +257,8 @@ pub struct LoadFlowReport {
     pub distributed: f64,
     /// What each enabled control did.
     pub controls: Vec<ControlResult>,
+    /// When it did not converge: the buses with the largest remaining mismatch.
+    pub worst: Vec<MismatchResult>,
     /// Voltages in bus order.
     pub state: State,
     /// Bus identifiers, in bus order.
@@ -607,6 +623,16 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
         sections,
         distributed: sol.distributed.iter().sum::<f64>() * sb,
         controls,
+        worst: sol
+            .worst
+            .iter()
+            .map(|&(b, p, q)| MismatchResult {
+                id: bus_ids.get(b).cloned().unwrap_or_default(),
+                p: p * sb,
+                q: q * sb,
+                vm: sol.vm.get(b).copied().unwrap_or(0.0),
+            })
+            .collect(),
         state: State {
             vm: sol.vm.clone(),
             va: sol.va.iter().map(|a| a * DEG).collect(),

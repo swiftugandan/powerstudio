@@ -54,6 +54,8 @@ pub struct PuBranch {
     pub ytt: C64,
     /// Phase shift of the ideal transformer at the from end, radians (the to end lags).
     pub shift: f64,
+    /// Off-nominal ratio of the ideal transformer at the from end (1 for a line between equal bases).
+    pub ratio: f64,
 }
 
 /// What kind of unit a machine is, where the load flow treats kinds differently.
