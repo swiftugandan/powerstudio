@@ -226,7 +226,8 @@ export class Viewport {
     this.invalidate(false);
   }
 
-  /** The frame as the active renderer produced it (WebGPU: read back from the GPU), as a PNG data URL. */
+  /** The frame as the active renderer produced it (WebGPU: read back from the GPU), as a PNG data URL.
+   * @returns {Promise<string>} */
   async snapshotPNG() {
     const r = this.renderer;
     if (!r) return '';
