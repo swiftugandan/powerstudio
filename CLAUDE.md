@@ -10,7 +10,10 @@ docs/ARCHITECTURE.md for the structure and docs/ENGINE.md for what every calcula
 - `npm run check`: strict `tsc --checkJs`, two configs (page with DOM and WebGPU types; worker and core).
 - `npm test`: Node test runner over `tests/*.test.mjs`.
 - `npm run test:browser`: Playwright against `dist/PowerStudio.html` (it builds first); projects `webgpu` and `canvas`.
-- `npm run build`: `dist/PowerStudio.html` plus its SHA-256.
+- `npm run build`: `dist/PowerStudio.html` plus its SHA-256. `npm run build:pages`: `_site/` (website at `/`, app at
+  `/app/`, download). The website's numbers come from the engine at build time; never type them into `site/index.html`.
+- Releases: bump `version` in `package.json` and `src/core/version.js` together (a test checks), tag `vX.Y.Z`, and
+  attach `dist/PowerStudio.html` and its `.sha256` to the GitHub release.
 - `PS_SCREENSHOTS=1 npx playwright test screenshots --project=webgpu`: refreshes `docs/screenshots/`.
 
 ## Rules

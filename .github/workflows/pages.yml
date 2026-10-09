@@ -59,17 +59,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Build the single-file app
-        run: node build.mjs
-      - name: Assemble the site
-        run: |
-          mkdir -p _site
-          cp dist/PowerStudio.html _site/index.html
-          cp dist/PowerStudio.html _site/PowerStudio.html
-          cp dist/PowerStudio.html.sha256 _site/PowerStudio.html.sha256
+      - name: Build the site (marketing page, app at /app/, single-file download)
+        run: node build-pages.mjs
       - id: hash
-        name: Hash the build
-        run: echo "sha256=$(sha256sum dist/PowerStudio.html | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        name: Hash the app
+        run: echo "sha256=$(sha256sum _site/PowerStudio.html | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-pages-artifact@v4
         with:
           path: _site
@@ -94,21 +88,25 @@ jobs:
     needs: [build, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Check that the published page is the build
+      - name: Check that the published app and download are the build
         env:
           EXPECTED: ${{ needs.build.outputs.sha256 }}
-          PAGE: ${{ needs.deploy.outputs.page_url }}
+          SITE: ${{ needs.deploy.outputs.page_url }}
         run: |
           echo "Expected sha256: $EXPECTED"
           for attempt in $(seq 1 30); do
-            actual=$(curl -fsSL -H 'Cache-Control: no-cache' "${PAGE}?build=${GITHUB_SHA}&attempt=${attempt}" | sha256sum | cut -d' ' -f1 || true)
-            echo "Attempt ${attempt}: ${PAGE} → ${actual}"
-            if [ "$actual" = "$EXPECTED" ]; then
-              echo "### Published page verified" >> "$GITHUB_STEP_SUMMARY"
-              echo "\`${PAGE}\` has sha256 \`${actual}\`, identical to the build." >> "$GITHUB_STEP_SUMMARY"
+            app=$(curl -fsSL -H 'Cache-Control: no-cache' "${SITE}app/?build=${GITHUB_SHA}&attempt=${attempt}" | sha256sum | cut -d' ' -f1 || true)
+            file=$(curl -fsSL -H 'Cache-Control: no-cache' "${SITE}PowerStudio.html?build=${GITHUB_SHA}&attempt=${attempt}" | sha256sum | cut -d' ' -f1 || true)
+            home=$(curl -fsSL -o /dev/null -w '%{http_code}' "${SITE}?build=${GITHUB_SHA}" || true)
+            echo "Attempt ${attempt}: app ${app}, download ${file}, home page HTTP ${home}"
+            if [ "$app" = "$EXPECTED" ] && [ "$file" = "$EXPECTED" ] && [ "$home" = "200" ]; then
+              {
+                echo "### Published site verified"
+                echo "\`${SITE}app/\` and \`${SITE}PowerStudio.html\` have sha256 \`${app}\`, identical to the build; the home page answers 200."
+              } >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
             sleep 20
           done
-          echo "The published page does not match the build." >&2
+          echo "The published site does not match the build." >&2
           exit 1

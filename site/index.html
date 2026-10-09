@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>PowerStudio: single-line diagrams, solved in your browser</title>
+<meta name="description" content="PowerStudio is a free, open-source power system analysis workbench that runs in the browser: load flow, IEC 60909-style short circuit, N-1 contingency and stability on a single-line diagram. No account, no server.">
+<meta property="og:title" content="PowerStudio: single-line diagrams, solved in your browser">
+<meta property="og:description" content="Load flow, short circuit, N-1 contingency and stability studies on a single-line diagram, running entirely on your device.">
+<meta property="og:image" content="{{siteUrl}}workspace.png">
+<link rel="icon" href="{{favicon}}" type="image/svg+xml">
+<style>
+:root {
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --night: #0d1116; --night-2: #151a21; --night-line: #262d37; --on-night: #e5e9ef; --on-night-muted: #a3adba;
+  --teal: #0b7a83; --teal-strong: #08666e; --teal-bright: #36c0cb; --on-teal: #ffffff;
+  --paper: #f6f7f9; --sheet: #ffffff; --ink: #18212e; --muted: #546072; --line: #dde1e7; --soft: #eef1f4;
+  --ok: #1d7f45; --warn: #a15c00; --bad: #c0352b;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper: #10151b; --sheet: #161b22; --ink: #e5e9ef; --muted: #a3adba; --line: #2a313c; --soft: #1c222b; --teal: #36c0cb; --teal-strong: #59d0d9; --on-teal: #052a2e; --ok: #4cc283; --warn: #e7a83d; --bad: #f06a5f; }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 17px/1.6 var(--font); -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--teal-bright); outline-offset: 3px; border-radius: 4px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+.mono { font-family: var(--mono); }
+
+/* Top bar and hero share the night palette: the diagram is the hero. */
+.night { background: var(--night); color: var(--on-night); }
+header.top .wrap { display: flex; align-items: center; gap: 24px; height: 72px; }
+.brand { display: flex; align-items: center; gap: 10px; text-decoration: none; font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+.brand svg { width: 30px; height: 30px; }
+nav.links { margin-left: auto; display: flex; align-items: center; gap: 26px; font-size: 15.5px; }
+nav.links a { color: var(--on-night-muted); text-decoration: none; }
+nav.links a:hover { color: var(--on-night); }
+.btn { display: inline-flex; align-items: center; gap: 8px; height: 46px; padding: 0 20px; border-radius: 8px; font-weight: 600; font-size: 16px; text-decoration: none; white-space: nowrap; }
+.btn.primary { background: var(--teal-bright); color: #052a2e; }
+.btn.primary:hover { background: #59d0d9; }
+.btn.ghost { color: var(--on-night); border: 1px solid #3a4452; }
+.btn.ghost:hover { border-color: var(--on-night-muted); }
+nav.links .btn { height: 38px; padding: 0 16px; font-size: 15px; color: #052a2e; }
+.hero .wrap { padding-top: 56px; padding-bottom: 72px; }
+.hero h1 { margin: 0 0 18px; max-width: 14em; font-size: clamp(38px, 5.6vw, 66px); line-height: 1.04; letter-spacing: -0.025em; font-weight: 700; text-wrap: balance; }
+.hero h1 em { font-style: normal; color: var(--teal-bright); }
+.hero .lede { margin: 0 0 28px; max-width: 36em; color: #c3cad4; font-size: 19px; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px 14px; align-items: center; }
+.actions .meta { color: var(--on-night-muted); font-size: 14.5px; margin-left: 4px; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 26px 0 0; padding: 0; list-style: none; color: var(--on-night-muted); font-size: 15px; }
+.facts li { display: flex; align-items: center; gap: 8px; }
+.facts li::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--teal-bright); }
+.stage { margin: 48px 0 0; border: 1px solid var(--night-line); border-radius: 12px; overflow: hidden; background: #10151b; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }
+.stage-bar { display: flex; align-items: center; gap: 14px; padding: 10px 16px; border-bottom: 1px solid var(--night-line); color: var(--on-night-muted); font-size: 13.5px; }
+.stage-bar strong { color: var(--on-night); font-weight: 600; }
+.stage-bar .pill { margin-left: auto; padding: 2px 10px; border-radius: 10px; background: rgba(76, 194, 131, 0.14); color: #4cc283; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.stage svg { display: block; width: 100%; height: auto; }
+.stage figcaption { padding: 12px 16px 14px; color: var(--on-night-muted); font-size: 14px; border-top: 1px solid var(--night-line); }
+
+section { padding: 88px 0; }
+section.alt { background: var(--sheet); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.kicker { margin: 0 0 8px; color: var(--teal); font-weight: 650; font-size: 15px; }
+h2 { margin: 0 0 14px; font-size: clamp(28px, 3.4vw, 40px); line-height: 1.12; letter-spacing: -0.02em; max-width: 22em; text-wrap: balance; }
+.intro { margin: 0 0 40px; max-width: 42em; color: var(--muted); font-size: 18px; }
+
+.studies { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+.study { display: flex; flex-direction: column; gap: 10px; padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--sheet); }
+section.alt .study { background: var(--paper); }
+.study .icon { width: 38px; height: 38px; border-radius: 9px; display: grid; place-items: center; background: color-mix(in srgb, var(--teal) 13%, transparent); color: var(--teal); }
+.study h3 { margin: 4px 0 0; font-size: 19px; letter-spacing: -0.01em; }
+.study p { margin: 0; color: var(--muted); font-size: 15.5px; }
+.study .figure { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
+.study .figure b { display: block; font-size: 30px; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--ink); }
+.study .figure span { display: block; margin-top: 4px; font-size: 14px; color: var(--muted); }
+
+.split { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 48px; align-items: center; }
+.shot { margin: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--sheet); box-shadow: 0 18px 50px rgba(16, 24, 40, 0.14); }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { padding: 10px 14px; font-size: 13.5px; color: var(--muted); border-top: 1px solid var(--line); }
+ul.ticks { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; }
+ul.ticks li { position: relative; padding-left: 30px; color: var(--muted); font-size: 16px; }
+ul.ticks li strong { color: var(--ink); font-weight: 600; }
+ul.ticks li::before { content: ""; position: absolute; left: 2px; top: 6px; width: 16px; height: 16px; border-radius: 50%; background: color-mix(in srgb, var(--teal) 16%, transparent); box-shadow: inset 0 0 0 5px color-mix(in srgb, var(--teal) 0%, transparent); }
+ul.ticks li::after { content: ""; position: absolute; left: 7px; top: 9px; width: 4px; height: 8px; border: solid var(--teal); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+
+table.checks { width: 100%; border-collapse: collapse; font-size: 15.5px; background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+table.checks th, table.checks td { padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.checks th { font-size: 13.5px; color: var(--muted); font-weight: 600; background: var(--soft); }
+table.checks tr:last-child td { border-bottom: 0; }
+table.checks td.num { font-family: var(--mono); font-size: 14.5px; white-space: nowrap; text-align: right; }
+table.checks td small { display: block; color: var(--muted); font-size: 13.5px; }
+.note { margin: 18px 0 0; color: var(--muted); font-size: 15px; max-width: 52em; }
+
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+.card { padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--sheet); }
+section.alt .card { background: var(--paper); }
+.card h3 { margin: 0 0 8px; font-size: 18px; }
+.card p { margin: 0; color: var(--muted); font-size: 15.5px; }
+.card code { font-family: var(--mono); font-size: 13.5px; background: var(--soft); padding: 1px 5px; border-radius: 4px; }
+
+.limits { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 40px; margin: 0; padding: 0; list-style: none; }
+.limits li { padding: 12px 0; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 15.5px; }
+.limits li strong { color: var(--ink); font-weight: 600; }
+
+.cta { text-align: center; }
+.cta h2 { margin: 0 auto 14px; }
+.cta .intro { margin: 0 auto 28px; }
+.cta .actions { justify-content: center; }
+.cta .btn.ghost { color: var(--ink); border-color: var(--line); }
+.cta .btn.ghost:hover { border-color: var(--muted); }
+
+footer { padding: 36px 0 48px; color: var(--on-night-muted); font-size: 14px; }
+footer .wrap { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px 40px; }
+footer p { margin: 0; max-width: 46em; }
+footer nav { display: flex; gap: 22px; flex-wrap: wrap; align-items: flex-start; }
+footer a { color: var(--on-night); text-decoration: none; }
+footer a:hover { text-decoration: underline; }
+
+@media (max-width: 980px) {
+  .studies { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+  .three { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  body { font-size: 16px; }
+  .wrap { padding: 0 16px; }
+  nav.links a:not(.btn) { display: none; }
+  .hero .wrap { padding-top: 32px; padding-bottom: 48px; }
+  .stage-bar .pill { display: none; }
+  .studies, .limits { grid-template-columns: minmax(0, 1fr); }
+  section { padding: 60px 0; }
+  table.checks th:nth-child(2), table.checks td:nth-child(2) { display: none; }
+  footer .wrap { grid-template-columns: minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+<div class="night">
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="./" aria-label="PowerStudio home">{{logo}}<span>PowerStudio</span></a>
+      <nav class="links" aria-label="Site">
+        <a href="#studies">Studies</a>
+        <a href="#workspace">Workspace</a>
+        <a href="#verification">Verification</a>
+        <a href="{{repo}}">GitHub</a>
+        <a class="btn primary" href="./app/">Open the app</a>
+      </nav>
+    </div>
+  </header>
+  <main id="top" class="hero">
+    <div class="wrap">
+      <h1>Single-line diagrams, <em>solved in your browser.</em></h1>
+      <p class="lede">PowerStudio is a power system analysis workbench. Draw a network, then run load flow, short-circuit, N-1 contingency and stability studies on it. Everything runs on your device: no account, no server, no tracking.</p>
+      <div class="actions">
+        <a class="btn primary" href="./app/">Open PowerStudio</a>
+        <a class="btn ghost" href="./PowerStudio.html" download>Download for offline use</a>
+        <span class="meta">One {{appSize}} HTML file · version {{version}} · MIT licence</span>
+      </div>
+      <ul class="facts">
+        <li>Drawn with WebGPU, with a Canvas 2D fallback</li>
+        <li>Checked against MATPOWER and pandapower</li>
+        <li>Opens MATPOWER case files</li>
+      </ul>
+      <figure class="stage">
+        <div class="stage-bar"><strong>IEEE 14-bus system</strong><span>Newton-Raphson load flow</span><span class="pill">Converged in {{lfIterations}} iterations</span></div>
+        {{diagram}}
+        <figcaption>{{diagramCaption}}</figcaption>
+      </figure>
+    </div>
+  </main>
+</div>
+
+<section id="studies">
+  <div class="wrap">
+    <p class="kicker">Four studies, one diagram</p>
+    <h2>The calculations a network engineer runs every day</h2>
+    <p class="intro">Each study reads the same network you draw, runs in a background worker so the diagram stays responsive, and puts its results back on the diagram, in sortable tables and in the inspector. The figures below are the bundled IEEE 14-bus sample, computed when this page was built.</p>
+    <div class="studies">
+      <article class="study">
+        <div class="icon">{{iconLoadflow}}</div>
+        <h3>Load flow</h3>
+        <p>Newton-Raphson with reference, PV and PQ busbars, transformer taps and phase shifts, reactive power limits and a DC start.</p>
+        <div class="figure"><b>{{lfLosses}} MW</b><span>losses, converged in {{lfIterations}} iterations</span></div>
+      </article>
+      <article class="study">
+        <div class="icon">{{iconShortcircuit}}</div>
+        <h3>Short circuit</h3>
+        <p>IEC 60909-style three-phase, line-to-line and earth faults, maximum and minimum, with peak and thermal currents and branch contributions.</p>
+        <div class="figure"><b>{{scIkss}} kA</b><span>highest Ik″, at {{scBus}}</span></div>
+      </article>
+      <article class="study">
+        <div class="icon">{{iconContingency}}</div>
+        <h3>N-1 contingency</h3>
+        <p>Every line, transformer or machine out in turn, ranked by the loading and voltage limits it breaks.</p>
+        <div class="figure"><b>{{n1Bad}} of {{n1Total}}</b><span>outages break a limit; losing {{n1Outage}} loads {{n1Loaded}} to {{n1Loading}} %</span></div>
+      </article>
+      <article class="study">
+        <div class="icon">{{iconRms}}</div>
+        <h3>Stability</h3>
+        <p>Electromechanical simulation with the classical machine model: faults, clearing, tripping and load steps, plotted over time.</p>
+        <div class="figure"><b>{{rmsVerdict}}</b><span>{{rmsDetail}}</span></div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="workspace" class="alt">
+  <div class="wrap split">
+    <figure class="shot">
+      <img src="./workspace.png" width="1440" height="900" alt="The PowerStudio workspace after a load flow on the IEEE 14-bus system: ribbon, model tree, diagram with loading colours and result boxes, inspector and the busbar results table." loading="lazy">
+      <figcaption>A screenshot of the running app, drawn with WebGPU.</figcaption>
+    </figure>
+    <div>
+      <p class="kicker">A workspace built for the job</p>
+      <h2>Familiar layout, made for the browser</h2>
+      <ul class="ticks">
+        <li><strong>Ribbon, model tree, diagram and inspector.</strong> Every element's data is grouped by the study it feeds, with units and limits.</li>
+        <li><strong>Edit on the diagram.</strong> Place and connect elements, drag busbars, resize bars, reroute and reconnect branches, select with a marquee.</li>
+        <li><strong>Results where you look.</strong> Loading and voltage colours, result boxes, sortable tables, CSV export, and results marked stale after an edit.</li>
+        <li><strong>Fast to drive.</strong> A command palette, keyboard shortcuts for every study, undo and redo for every change, light and dark themes.</li>
+        <li><strong>Your files.</strong> Import PowerStudio files or MATPOWER cases; export JSON, SVG, PNG and CSV.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="verification">
+  <div class="wrap">
+    <p class="kicker">Verification</p>
+    <h2>Checked against independent solvers, not against itself</h2>
+    <p class="intro">The engine's tests compare its results with two other programs on the same networks. The largest differences, recomputed when this page was built:</p>
+    <table class="checks">
+      <thead><tr><th scope="col">What</th><th scope="col">Reference</th><th scope="col">Largest difference</th></tr></thead>
+      <tbody>
+        <tr><td>Load flow on MATPOWER case14, case30 and case118, imported from their files<small>Bus voltages, all buses</small></td><td>MATPOWER's algorithm (PYPOWER)</td><td class="num">{{agreeMatpower}} p.u.</td></tr>
+        <tr><td>Load flow on both samples, with and without reactive limits<small>Voltages, branch flows and machine outputs</small></td><td>pandapower</td><td class="num">{{agreeLf}} p.u.</td></tr>
+        <tr><td>Short circuit, three-phase and line-to-line, maximum and minimum<small>Ik″, ip and Ith at every busbar</small></td><td>pandapower's IEC 60909</td><td class="num">{{agreeScSym}} relative</td></tr>
+        <tr><td>Short circuit, line-to-earth, maximum and minimum<small>Ik″ at every busbar</small></td><td>pandapower's IEC 60909</td><td class="num">{{agreeScEarth}} relative</td></tr>
+        <tr><td>Stability on a single machine against an infinite bus<small>Clearing 2 % before and after the critical time</small></td><td>Equal-area criterion</td><td class="num">stable / unstable</td></tr>
+      </tbody>
+    </table>
+    <p class="note">The short-circuit calculation follows the method of IEC 60909-0 as pandapower implements it; it is not certified against the standard. The full test report, with environments and every number, is in <a href="{{repo}}/blob/main/docs/TEST-REPORT.md">docs/TEST-REPORT.md</a>.</p>
+  </div>
+</section>
+
+<section class="alt">
+  <div class="wrap">
+    <p class="kicker">Local-first</p>
+    <h2>Your network never leaves your machine</h2>
+    <div class="three">
+      <div class="card"><h3>No account, no server</h3><p>Networks save to your browser's storage as you work. There is nothing to sign up for and nothing is uploaded.</p></div>
+      <div class="card"><h3>Network access is switched off</h3><p>The app's Content-Security-Policy sets <code>connect-src 'none'</code>, so the page cannot send data anywhere, by design and by test.</p></div>
+      <div class="card"><h3>One file, offline</h3><p>The whole app is a single {{appSize}} HTML file. Download it, open it from disk, and it runs without a connection.</p></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <p class="kicker">Scope</p>
+    <h2>What it is, and what it is not</h2>
+    <p class="intro">PowerStudio is a capable study tool, not a validated engineering product. Check results that matter with a validated tool.</p>
+    <ul class="limits">
+      <li><strong>Balanced networks.</strong> Positive-sequence load flow; no unbalanced three-phase studies.</li>
+      <li><strong>Classical stability model.</strong> No exciters, governors or stabilisers; no electromagnetic transients.</li>
+      <li><strong>Single outages.</strong> N-1 only, with no remedial actions.</li>
+      <li><strong>No tap-changer control or switches.</strong> Elements are switched in or out of service; taps are fixed.</li>
+      <li><strong>A few hundred busbars.</strong> The dense solver is fast up to that size; larger networks are slow.</li>
+      <li><strong>Tested in Chromium.</strong> WebGPU was verified on macOS; Firefox, Safari and Windows were not tested.</li>
+    </ul>
+    <p class="note">The full list is in the <a href="{{repo}}#scope-and-boundaries">Scope and boundaries</a> section of the README.</p>
+  </div>
+</section>
+
+<section class="alt cta">
+  <div class="wrap">
+    <h2>Open a sample and run a load flow</h2>
+    <p class="intro">The IEEE 14-bus system opens on first start. Press Alt+L and the network is solved.</p>
+    <div class="actions">
+      <a class="btn primary" href="./app/">Open PowerStudio</a>
+      <a class="btn ghost" href="{{repo}}">Source on GitHub</a>
+      <a class="btn ghost" href="{{repo}}/releases/latest">Release notes</a>
+    </div>
+  </div>
+</section>
+
+<footer class="night">
+  <div class="wrap">
+    <p>PowerStudio {{version}} is free and open-source software under the MIT licence. It is an independent project inspired by desktop power system tools and is not affiliated with, endorsed by or connected to DIgSILENT GmbH or its PowerFactory software. PowerFactory is a trademark of its owner. The IEEE 14-bus sample uses the load flow data of MATPOWER case14 (BSD licence).</p>
+    <nav aria-label="Footer"><a href="./app/">App</a><a href="{{repo}}">GitHub</a><a href="{{repo}}/releases">Releases</a><a href="{{repo}}/blob/main/LICENSE">Licence</a></nav>
+  </div>
+</footer>
+</body>
+</html>

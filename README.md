@@ -5,7 +5,8 @@ on a single-line diagram and run Newton-Raphson load flow, IEC 60909-style short
 analysis and electromechanical stability simulation. It runs entirely on your device. There is no account, no
 server and no tracking, and the diagram is drawn with WebGPU, with a Canvas 2D fallback.
 
-**Live app: https://swiftugandan.github.io/powerstudio/**
+**Open the app: https://swiftugandan.github.io/powerstudio/app/** · Website: https://swiftugandan.github.io/powerstudio/ ·
+Offline copy: download `PowerStudio.html` from the [latest release](https://github.com/swiftugandan/powerstudio/releases/latest)
 
 ![PowerStudio after a load flow on the IEEE 14-bus system](docs/screenshots/01-load-flow.png)
 
@@ -36,6 +37,7 @@ You need Node.js 22 or later.
 npm ci
 npm start                 # development server at http://127.0.0.1:8770/ (no build step)
 npm run build             # writes dist/PowerStudio.html, one self-contained file, and its SHA-256
+npm run build:pages       # writes _site/: the website at /, the app at /app/, the download and build-info.json
 npm run check             # strict type checking with tsc --checkJs
 npm test                  # unit and engine tests (Node test runner)
 npx playwright install chromium

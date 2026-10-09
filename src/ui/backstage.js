@@ -6,9 +6,9 @@ import { relative } from './format.js';
 import { SAMPLES } from '../samples/index.js';
 import { kbd } from './keys.js';
 import { confirm } from './feedback.js';
+import { APP_VERSION, REPO_URL, SITE_URL } from '../core/version.js';
 
-export const VERSION = '0.1.0';
-export const REPO = 'https://github.com/swiftugandan/powerstudio';
+const VERSION = APP_VERSION, REPO = REPO_URL;
 
 /** @typedef {'home' | 'open' | 'import' | 'export' | 'shortcuts' | 'about'} Page */
 
@@ -73,7 +73,7 @@ async function render(app, page, close) {
   return [h('h1', { html: `<span style="display:inline-flex;align-items:center;gap:10px">${logo(30)}PowerStudio</span>` }),
     h('div', { class: 'about', html: `
       <p><strong>Single-line diagrams, solved in your browser.</strong> PowerStudio draws a network and runs Newton-Raphson load flow, IEC 60909-style short-circuit currents, N-1 contingency analysis and electromechanical stability simulation. It runs entirely on this device: no account, no server, no tracking.</p>
-      <p>Version ${VERSION}. Source code and documentation: <a href="${REPO}" target="_blank" rel="noopener">${REPO.replace('https://', '')}</a>. Released under the MIT licence.</p>
+      <p>Version ${VERSION}. Website: <a href="${SITE_URL}" target="_blank" rel="noopener">${SITE_URL.replace('https://', '')}</a>. Source code and documentation: <a href="${REPO}" target="_blank" rel="noopener">${REPO.replace('https://', '')}</a>. Released under the MIT licence.</p>
       <p class="disclaimer">PowerStudio is an independent open-source project. It is not affiliated with, endorsed by or connected to DIgSILENT GmbH or its PowerFactory software. PowerFactory is a trademark of its owner. Its short-circuit calculation follows the method of IEC 60909-0 but is not certified against the standard; check results that matter with a validated tool.</p>
       <p>The IEEE 14-bus sample uses the load flow data of MATPOWER case14 (BSD licence), which comes from the University of Washington archive of IEEE test systems. Its ratings and machine data are assumptions.</p>
       <p>Drawing: <code>${esc(app.viewport.renderer?.label ?? '')}</code>${app.viewport.renderer?.detail ? ` (${esc(app.viewport.renderer.detail)})` : ''}${app.viewport.fallbackReason ? `. ${esc(app.viewport.fallbackReason)}` : ''}.</p>` })];

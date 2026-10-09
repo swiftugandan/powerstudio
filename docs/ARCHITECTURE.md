@@ -74,8 +74,13 @@ same solvers run on the main thread.
 `import { … } from '…'` statements and `export function|class|const|let` declarations; anything else fails the
 build. It wraps each module in a function registry, bundles the worker separately and starts it from a Blob URL,
 inlines the stylesheet and favicon, and adds the Content-Security-Policy. The output, `dist/PowerStudio.html`, is
-byte-for-byte deterministic; its SHA-256 is written next to it, and the Pages workflow compares the published page
-against it.
+byte-for-byte deterministic; its SHA-256 is written next to it.
+
+`build-pages.mjs` builds the GitHub Pages site into `_site/`: the website from `site/index.html` at `/`, the app at
+`/app/` and the same file as the download `PowerStudio.html`. The website's figures (the IEEE 14-bus studies and the
+agreement with the oracles) and its diagram are computed by the engine during the build (`scripts/site-data.mjs`),
+the diagram drawn as SVG from the app's own display list with the colours read from `style.css`. The Pages workflow
+compares the published `/app/` and `PowerStudio.html` against the build's SHA-256.
 
 ## Testing
 

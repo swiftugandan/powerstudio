@@ -26,6 +26,7 @@ import { icon, logo } from './ui/icons.js';
 import { kbd, isMac } from './ui/keys.js';
 import { fixed, duration } from './ui/format.js';
 import { enumLabel } from './ui/fields.js';
+import { REPO_URL } from './core/version.js';
 
 /**
  * @typedef {import('./core/catalog.js').Element} Element
@@ -140,7 +141,7 @@ export class App {
       h('button', { type: 'button', class: 'icon-btn mobile-only', title: 'Inspector', 'aria-label': 'Show inspector', 'data-cmd': 'view.sheetRight', html: icon('panelRight', 18) }),
       h('button', { type: 'button', class: 'icon-btn desktop-only', title: 'Toggle theme', 'aria-label': 'Toggle theme', 'data-cmd': 'view.toggleTheme', html: icon('colour', 18) }),
       h('button', { type: 'button', class: 'icon-btn desktop-only', title: 'Keyboard shortcuts', 'aria-label': 'Keyboard shortcuts', 'data-cmd': 'help.shortcuts', html: icon('keyboard', 18) }),
-      h('a', { class: 'icon-btn desktop-only', href: 'https://github.com/swiftugandan/powerstudio', target: '_blank', rel: 'noopener', title: 'Source code on GitHub', 'aria-label': 'Source code on GitHub', html: icon('github', 18) }));
+      h('a', { class: 'icon-btn desktop-only', href: REPO_URL, target: '_blank', rel: 'noopener', title: 'Source code on GitHub', 'aria-label': 'Source code on GitHub', html: icon('github', 18) }));
     this.status = {
       tool: h('span', { class: 'cell' }), pointer: h('span', { class: 'cell mono hide-narrow', text: '—' }), selection: h('span', { class: 'cell hide-narrow' }),
       message: h('span', { class: 'cell grow' }), progress: h('span', { class: 'cell', hidden: true }), backend: h('span', { class: 'cell', title: '' }),
