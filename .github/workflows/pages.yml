@@ -1,0 +1,110 @@
+name: Test, build and publish
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type-check
+        run: npm run check
+      - name: Unit and engine tests
+        run: npm test
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser tests (WebGPU and Canvas 2D projects)
+        run: npm run test:browser
+      - name: Record which backend each browser test used
+        if: always()
+        run: node scripts/browser-report.mjs >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-test-results
+          path: test-results/
+          if-no-files-found: ignore
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      sha256: ${{ steps.hash.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Build the single-file app
+        run: node build.mjs
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp dist/PowerStudio.html _site/index.html
+          cp dist/PowerStudio.html _site/PowerStudio.html
+          cp dist/PowerStudio.html.sha256 _site/PowerStudio.html.sha256
+      - id: hash
+        name: Hash the build
+        run: echo "sha256=$(sha256sum dist/PowerStudio.html | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify:
+    needs: [build, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check that the published page is the build
+        env:
+          EXPECTED: ${{ needs.build.outputs.sha256 }}
+          PAGE: ${{ needs.deploy.outputs.page_url }}
+        run: |
+          echo "Expected sha256: $EXPECTED"
+          for attempt in $(seq 1 30); do
+            actual=$(curl -fsSL -H 'Cache-Control: no-cache' "${PAGE}?build=${GITHUB_SHA}&attempt=${attempt}" | sha256sum | cut -d' ' -f1 || true)
+            echo "Attempt ${attempt}: ${PAGE} → ${actual}"
+            if [ "$actual" = "$EXPECTED" ]; then
+              echo "### Published page verified" >> "$GITHUB_STEP_SUMMARY"
+              echo "\`${PAGE}\` has sha256 \`${actual}\`, identical to the build." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "The published page does not match the build." >&2
+          exit 1

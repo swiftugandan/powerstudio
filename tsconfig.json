@@ -18,7 +18,9 @@
     "noUnusedParameters": true,
     "exactOptionalPropertyTypes": false,
     "skipLibCheck": true,
-    "types": []
+    "types": [
+      "@webgpu/types"
+    ]
   },
   "include": [
     "src/**/*.js"

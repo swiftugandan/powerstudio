@@ -148,7 +148,9 @@ export function schedule(net, fixedQ) {
 function newton(Y, n, spec, vm0, va0, tol, maxIter, log, done) {
   const vm = Float64Array.from(vm0), va = Float64Array.from(va0);
   /** @type {number[]} */
-  const pvpq = [], pq = [];
+  const pvpq = [];
+  /** @type {number[]} */
+  const pq = [];
   for (let i = 0; i < n; i++) { if (spec.type[i] !== 3) pvpq.push(i); if (spec.type[i] === 1) pq.push(i); }
   const np = pvpq.length, nq = pq.length, dim = np + nq;
   const colA = new Int32Array(n).fill(-1), colM = new Int32Array(n).fill(-1);

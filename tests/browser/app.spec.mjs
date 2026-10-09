@@ -1,0 +1,198 @@
+/** End-to-end tests of the built app (dist/PowerStudio.html) on an HTTP origin. */
+import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
+import { decodePNG, share } from './png.mjs';
+
+const golden = JSON.parse(readFileSync(new URL('../oracle/golden/matpower-case30.json', import.meta.url), 'utf8'));
+
+/** @param {import('@playwright/test').Page} page @param {string} [query] */
+async function open(page, query = 'sample=ieee14') {
+  await page.goto(`/PowerStudio.html?${query}`);
+  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio?.ready === true);
+  await page.locator('.toast').evaluateAll(ts => ts.forEach(t => t.remove()));
+}
+
+/** @param {import('@playwright/test').Page} page @param {string} text */
+async function palette(page, text) {
+  await page.keyboard.press('ControlOrMeta+K');
+  await page.locator('.palette input').fill(text);
+  await page.keyboard.press('Enter');
+}
+
+/** @param {import('@playwright/test').Page} page */
+async function loadFlow(page) {
+  await page.keyboard.press('Alt+L');
+  await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('Converged');
+}
+
+test('draws the diagram with the backend it reports, and that backend is the expected one', async ({ page }, info) => {
+  await open(page);
+  const facts = await page.evaluate(() => ({ backend: /** @type {any} */ (window).powerstudio.backend, reason: /** @type {any} */ (window).powerstudio.fallbackReason }));
+  const badge = page.locator('.vp-badge');
+  await expect(badge).toHaveAttribute('data-backend', facts.backend);
+  if (info.project.name === 'webgpu') {
+    expect(facts.backend, `WebGPU was expected in this project; fallback reason: ${facts.reason}`).toBe('webgpu');
+    await expect(badge).toContainText('WebGPU');
+  } else {
+    expect(facts.backend).toBe('canvas2d');
+    expect(facts.reason).toContain('WebGPU');
+    await expect(badge).toContainText('Canvas 2D');
+  }
+  // The diagram is really on screen: 132 kV busbars are blue, 33 kV ones green (light theme tokens).
+  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio.frames > 0);
+  const img = decodePNG(await page.locator('#viewport').screenshot());
+  expect(share(img, [31, 92, 192])).toBeGreaterThan(0.0008);
+  expect(share(img, [23, 128, 74])).toBeGreaterThan(0.0008);
+  info.annotations.push({ type: 'backend', description: `${facts.backend}${facts.reason ? ` (${facts.reason})` : ''}` });
+});
+
+test('runs a load flow from the keyboard and matches MATPOWER case14', async ({ page }) => {
+  await open(page);
+  await loadFlow(page);
+  await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('Converged in 3 iterations');
+  const row = page.locator('table.grid tbody tr[data-id="B14"]');
+  await expect(row).toContainText('1.0355');
+  await expect(row).toContainText('−16.034');
+  await expect(page.locator('.dock-toolbar .summary')).toContainText('Losses 13.393 MW');
+});
+
+test('edits a value in the inspector, recalculates, and undo and redo restore it', async ({ page }) => {
+  await open(page);
+  await loadFlow(page);
+  await page.locator('.tree-row[data-id="D14"]').click();
+  const p = page.locator('#inspector-panel input[data-key="p"]');
+  await expect(p).toHaveValue('14.9');
+  await p.fill('30');
+  await p.press('Enter');
+  // Recalculate on edit refreshes the load flow by itself.
+  await expect(page.locator('.dock-toolbar .summary')).not.toContainText('Load 259.00 MW');
+  await expect(page.locator('.dock-toolbar .summary')).toContainText('Load 274.10 MW');
+  await page.locator('#viewport canvas').click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(page.locator('.dock-toolbar .summary')).toContainText('Load 259.00 MW');
+  await page.keyboard.press('ControlOrMeta+Shift+Z');
+  await expect(page.locator('.dock-toolbar .summary')).toContainText('Load 274.10 MW');
+});
+
+test('draws a network from scratch with the insert tools and solves it', async ({ page }) => {
+  await open(page);
+  await palette(page, 'New network');
+  await expect(page.locator('#doc-name')).toHaveValue('Untitled network');
+  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await page.locator('#viewport').boundingBox());
+  const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const a = { x: c.x - 160, y: c.y }, b = { x: c.x + 160, y: c.y };
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('B');
+  await page.mouse.click(a.x, a.y);
+  await page.mouse.click(b.x, b.y);
+  await page.keyboard.press('L');
+  await page.mouse.click(a.x, a.y);
+  await page.mouse.click(b.x, b.y);
+  await page.keyboard.press('E');
+  await page.mouse.click(a.x, a.y - 2);
+  await page.keyboard.press('D');
+  await page.mouse.click(b.x, b.y + 2);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('2');
+  await expect(page.locator('.tree-row[data-cls="line"] .meta')).toHaveText('1');
+  await expect(page.locator('.tree-row[data-cls="extgrid"] .meta')).toHaveText('1');
+  await expect(page.locator('.tree-row[data-cls="load"] .meta')).toHaveText('1');
+  await loadFlow(page);
+  await expect(page.locator('.dock-toolbar .summary')).toContainText('Load 2.00 MW');
+});
+
+test('keeps work in the browser across a reload', async ({ page }) => {
+  await open(page, 'sample=riverside');
+  const name = page.locator('#doc-name');
+  await name.fill('Riverside after reload');
+  await name.press('Enter');
+  await expect(page.locator('#save-state')).toContainText('Saved in this browser');
+  await page.goto('/PowerStudio.html');
+  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio?.ready === true);
+  await expect(page.locator('#doc-name')).toHaveValue('Riverside after reload');
+  await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('9');
+});
+
+test('short circuit, contingency and stability run from the palette and the ribbon', async ({ page }) => {
+  await open(page);
+  await palette(page, 'short circuit');
+  await expect(page.locator('.dock-tab[data-tab="shortcircuit"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('table.grid tbody tr[data-id="B8"]')).toContainText('27.350');
+  await page.locator('.ribbon-tab[data-tab="calculate"]').click();
+  await page.locator('.ribbon-panel [data-cmd="calc.contingency"]').click();
+  await expect(page.locator('.dock-toolbar .pill.bad')).toContainText('10 outages with new violations');
+  await page.locator('.ribbon-panel [data-cmd="calc.rms"]').click();
+  await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('All machines stay in synchronism');
+  await expect(page.locator('.plot canvas')).toBeVisible();
+});
+
+test('imports a MATPOWER case and solves it to the MATPOWER solution', async ({ page }) => {
+  await open(page);
+  await page.locator('.ribbon-tab[data-tab="file"]').click();
+  await page.locator('.backstage nav [data-page="import"]').click();
+  const chooser = page.waitForEvent('filechooser');
+  await page.locator('.backstage .card', { hasText: 'MATPOWER case' }).click();
+  await (await chooser).setFiles('tests/fixtures/case30.m');
+  await expect(page.locator('#doc-name')).toHaveValue('case30');
+  await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('30');
+  await loadFlow(page);
+  const k = golden.bus.indexOf(30);
+  await expect(page.locator('table.grid tbody tr[data-id="B30"]')).toContainText(golden.vm[k].toFixed(4));
+});
+
+test('exports a PowerStudio file that imports again unchanged', async ({ page }) => {
+  await open(page, 'sample=riverside');
+  const download = page.waitForEvent('download');
+  await page.keyboard.press('ControlOrMeta+Shift+S');
+  const file = await (await download).path();
+  const doc = JSON.parse(readFileSync(file, 'utf8'));
+  expect(doc.format).toBe('powerstudio');
+  expect(doc.elements).toHaveLength(28);
+  const chooser = page.waitForEvent('filechooser');
+  await palette(page, 'Import file');
+  await (await chooser).setFiles(file);
+  await expect(page.locator('#doc-name')).toHaveValue('Riverside distribution');
+  await expect(page.locator('.log')).toContainText('with 28 elements');
+});
+
+test('switches theme and redraws the diagram in the dark palette', async ({ page }) => {
+  await open(page);
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('Shift+T');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.waitForTimeout(200);
+  const img = decodePNG(await page.locator('#viewport').screenshot());
+  expect(share(img, [16, 21, 27], 12)).toBeGreaterThan(0.5); // --dg-bg in the dark theme
+});
+
+test('can be told to draw with Canvas 2D', async ({ page }) => {
+  await open(page);
+  await palette(page, 'Canvas 2D only');
+  await expect(page.locator('.vp-badge')).toHaveAttribute('data-backend', 'canvas2d');
+  const img = decodePNG(await page.locator('#viewport').screenshot());
+  expect(share(img, [31, 92, 192])).toBeGreaterThan(0.0008);
+});
+
+test('makes no network requests beyond loading the page, and forbids them by policy', async ({ page }) => {
+  /** @type {string[]} */
+  const urls = [];
+  page.on('request', r => urls.push(r.url()));
+  await open(page);
+  await loadFlow(page);
+  await page.keyboard.press('Alt+N');
+  await expect(page.locator('.dock-tab[data-tab="contingency"]')).toHaveAttribute('aria-selected', 'true');
+  const external = urls.filter(u => !u.startsWith('http://127.0.0.1:8771/PowerStudio.html') && !u.startsWith('blob:') && !u.startsWith('data:'));
+  expect(external).toEqual([]);
+  await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute('content', /connect-src 'none'/);
+});
+
+test('fits a phone screen without sideways scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await open(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.locator('[data-cmd="view.sheetLeft"]').click();
+  await expect(page.locator('#tree-panel')).toBeVisible();
+  await page.locator('.tree-row[data-id="B4"]').click();
+  await page.locator('[data-cmd="view.sheetRight"]').click();
+  await expect(page.locator('#inspector-panel .insp-head .name')).toHaveText('Bus 4');
+});

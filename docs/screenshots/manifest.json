@@ -1,0 +1,11 @@
+{
+  "01-load-flow": "IEEE 14-bus system after a load flow: loading colours, result boxes, busbar table and the selected busbar in the inspector. Drawn with webgpu apple · metal-3.",
+  "02-short-circuit-dark": "Three-phase fault at Hilltop on the Riverside network in the dark theme, with the branch contributions. Drawn with webgpu apple · metal-3.",
+  "03-contingency": "N-1 analysis of the IEEE 14-bus system: worst post-outage loading on each branch and the ranked outage table. Drawn with webgpu apple · metal-3.",
+  "04-stability": "Classical-model stability simulation: a fault at Bus 4 cleared by tripping Line 4-5, rotor angles against the centre of inertia. Drawn with webgpu apple · metal-3.",
+  "05-command-palette": "The command palette searches every command and every element. Drawn with webgpu apple · metal-3.",
+  "06-study-case": "The study case: settings of every calculation and the simulation event list. Drawn with webgpu apple · metal-3.",
+  "07-editing": "Editing: the Insert tab, a selected transformer with its route handle, and its data in the inspector. Drawn with webgpu apple · metal-3.",
+  "08-canvas-fallback": "The same view drawn by the Canvas 2D fallback, forced with ?renderer=canvas. Drawn with canvas2d.",
+  "09-phone": "Phone layout: panels open as sheets over the diagram. Drawn with webgpu apple · metal-3."
+}

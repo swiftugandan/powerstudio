@@ -114,7 +114,11 @@ export function runRms(doc, opt = {}) {
   /** @type {number[]} */
   const T = [];
   /** @type {number[][]} */
-  const D = src.map(() => []), W = src.map(() => []), P = src.map(() => []);
+  const D = src.map(() => []);
+  /** @type {number[][]} */
+  const W = src.map(() => []);
+  /** @type {number[][]} */
+  const P = src.map(() => []);
   /** @type {number[][]} */
   const V = Array.from({ length: n }, () => []);
   const hasGrid = src.some(s => s.grid);

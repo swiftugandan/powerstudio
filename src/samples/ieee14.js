@@ -21,11 +21,11 @@ export function ieee14() {
   doc.description = 'Load flow data of the IEEE 14-bus test system (MATPOWER case14). Line lengths, ratings, transformer sizes and machine data are assumed typical values, not part of the IEEE data.';
   /** @type {Array<[number, string, number, number, number, number]>} id, name, kV, x, y, bar length */
   const buses = [
-    [1, 'Bus 1', HV, -760, -300, 140], [2, 'Bus 2', HV, -760, 100, 200], [3, 'Bus 3', HV, -440, 400, 140],
-    [4, 'Bus 4', HV, -280, 100, 220], [5, 'Bus 5', HV, -340, -300, 180], [6, 'Bus 6', LV, 100, -300, 220],
-    [7, 'Bus 7', LV, 120, 40, 120], [8, 'Bus 8', TV, 420, 40, 100], [9, 'Bus 9', LV, 120, 280, 200],
-    [10, 'Bus 10', LV, 420, 400, 120], [11, 'Bus 11', LV, 420, -120, 120], [12, 'Bus 12', LV, 380, -500, 120],
-    [13, 'Bus 13', LV, 700, -300, 140], [14, 'Bus 14', LV, 700, 280, 120],
+    [1, 'Bus 1', HV, -600, -300, 120], [2, 'Bus 2', HV, -600, 40, 260], [3, 'Bus 3', HV, -420, 360, 200],
+    [4, 'Bus 4', HV, -280, 140, 240], [5, 'Bus 5', HV, -280, -160, 200], [6, 'Bus 6', LV, 120, -160, 220],
+    [7, 'Bus 7', LV, 120, 140, 120], [8, 'Bus 8', TV, 360, 140, 100], [9, 'Bus 9', LV, 120, 340, 280],
+    [10, 'Bus 10', LV, 420, 340, 120], [11, 'Bus 11', LV, 420, -20, 120], [12, 'Bus 12', LV, 420, -300, 120],
+    [13, 'Bus 13', LV, 640, -160, 140], [14, 'Bus 14', LV, 640, 500, 120],
   ];
   const kv = new Map(buses.map(b => [b[0], b[2]]));
   for (const [n, name, vn, x, y, len] of buses) {
@@ -77,7 +77,7 @@ export function ieee14() {
   gens.forEach(([b, mode, p, vset, qmin, qmax, sn, xdss, xdt, h, cos, vn], k) => {
     doc.elements.push(makeElement('gen', `G${k + 1}`, {
       name: p > 0 ? `Generator ${b}` : `Condenser ${b}`, bus: `B${b}`, mode, p, q: 0, vset, qmin, qmax, sn, vn,
-      cosphi: cos, xdss, rs: 0.003, xdt, h, damping: 0, side: 'above',
+      cosphi: cos, xdss, rs: 0.003, xdt, h, damping: 0,
     }));
   });
   /** @type {Array<[number, number, number]>} */
@@ -97,19 +97,26 @@ export function ieee14() {
 
 /** Hand-placed connection points for the IEEE 14 drawing. @param {PowerDocument} doc */
 function placeConnections(doc) {
-  /** @type {Record<string, [number, number]>} element → [position at first end, at second end] */
+  // [position at the first end, at the second end, route offset]; an offset of 60 between busbars on the same row
+  // draws a straight link between their ends.
+  /** @type {Record<string, [number, number, number]>} */
   const branchPos = {
-    L1: [0, -0.3], L2: [0.35, -0.35], L3: [0.3, -0.3], L4: [0.38, -0.4], L5: [-0.1, 0.15], L6: [0.3, -0.12],
-    L7: [0.1, -0.05], L8: [0.3, -0.3], L9: [0.1, -0.3], L10: [0.4, -0.3], L11: [0.3, -0.3], L12: [0.3, 0.3],
-    L13: [0.3, 0.3], L14: [0.3, -0.3], L15: [0.25, 0.3],
-    T1: [0.3, -0.3], T2: [0.42, -0.4], T3: [0.32, -0.38], T4: [0.35, -0.3], T5: [0.1, 0.1],
+    L1: [0, 0, 0], L2: [0.4, -0.4, 0], L3: [0.15, -0.3, 0], L4: [0.42, -0.4, 0], L5: [0.3, -0.3, 0], L6: [0.3, -0.15, 0],
+    L7: [0, 0, 0], L8: [0.3, -0.3, 0], L9: [0.2, -0.3, 0], L10: [0.5, -0.5, 60], L11: [0.5, -0.5, 60], L12: [0.45, -0.4, 0],
+    L13: [0.3, 0.3, 0], L14: [0.4, -0.3, 0], L15: [0, 0, 0],
+    T1: [0.5, -0.5, 60], T2: [0.4, -0.45, 0], T3: [0.5, -0.5, 60], T4: [0.5, -0.5, 60], T5: [0, -0.2, 0],
   };
-  /** @type {Record<string, number>} */
-  const singlePos = { G1: 0, G2: -0.3, G3: 0, G4: -0.2, G5: 0.2, D2: -0.3, D3: -0.2, D4: -0.25, D5: -0.1, D6: 0.15, D9: -0.3, D10: 0, D11: 0.1, D12: 0, D13: 0.1, D14: 0, S9: -0.05 };
+  /** @type {Record<string, [number, 'above' | 'below']>} */
+  const singlePos = {
+    G1: [-0.1, 'above'], G2: [-0.42, 'above'], G3: [-0.35, 'below'], G4: [-0.2, 'above'], G5: [0, 'above'],
+    D2: [-0.15, 'below'], D3: [0.35, 'below'], D4: [0.1, 'below'], D5: [0.25, 'below'], D6: [-0.1, 'below'], D9: [0.08, 'below'],
+    D10: [-0.2, 'below'], D11: [-0.35, 'below'], D12: [0.2, 'below'], D13: [0.3, 'below'], D14: [0.3, 'below'], S9: [-0.35, 'below'],
+  };
   for (const el of doc.elements) {
     const bp = branchPos[el.id];
-    if (bp && el.cls === 'line') { el.fromPos = bp[0]; el.toPos = bp[1]; }
-    if (bp && el.cls === 'trafo') { el.hvPos = bp[0]; el.lvPos = bp[1]; }
-    if (el.id in singlePos) el.pos = singlePos[el.id];
+    if (bp && el.cls === 'line') { el.fromPos = bp[0]; el.toPos = bp[1]; el.bend = bp[2]; }
+    if (bp && el.cls === 'trafo') { el.hvPos = bp[0]; el.lvPos = bp[1]; el.bend = bp[2]; }
+    const sp = singlePos[el.id];
+    if (sp) { el.pos = sp[0]; el.side = sp[1]; }
   }
 }

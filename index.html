@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en-GB" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PowerStudio</title>
+<meta name="description" content="PowerStudio: draw a single-line diagram and run load flow, IEC 60909-style short circuit, N-1 contingency and stability studies in your browser. Local-first, no account.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<div class="app" id="app" data-state="booting">
+  <header class="titlebar">
+    <div class="brand" id="brand"></div>
+    <div class="doc-title">
+      <input id="doc-name" class="doc-name" aria-label="Document name" spellcheck="false" autocomplete="off">
+      <span id="save-state" class="save-state" aria-live="polite"></span>
+    </div>
+    <button type="button" class="palette-trigger" id="palette-trigger" data-cmd="palette.open"></button>
+    <div class="title-actions" id="title-actions"></div>
+  </header>
+  <nav class="ribbon" id="ribbon" aria-label="Commands"></nav>
+  <main class="workspace" id="workspace">
+    <aside class="panel panel-left" id="tree-panel" aria-label="Model"></aside>
+    <div class="splitter splitter-v" data-split="left" role="separator" aria-orientation="vertical" aria-label="Resize model panel" tabindex="0"></div>
+    <section class="center">
+      <div class="viewport" id="viewport"></div>
+      <div class="splitter splitter-h" data-split="bottom" role="separator" aria-orientation="horizontal" aria-label="Resize results panel" tabindex="0"></div>
+      <section class="dock" id="dock" aria-label="Results"></section>
+    </section>
+    <div class="splitter splitter-v" data-split="right" role="separator" aria-orientation="vertical" aria-label="Resize inspector" tabindex="0"></div>
+    <aside class="panel panel-right" id="inspector-panel" aria-label="Inspector"></aside>
+  </main>
+  <footer class="statusbar" id="statusbar"></footer>
+</div>
+<div id="overlay-root"></div>
+<noscript><p class="noscript">PowerStudio needs JavaScript to run.</p></noscript>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@
  * is the one gate every document passes on the way in: it fills defaults, drops unknown keys, checks every value
  * against the catalogue and reports what it fixed or rejected. */
 
-import { CLASSES, CLASS_ORDER, checkValue, endsOf, isClass, makeElement } from './catalog.js';
+import { CLASSES, checkValue, endsOf, isClass, makeElement } from './catalog.js';
 
 /**
  * @typedef {import('./catalog.js').Element} Element
@@ -144,7 +144,6 @@ export function normalizeDocument(input) {
     else if (new Set(busesOf(el)).size < busesOf(el).length) { issues.push(`${el.id}: removed, both ends are on the same busbar.`); return false; }
     return missing.length === 0;
   });
-  doc.elements.sort((a, b) => CLASS_ORDER.indexOf(a.cls) - CLASS_ORDER.indexOf(b.cls));
 
   const study = raw.study && typeof raw.study === 'object' ? /** @type {Record<string, Record<string, unknown>>} */ (raw.study) : {};
   for (const [section, fields] of Object.entries(STUDY_FIELDS)) {
