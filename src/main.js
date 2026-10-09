@@ -23,6 +23,11 @@ Object.defineProperty(window, 'powerstudio', {
     get backendDetail() { return app.viewport.renderer?.detail ?? ''; },
     get fallbackReason() { return app.viewport.fallbackReason; },
     get frames() { return app.viewport.frames; },
+    /** Page coordinates (CSS px) of a diagram point, for automation that needs to aim at a handle. */
+    toPage: (/** @type {number} */ x, /** @type {number} */ y) => {
+      const r = /** @type {HTMLElement} */ (document.getElementById('viewport')).getBoundingClientRect(), p = app.viewport.camera.toScreen(x, y);
+      return { x: r.left + p.x, y: r.top + p.y };
+    },
     /** The current frame read back from the active renderer, as a PNG data URL. */
     snapshot: () => app.viewport.snapshotPNG(),
   }),

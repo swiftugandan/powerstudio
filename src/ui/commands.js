@@ -46,6 +46,7 @@ export class Commands {
   /** Routes a keydown to a command. Single keys and Shift+key never fire while typing; Mod and Alt combos do only
    * when the command is marked global. @param {KeyboardEvent} e */
   handleKey(e) {
+    if (e.defaultPrevented) return false; // a widget (tree, menu, field) already handled it
     const combo = eventKey(e);
     const id = this.keymap.get(combo);
     if (!id) return false;

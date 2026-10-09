@@ -468,12 +468,14 @@ export class App {
       ids.add(id);
       map.set(el.id, id);
     }
+    const pastedIds = new Set(map.values());
     for (const src of clip.elements) {
       const el = /** @type {Element} */ ({ ...structuredClone(src), id: map.get(src.id) });
       if (el.cls === 'bus') { el.x = /** @type {number} */ (el.x) + 40; el.y = /** @type {number} */ (el.y) + 40; el.name = `${src.name} (copy)`; }
       else {
         for (const k of CLASSES[el.cls].ends) el[k] = map.get(/** @type {string} */ (src[k])) ?? src[k];
-        if (busesOf(el).some(b => !this.store.get(b) && !map.has(b))) continue;
+        // Each end must land on a pasted busbar or on one that still exists.
+        if (busesOf(el).some(b => !this.store.get(b) && !pastedIds.has(b))) continue;
       }
       created.push(el);
     }

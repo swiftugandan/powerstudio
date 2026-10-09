@@ -110,6 +110,82 @@ test('draws a network from scratch with the insert tools and solves it', async (
   await expect(page.locator('.dock-toolbar .summary')).toContainText('Load 2.00 MW');
 });
 
+test('copies, pastes, switches out of service, nudges and selects with a marquee', async ({ page }) => {
+  await open(page);
+  await loadFlow(page);
+  const canvas = page.locator('#viewport canvas');
+  // Marquee over the whole view selects the network.
+  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await page.locator('#viewport').boundingBox());
+  await page.mouse.move(box.x + 4, box.y + 4);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 4 });
+  await page.mouse.move(box.x + box.width - 4, box.y + box.height - 4, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.locator('#statusbar')).toContainText('51 selected');
+  // Copy and paste duplicates the whole network, connections included.
+  await page.keyboard.press('ControlOrMeta+C');
+  await page.keyboard.press('ControlOrMeta+V');
+  await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('28');
+  await expect(page.locator('.tree-row[data-cls="line"] .meta')).toHaveText('30');
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('14');
+  // Switching Line 1-2 out of service re-solves the network with it open.
+  await page.locator('.tree-row[data-id="L1"]').click();
+  await canvas.focus();
+  await page.keyboard.press('Shift+O');
+  await expect(page.locator('.tree-row[data-id="L1"]')).toHaveClass(/off/);
+  await expect(page.locator('.dock-toolbar .summary')).not.toContainText('Losses 13.393 MW');
+  await page.keyboard.press('Shift+O');
+  await expect(page.locator('.tree-row[data-id="L1"]')).not.toHaveClass(/off/);
+  await expect(page.locator('.dock-toolbar .summary')).toContainText('Losses 13.393 MW');
+  // Arrow keys move the selected busbar on the grid, but not while the model tree has focus.
+  await page.locator('.tree-row[data-id="B4"]').click();
+  await page.keyboard.press('ArrowDown');
+  await canvas.focus();
+  await page.locator('#inspector-panel summary', { hasText: 'Diagram' }).click();
+  const x = page.locator('#inspector-panel input[data-key="x"]');
+  await expect(x).toHaveValue('-280');
+  await canvas.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(x).toHaveValue('-260');
+});
+
+test('resizes, reroutes and reconnects with the diagram handles', async ({ page }) => {
+  await open(page);
+  /** @param {number} x @param {number} y */
+  const at = (x, y) => page.evaluate(([px, py]) => /** @type {any} */ (window).powerstudio.toPage(px, py), [x, y]);
+  /** @param {{ x: number, y: number }} from @param {{ x: number, y: number }} to */
+  const drag = async (from, to) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 6 }); await page.mouse.up(); };
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('F');
+  await page.keyboard.press('=');
+  await page.keyboard.press('=');
+  const diagram = page.locator('#inspector-panel summary', { hasText: 'Diagram' });
+  // Bus 4 sits at (-280, 140) with length 240: drag its right end 60 units further.
+  await page.locator('.tree-row[data-id="B4"]').click();
+  await page.locator('#viewport canvas').focus();
+  await diagram.click();
+  await drag(await at(-160, 140), await at(-100, 140));
+  await expect(page.locator('#inspector-panel input[data-key="len"]')).toHaveValue('300');
+  await expect(page.locator('#inspector-panel input[data-key="x"]')).toHaveValue('-250');
+  // Transformer 4-9 runs down from Bus 4 to y = 240 and across; drag its middle segment down by 40.
+  await page.locator('.tree-row[data-id="T2"]').click();
+  const bus4 = { x: -250, len: 300 };
+  const hvX = bus4.x + 0.4 * bus4.len, lvX = 120 + -0.45 * 280;
+  await drag(await at((hvX + lvX) / 2, 240), await at((hvX + lvX) / 2, 280));
+  await expect(page.locator('#inspector-panel input[data-key="bend"]')).toHaveValue('40');
+  // Drag the LV end of Transformer 4-9 from Bus 9 onto Bus 7: it reconnects.
+  await drag(await at(lvX, 340), await at(150, 140));
+  await expect(page.locator('#inspector-panel select[data-key="lv"]')).toHaveValue('B7');
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(page.locator('#inspector-panel select[data-key="lv"]')).toHaveValue('B9');
+  // Slide Load 4 along Bus 4 by dragging its symbol.
+  await page.locator('.tree-row[data-id="D4"]').click();
+  const d4x = -250 + 0.1 * 300;
+  await drag(await at(d4x, 140 + 44 + 15), await at(d4x + 60, 140 + 44 + 15));
+  await expect(page.locator('#inspector-panel input[data-key="pos"]')).toHaveValue('0.3');
+});
+
 test('keeps work in the browser across a reload', async ({ page }) => {
   await open(page, 'sample=riverside');
   const name = page.locator('#doc-name');
