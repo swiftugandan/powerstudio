@@ -259,7 +259,7 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 conn2: Winding::Yn,
                 r0: rr * z1,
                 x0: xx * z1,
-                ratio_tap: None,
+                ratio_taps: Vec::new(),
                 phase_tap: None,
                 limits: Vec::new(),
             });

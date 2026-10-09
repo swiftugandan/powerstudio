@@ -1,0 +1,100 @@
+{
+ "case": "five-bus-nb-35",
+ "corrected": {
+  "q0": {},
+  "voltage_regulator_on": [
+   "B1-G1"
+  ],
+  "winding_1_ratio": {}
+ },
+ "data": "powsybl-core test resource five_bus_nodeBreaker_rev35_exported.raw, read from .cache/reference (not redistributed)",
+ "imported": {
+  "generators": {
+   "B1-G1": {
+    "max_q": 0.0,
+    "min_q": 0.0,
+    "regulating": true,
+    "target_p": 232.392,
+    "target_q": -16.549,
+    "target_v": 146.28
+   }
+  },
+  "lines": {
+   "L-1-2-1": {
+    "b1": 0.00013862633900441084,
+    "b2": 0.00013862633900441084,
+    "g1": 0.0,
+    "g2": 0.0,
+    "r": 3.6907272,
+    "x": 11.2683348
+   }
+  },
+  "loads": {
+   "B2-L1": {
+    "p0": 21.7,
+    "q0": 12.7
+   },
+   "B3-L1": {
+    "p0": 94.2,
+    "q0": 19.0
+   },
+   "B4-L1": {
+    "p0": 47.8,
+    "q0": -3.9
+   },
+   "B5-L1": {
+    "p0": 7.6,
+    "q0": 1.6
+   }
+  },
+  "phase_taps": {},
+  "ratio_taps": {
+   "T-1-3-1#ONE": {
+    "deadband": 44.55,
+    "regulating": true,
+    "steps": 4,
+    "tap": 1,
+    "target_v": 45.225
+   },
+   "T-1-3-4-1#ONE": {
+    "deadband": null,
+    "regulating": false,
+    "steps": 1,
+    "tap": 0,
+    "target_v": null
+   },
+   "T-1-3-4-1#THREE": {
+    "deadband": 20.79,
+    "regulating": true,
+    "steps": 4,
+    "tap": 1,
+    "target_v": 21.105
+   },
+   "T-1-3-4-1#TWO": {
+    "deadband": null,
+    "regulating": false,
+    "steps": 1,
+    "tap": 0,
+    "target_v": null
+   }
+  },
+  "shunts": {
+   "B2-SH1": {
+    "b": 0.0009976895610165932,
+    "g": 0.0,
+    "max_sections": 1,
+    "sections": 1
+   },
+   "B5-SwSH1": {
+    "b": 0.005250997689561016,
+    "g": 0.0,
+    "max_sections": 2,
+    "sections": 2
+   }
+  }
+ },
+ "slack": [
+  "B1"
+ ],
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': 'VL1_1'})"
+}

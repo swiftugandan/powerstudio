@@ -119,8 +119,10 @@ impl Model {
             if t.r == 0.0 && t.x == 0.0 {
                 push(Severity::Error, Class::Transformer2, i, "has zero impedance".into());
             }
-            if let Some(tap) = &t.ratio_tap
-                && !(tap.low <= tap.position && tap.position <= tap.high)
+            for tap in t
+                .ratio_taps
+                .iter()
+                .filter(|tap| !(tap.low <= tap.position && tap.position <= tap.high))
             {
                 push(
                     Severity::Error,
@@ -137,10 +139,7 @@ impl Model {
             let missing = |table: &[crate::TapPoint], position: i32| {
                 !table.is_empty() && !table.iter().any(|p| p.position == position)
             };
-            if t.ratio_tap
-                .as_ref()
-                .is_some_and(|tap| missing(&tap.table, tap.position))
-            {
+            if t.ratio_taps.iter().any(|tap| missing(&tap.table, tap.position)) {
                 push(
                     Severity::Error,
                     Class::Transformer2,
@@ -161,7 +160,23 @@ impl Model {
             }
         }
         for (i, t) in self.transformers3.iter().enumerate() {
-            if self.alive(Class::Transformer3, i) && t.windings.iter().any(|w| !positive(w.rated_kv)) {
+            if !self.alive(Class::Transformer3, i) {
+                continue;
+            }
+            let outside = |table: &[crate::TapPoint], position: i32| {
+                !table.is_empty() && !table.iter().any(|p| p.position == position)
+            };
+            if t.ratio_taps.iter().any(|tap| outside(&tap.table, tap.position))
+                || t.phase_taps.iter().any(|tap| outside(&tap.table, tap.position))
+            {
+                push(
+                    Severity::Error,
+                    Class::Transformer3,
+                    i,
+                    "a tap position is not in its table".into(),
+                );
+            }
+            if t.windings.iter().any(|w| !positive(w.rated_kv)) {
                 push(
                     Severity::Error,
                     Class::Transformer3,

@@ -1,0 +1,141 @@
+{
+ "case": "t2w-second-ratio-33",
+ "corrected": {
+  "q0": {},
+  "voltage_regulator_on": [
+   "B1-G1"
+  ],
+  "winding_1_ratio": {}
+ },
+ "data": "powsybl-core test resource TwoWindingsTransformerSecondRatio.raw, read from .cache/reference (not redistributed)",
+ "imported": {
+  "generators": {
+   "B1-G1": {
+    "max_q": 0.0,
+    "min_q": 0.0,
+    "regulating": true,
+    "target_p": 21.7,
+    "target_q": 17.916,
+    "target_v": 146.28
+   }
+  },
+  "lines": {},
+  "loads": {
+   "B2-L1": {
+    "p0": 21.7,
+    "q0": 12.7
+   }
+  },
+  "phase_taps": {},
+  "ratio_taps": {
+   "T-1-2-1#ONE": {
+    "deadband": null,
+    "regulating": false,
+    "steps": 1,
+    "tap": 0,
+    "target_v": null
+   },
+   "T-1-2-2#ONE": {
+    "deadband": null,
+    "regulating": false,
+    "steps": 1,
+    "tap": 0,
+    "target_v": null
+   },
+   "T-1-2-3#ONE": {
+    "deadband": null,
+    "regulating": false,
+    "steps": 1,
+    "tap": 0,
+    "target_v": null
+   }
+  },
+  "shunts": {}
+ },
+ "loadflow": {
+  "buses": {
+   "B1": [
+    1.06,
+    0.0
+   ],
+   "B2": [
+    1.0823173150078997,
+    -0.9771643202577682
+   ]
+  },
+  "generators": {
+   "B1-G1": {
+    "p": -21.7,
+    "q": -17.91597037931359,
+    "v": [
+     1.06,
+     0.0
+    ]
+   }
+  },
+  "lines": {},
+  "loads": {
+   "B2-L1": {
+    "p": 21.7,
+    "q": 12.7,
+    "v": [
+     1.0823173150078997,
+     -0.9771643202577682
+    ]
+   }
+  },
+  "shunts": {},
+  "transformers2": {
+   "T-1-2-1": {
+    "p1": 10.069927788607332,
+    "p2": -10.069927788607332,
+    "q1": -28.646376886265767,
+    "q2": 30.287726569989402,
+    "v1": [
+     1.06,
+     0.0
+    ],
+    "v2": [
+     1.0823173150078997,
+     -0.9771643202577682
+    ]
+   },
+   "T-1-2-2": {
+    "p1": 3.3002934432802133,
+    "p2": -3.3002934432802133,
+    "q1": 21.660596773646333,
+    "q2": -19.429292357880286,
+    "v1": [
+     1.06,
+     0.0
+    ],
+    "v2": [
+     1.0823173150078997,
+     -0.9771643202577682
+    ]
+   },
+   "T-1-2-3": {
+    "p1": 8.329778766296124,
+    "p2": -8.329778766296126,
+    "q1": 24.901750491933022,
+    "q2": -23.558434203114455,
+    "v1": [
+     1.06,
+     0.0
+    ],
+    "v2": [
+     1.0823173150078997,
+     -0.9771643202577682
+    ]
+   }
+  },
+  "transformers3": {}
+ },
+ "slack": [
+  "B1"
+ ],
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': 'VL1-2_0'})",
+ "status": [
+  "CONVERGED"
+ ]
+}

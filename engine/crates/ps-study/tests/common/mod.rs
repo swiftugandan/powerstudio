@@ -29,3 +29,32 @@ pub fn golden(name: &str) -> serde_json::Value {
 pub fn f(v: &serde_json::Value) -> f64 {
     v.as_f64().unwrap_or(f64::NAN)
 }
+
+/// Worst difference per quantity, with where it occurred.
+#[derive(Default)]
+pub struct Worst {
+    pub rows: Vec<(String, f64, String, f64)>,
+}
+
+impl Worst {
+    /// Records a difference. A missing reference value (an element PowSyBl left unsolved) is skipped.
+    pub fn check(&mut self, what: &str, id: &str, got: f64, want: f64) {
+        if want.is_nan() {
+            return;
+        }
+        let d = (got - want).abs();
+        if !d.is_finite() {
+            self.rows.push((what.into(), f64::INFINITY, id.into(), got));
+            return;
+        }
+        match self.rows.iter_mut().find(|r| r.0 == what) {
+            Some(r) if d > r.1 => *r = (what.into(), d, format!("{id} ({got} vs {want})"), got),
+            Some(_) => {}
+            None => self.rows.push((what.into(), d, format!("{id} ({got} vs {want})"), got)),
+        }
+    }
+
+    pub fn max(&self, what: &str) -> f64 {
+        self.rows.iter().find(|r| r.0 == what).map_or(0.0, |r| r.1)
+    }
+}

@@ -156,7 +156,7 @@ fn a_tap_table_acts_like_the_stepped_changer_it_tabulates() {
     };
     let stepped = {
         let mut m = base();
-        m.transformers2[0].ratio_tap = Some(RatioTap {
+        m.transformers2[0].ratio_taps = vec![RatioTap {
             end: 1,
             low: -5,
             high: 5,
@@ -164,7 +164,7 @@ fn a_tap_table_acts_like_the_stepped_changer_it_tabulates() {
             step_pct: 1.5,
             position: 3,
             ..Default::default()
-        });
+        }];
         m.transformers2[0].phase_tap = Some(PhaseTap {
             end: 1,
             low: -5,
@@ -179,7 +179,7 @@ fn a_tap_table_acts_like_the_stepped_changer_it_tabulates() {
     let tabular = {
         let mut m = base();
         let rows = |f: &dyn Fn(i32) -> TapPoint| (-5..=5).map(f).collect::<Vec<_>>();
-        m.transformers2[0].ratio_tap = Some(RatioTap {
+        m.transformers2[0].ratio_taps = vec![RatioTap {
             end: 1,
             low: -5,
             high: 5,
@@ -190,7 +190,7 @@ fn a_tap_table_acts_like_the_stepped_changer_it_tabulates() {
                 ..Default::default()
             }),
             ..Default::default()
-        });
+        }];
         m.transformers2[0].phase_tap = Some(PhaseTap {
             end: 1,
             low: -5,

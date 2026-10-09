@@ -8,7 +8,10 @@ pub mod files;
 pub mod matpower;
 pub mod matpower_model;
 pub mod powerstudio;
+pub mod psse;
+pub mod psse_model;
 pub mod rdf;
+pub mod report;
 pub mod zip;
 
 /// A problem found while reading a file, located well enough for the user to find it.

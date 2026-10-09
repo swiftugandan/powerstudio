@@ -126,14 +126,15 @@ pub fn tap_effect(t: &Transformer2) -> TapEffect {
         e.g_scale *= 1.0 + p.g_pct / 100.0;
         e.b_scale *= 1.0 + p.b_pct / 100.0;
     };
-    let mut factor = 1.0;
-    let mut ratio_end = 1;
-    if let Some(tap) = &t.ratio_tap {
-        ratio_end = tap.end;
+    let mut ratio_factors = Vec::with_capacity(t.ratio_taps.len());
+    for tap in &t.ratio_taps {
         if tap.table.is_empty() {
-            factor = 1.0 + f64::from(tap.position - tap.neutral) * tap.step_pct / 100.0;
+            ratio_factors.push((
+                tap.end,
+                1.0 + f64::from(tap.position - tap.neutral) * tap.step_pct / 100.0,
+            ));
         } else if let Some(p) = tap.table.iter().find(|p| p.position == tap.position) {
-            factor = p.ratio;
+            ratio_factors.push((tap.end, p.ratio));
             correct(p);
         }
     }
@@ -149,7 +150,9 @@ pub fn tap_effect(t: &Transformer2) -> TapEffect {
         }
     }
     let mut scale = |end: u8, f: f64| if end == 2 { e.f2 *= f } else { e.f1 *= f };
-    scale(ratio_end, factor);
+    for (end, f) in ratio_factors {
+        scale(end, f);
+    }
     scale(phase_end, phase_factor);
     // A positive angle makes the other winding lag the tap changer's; the model's sense is winding 2 lagging.
     e.angle_deg = if phase_end == 2 { -angle } else { angle };
@@ -618,23 +621,36 @@ pub fn transformer3_winding_pu(t: &Transformer3, w: usize, vk: f64, base_mva: f6
     let k1 = t.windings[0].rated_kv;
     // Ω at winding w → p.u. on the star base (k1).
     let point = |tap: &ps_model::RatioTap| tap.table.iter().find(|p| p.position == tap.position).copied();
-    let (tap, r_scale, x_scale) = match &t.ratio_tap {
-        Some(tap) if usize::from(tap.end) == w + 1 && tap.table.is_empty() => (
+    let (tap, r_scale, x_scale) = match t.ratio_taps.iter().find(|tap| usize::from(tap.end) == w + 1) {
+        Some(tap) if tap.table.is_empty() => (
             1.0 + f64::from(tap.position - tap.neutral) * tap.step_pct / 100.0,
             1.0,
             1.0,
         ),
-        Some(tap) if usize::from(tap.end) == w + 1 => match point(tap) {
+        Some(tap) => match point(tap) {
             Some(p) => (p.ratio, 1.0 + p.r_pct / 100.0, 1.0 + p.x_pct / 100.0),
             None => (1.0, 1.0, 1.0),
         },
         _ => (1.0, 1.0, 1.0),
     };
-    let z = C64::new(wd.r * r_scale, wd.x * x_scale).scale(base_mva / (wd.rated_kv * wd.rated_kv));
-    let ratio = (wd.rated_kv * tap / k1) / (vk / k1);
+    // A phase tap changer: its angle (the star lags the winding for positive values) and the table's corrections.
+    let (angle, phase_ratio, pr_scale, px_scale) = match t.phase_taps.iter().find(|tap| usize::from(tap.end) == w + 1) {
+        Some(tap) if tap.table.is_empty() => (f64::from(tap.position - tap.neutral) * tap.step_deg, 1.0, 1.0, 1.0),
+        Some(tap) => tap
+            .table
+            .iter()
+            .find(|p| p.position == tap.position)
+            .map_or((0.0, 1.0, 1.0, 1.0), |p| {
+                (p.angle_deg, p.ratio, 1.0 + p.r_pct / 100.0, 1.0 + p.x_pct / 100.0)
+            }),
+        None => (0.0, 1.0, 1.0, 1.0),
+    };
+    let z =
+        C64::new(wd.r * r_scale * pr_scale, wd.x * x_scale * px_scale).scale(base_mva / (wd.rated_kv * wd.rated_kv));
+    let ratio = (wd.rated_kv * tap * phase_ratio / k1) / (vk / k1);
     // The star point is in winding 1's frame; winding w lags winding 1 by its clock, so the star lags winding w by
     // the opposite angle.
-    let shift = -f64::from(wd.clock % 12) * 30.0 / DEG;
+    let shift = (angle - f64::from(wd.clock % 12) * 30.0 - wd.phase_shift_deg) / DEG;
     // The winding's magnetising admittance sits at its network side behind the ratio, on the star base.
     let y_from = C64::new(wd.g, wd.b).scale(wd.rated_kv * wd.rated_kv / base_mva);
     TransformerPu {

@@ -1,0 +1,99 @@
+{
+ "case": "t2w-phase-33",
+ "corrected": {
+  "q0": {},
+  "voltage_regulator_on": [
+   "B1-G1"
+  ],
+  "winding_1_ratio": {}
+ },
+ "data": "powsybl-core test resource TwoWindingsTransformerPhase.raw, read from .cache/reference (not redistributed)",
+ "imported": {
+  "generators": {
+   "B1-G1": {
+    "max_q": 0.0,
+    "min_q": 0.0,
+    "regulating": true,
+    "target_p": 21.7,
+    "target_q": 13.88,
+    "target_v": 146.28
+   }
+  },
+  "lines": {},
+  "loads": {
+   "B2-L1": {
+    "p0": 21.7,
+    "q0": 12.7
+   }
+  },
+  "phase_taps": {
+   "T-1-2-1#ONE": {
+    "deadband": null,
+    "regulating": false,
+    "steps": 1,
+    "tap": 0,
+    "target": null
+   }
+  },
+  "ratio_taps": {},
+  "shunts": {}
+ },
+ "loadflow": {
+  "buses": {
+   "B1": [
+    1.06,
+    0.0
+   ],
+   "B2": [
+    1.0578904909842788,
+    -4.268212061971725
+   ]
+  },
+  "generators": {
+   "B1-G1": {
+    "p": -21.7,
+    "q": -13.881285560894346,
+    "v": [
+     1.06,
+     0.0
+    ]
+   }
+  },
+  "lines": {},
+  "loads": {
+   "B2-L1": {
+    "p": 21.7,
+    "q": 12.7,
+    "v": [
+     1.0578904909842788,
+     -4.268212061971725
+    ]
+   }
+  },
+  "shunts": {},
+  "transformers2": {
+   "T-1-2-1": {
+    "p1": 21.700000000004767,
+    "p2": -21.700000000004763,
+    "q1": 13.881285560894346,
+    "q2": -12.699999999989792,
+    "v1": [
+     1.06,
+     0.0
+    ],
+    "v2": [
+     1.0578904909842788,
+     -4.268212061971725
+    ]
+   }
+  },
+  "transformers3": {}
+ },
+ "slack": [
+  "B1"
+ ],
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': 'VL1-2_0'})",
+ "status": [
+  "CONVERGED"
+ ]
+}

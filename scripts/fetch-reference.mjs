@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-/** Downloads the reference model archives the engine tests read (tests/oracle/cgmes-cases.json lists them) into
- * .cache/reference/, checking each against its pinned SHA-256. Archives already present and intact are kept. They are
+/** Downloads the reference models the engine tests read (tests/oracle/cgmes-cases.json and psse-cases.json list them) into
+ * .cache/reference/, checking each against its pinned SHA-256. Files already present and intact are kept. They are
  * not redistributed with the repository; docs/research/sources.md gives their licences. */
 
 import { createHash } from 'node:crypto';
@@ -10,7 +10,9 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = join(root, '.cache', 'reference');
-const { archives } = JSON.parse(readFileSync(join(root, 'tests', 'oracle', 'cgmes-cases.json'), 'utf8'));
+const lists = ['cgmes-cases.json', 'psse-cases.json'];
+/** @type {Record<string, {file: string, url: string, sha256: string}>} */
+const archives = Object.assign({}, ...lists.map((f) => JSON.parse(readFileSync(join(root, 'tests', 'oracle', f), 'utf8')).archives));
 mkdirSync(dir, { recursive: true });
 const sha = (/** @type {Buffer} */ b) => createHash('sha256').update(b).digest('hex');
 let failed = false;
@@ -24,6 +26,6 @@ for (const [name, a] of Object.entries(archives)) {
   const got = sha(bytes);
   if (got !== a.sha256) { console.log(`checksum ${got} does not match the pinned ${a.sha256}`); failed = true; continue; }
   writeFileSync(path, bytes);
-  console.log(`${(bytes.length / 2 ** 20).toFixed(1)} MiB, checksum verified`);
+  console.log(`${(bytes.length / 2 ** 20).toFixed(2)} MiB, checksum verified`);
 }
 if (failed) process.exit(1);

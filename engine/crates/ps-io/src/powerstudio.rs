@@ -266,7 +266,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     conn2,
                     r0,
                     x0,
-                    ratio_tap: Some(RatioTap {
+                    ratio_taps: vec![RatioTap {
                         end: 1,
                         low: e.int("tapMin", -9),
                         high: e.int("tapMax", 9),
@@ -275,7 +275,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                         position: e.int("tapPos", 0),
                         control: None,
                         table: Vec::new(),
-                    }),
+                    }],
                     phase_tap: None,
                     limits: Vec::new(),
                 });

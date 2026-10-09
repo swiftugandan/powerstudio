@@ -321,8 +321,9 @@ pub struct Transformer2 {
     pub r0: f64,
     /// Zero-sequence series reactance referred to winding 1, Ω.
     pub x0: f64,
-    /// Ratio tap changer, if fitted.
-    pub ratio_tap: Option<RatioTap>,
+    /// Ratio tap changers, at most one per winding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ratio_taps: Vec<RatioTap>,
     /// Phase tap changer, if fitted.
     pub phase_tap: Option<PhaseTap>,
     /// Current limits.
@@ -351,6 +352,10 @@ pub struct Winding3 {
     pub b: f64,
     /// Clock number of this winding relative to winding 1.
     pub clock: u8,
+    /// Further fixed phase shift of this winding, degrees, in the same sense as the clock: the winding's node lags
+    /// the star point for positive values. PSS/E `ANG1`…`ANG3` (the bus leads the star point) enter negated.
+    #[serde(default)]
+    pub phase_shift_deg: f64,
     /// Connection.
     pub conn: Winding,
     /// Disconnected from its node while the transformer stays in service.
@@ -371,8 +376,12 @@ pub struct Transformer3 {
     pub windings: [Winding3; 3],
     /// Switched in.
     pub in_service: bool,
-    /// Ratio tap changer (on any winding), if fitted.
-    pub ratio_tap: Option<RatioTap>,
+    /// Ratio tap changers, at most one per winding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ratio_taps: Vec<RatioTap>,
+    /// Phase tap changers, at most one per winding. A positive angle makes the star point lag the winding.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub phase_taps: Vec<PhaseTap>,
     /// Current limits.
     pub limits: Vec<CurrentLimit>,
 }

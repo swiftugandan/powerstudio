@@ -1,0 +1,240 @@
+{
+ "about": "PSS/E RAW cases compared with PowSyBl, from powsybl-core's tests at a pinned commit (MPL 2.0; the IEEE cases are public test systems, the Illinois synthetic grids are from Texas A&M's ACTIVSg collection). scripts/fetch-reference.mjs downloads them into .cache/reference; they are not copied into the repository. 'start' is the load flow's starting point: 'dc' (DC load flow) or 'raw' (the voltages stored in the file). 'loadflow': false marks a case PowSyBl does not solve (its three-winding data are inconsistent); only its import is compared. 'pending' names what PowerStudio lacks to solve a case as PowSyBl does; its import is compared and its load flow is reported without failing.",
+ "archives": {
+  "ieee14-33": {
+   "file": "psse-ieee14-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/IEEE_14_bus_delimiter.raw",
+   "sha256": "f21dbc48bdaf0444288657280ea06380077e61c31846cfbc5b02da21dbc5d7dd"
+  },
+  "ieee14-zip-33": {
+   "file": "psse-ieee14-zip-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/IEEE_14_buses_zip_load.raw",
+   "sha256": "07875a141d08c9e2c4cfd57388791c086384dd21f3953e3bf5c7a96ca8bd0bc2"
+  },
+  "ieee57-33": {
+   "file": "psse-ieee57-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/IEEE_57_bus.raw",
+   "sha256": "1171360ea48e385b1346893dc6c63fd95c52672ee64df25bb85cab876471b1bf"
+  },
+  "ieee118-33": {
+   "file": "psse-ieee118-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/IEEE_118_bus.raw",
+   "sha256": "ecfd5370e20d3e0ed8916c974abf58b4af6011e22ebdb2e0046083b9e95d3868"
+  },
+  "three-mib-t3w-33": {
+   "file": "psse-three-mib-t3w-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/ThreeMIB_T3W_modified.raw",
+   "sha256": "9900cfb4b58baa1dc8db34af0ce5fb32d28bfb579ee6b3bb1f81f388df04fee1"
+  },
+  "three-mib-t3w-phase-33": {
+   "file": "psse-three-mib-t3w-phase-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/ThreeMIB_T3W_phase.raw",
+   "sha256": "10324a7c20ddfb3dca986f81081fd34c3e6d3a914c1d808ad2c2c2576223d2a4"
+  },
+  "t2w-phase-33": {
+   "file": "psse-t2w-phase-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/TwoWindingsTransformerPhase.raw",
+   "sha256": "4ab7adf043160b921c69c5f7948a2a12ba1000a19d095b4599b7d6f01ff4de85"
+  },
+  "t2w-second-ratio-33": {
+   "file": "psse-t2w-second-ratio-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/TwoWindingsTransformerSecondRatio.raw",
+   "sha256": "1b6dd0ee985fc2e140750fe6e46202762cb30bf57054aa0a71b224df98ff9503"
+  },
+  "switched-shunt-33": {
+   "file": "psse-switched-shunt-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/SwitchedShunt.raw",
+   "sha256": "264139a78381cb20b09b616d171a10783531ebe4df4ea663a9c881480015c9a0"
+  },
+  "remote-control-33": {
+   "file": "psse-remote-control-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/remoteControl.raw",
+   "sha256": "b9b22dc5f17ed44cffc47b2b83959d831f0b7df17ca908544dc2bab698b74bf3"
+  },
+  "two-area-33": {
+   "file": "psse-two-area-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/two_area_case.raw",
+   "sha256": "e183dd7aeec5aee8037791ea15af194b0b86a3189f4921be0f8c34b576808d56"
+  },
+  "zero-nomv-33": {
+   "file": "psse-zero-nomv-33.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/TransformersWithZeroNomV.raw",
+   "sha256": "fe3fa050b77261fd2af7b8bd743a98ee55f3c71908c10d733f20b93ed2531cb0"
+  },
+  "ieee14-35": {
+   "file": "psse-ieee14-35.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model-test/src/main/resources/IEEE_14_bus_rev35.raw",
+   "sha256": "aa24224c633348efa9f2f75812ce8481418ec896351f6334c3e8bbb8b6f370ec"
+  },
+  "ieee14-completed-35": {
+   "file": "psse-ieee14-completed-35.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model/src/test/resources/IEEE_14_bus_completed_rev35.raw",
+   "sha256": "89312aa3b014e24589c6dc7d57257c8155bc14e9eef5979181abefa27f02016b"
+  },
+  "ieee24-35": {
+   "file": "psse-ieee24-35.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model/src/test/resources/IEEE_24_bus_rev35.raw",
+   "sha256": "37662fceab431e72d4ee802cf7ac89fef32903eb20f9097ea606ba41ce98d0c3"
+  },
+  "ieee14-nb-35": {
+   "file": "psse-ieee14-nb-35.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model/src/test/resources/IEEE_14_bus_nodeBreaker_rev35_exported.raw",
+   "sha256": "13ab9cfd27578bb220770ef6db3c59135987cb8c7ec18bd7c16e7371e1a37f63"
+  },
+  "five-bus-nb-35": {
+   "file": "psse-five-bus-nb-35.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-converter/src/test/resources/five_bus_nodeBreaker_rev35_exported.raw",
+   "sha256": "dfcbdfb5a1b4f665e6334294c28d42f5729a04ac96caf20d2f09f6c79e21e825"
+  },
+  "wscc9": {
+   "file": "psse-wscc9.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model-test/src/main/resources/illinois/literature-based/WSCC%209%20bus.raw",
+   "sha256": "b30bbd77c264ba2f3971ea83aa97b11e703eae35314b0243d4e10e482207eae8"
+  },
+  "ieee39": {
+   "file": "psse-ieee39.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model-test/src/main/resources/illinois/literature-based/IEEE%2039%20bus.RAW",
+   "sha256": "1bd9c91e92133b0ebbbe19e9df21c43874f4f8306e9f22c0b04bec270e3d4e8d"
+  },
+  "ieee300": {
+   "file": "psse-ieee300.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model-test/src/main/resources/illinois/literature-based/IEEE300Bus.raw",
+   "sha256": "e42aebe99b0564300e87cebcca70adc4f1650bc572e44abf155f8b705c8d1ecd"
+  },
+  "rts96": {
+   "file": "psse-rts96.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model-test/src/main/resources/illinois/literature-based/IEEE%20RTS%2096%20bus%20%281%29.RAW",
+   "sha256": "ed38ef0a7f17d393c57a4591b930ed2fdd41e2d65ee6fecabaa916627db6dbf2"
+  },
+  "illinois200": {
+   "file": "psse-illinois200.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model-test/src/main/resources/illinois/synthetic/Illinois200.RAW",
+   "sha256": "b3de70ab5918a80b205651dc2eb6849021a88f2dde0816dd6342410d8c21a054"
+  },
+  "south-carolina500": {
+   "file": "psse-south-carolina500.raw",
+   "url": "https://raw.githubusercontent.com/powsybl/powsybl-core/0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d/psse/psse-model-test/src/main/resources/illinois/synthetic/SouthCarolina500.RAW",
+   "sha256": "bae9ac14114c860a93ca31eeef5c12b602f638753408c82ff4a047a959bde33c"
+  }
+ },
+ "cases": [
+  {
+   "name": "ieee14-33",
+   "archive": "ieee14-33",
+   "start": "dc"
+  },
+  {
+   "name": "ieee14-zip-33",
+   "archive": "ieee14-zip-33",
+   "start": "dc"
+  },
+  {
+   "name": "ieee57-33",
+   "archive": "ieee57-33",
+   "start": "dc"
+  },
+  {
+   "name": "ieee118-33",
+   "archive": "ieee118-33",
+   "start": "dc"
+  },
+  {
+   "name": "three-mib-t3w-33",
+   "archive": "three-mib-t3w-33",
+   "start": "dc"
+  },
+  {
+   "name": "three-mib-t3w-phase-33",
+   "archive": "three-mib-t3w-phase-33",
+   "start": "dc"
+  },
+  {
+   "name": "t2w-phase-33",
+   "archive": "t2w-phase-33",
+   "start": "dc"
+  },
+  {
+   "name": "t2w-second-ratio-33",
+   "archive": "t2w-second-ratio-33",
+   "start": "dc"
+  },
+  {
+   "name": "switched-shunt-33",
+   "archive": "switched-shunt-33",
+   "start": "dc"
+  },
+  {
+   "name": "remote-control-33",
+   "archive": "remote-control-33",
+   "start": "dc"
+  },
+  {
+   "name": "two-area-33",
+   "archive": "two-area-33",
+   "start": "dc"
+  },
+  {
+   "name": "zero-nomv-33",
+   "archive": "zero-nomv-33",
+   "start": "dc"
+  },
+  {
+   "name": "ieee14-35",
+   "archive": "ieee14-35",
+   "start": "dc"
+  },
+  {
+   "name": "ieee14-completed-35",
+   "archive": "ieee14-completed-35",
+   "start": "dc",
+   "loadflow": false
+  },
+  {
+   "name": "ieee24-35",
+   "archive": "ieee24-35",
+   "start": "dc"
+  },
+  {
+   "name": "ieee14-nb-35",
+   "archive": "ieee14-nb-35",
+   "start": "dc"
+  },
+  {
+   "name": "five-bus-nb-35",
+   "archive": "five-bus-nb-35",
+   "start": "dc",
+   "loadflow": false
+  },
+  {
+   "name": "wscc9",
+   "archive": "wscc9",
+   "start": "dc"
+  },
+  {
+   "name": "ieee39",
+   "archive": "ieee39",
+   "start": "dc"
+  },
+  {
+   "name": "ieee300",
+   "archive": "ieee300",
+   "start": "dc",
+   "pending": "two-terminal HVDC link at bus 120: PowerStudio does not model HVDC yet (design phase 3)"
+  },
+  {
+   "name": "rts96",
+   "archive": "rts96",
+   "start": "dc"
+  },
+  {
+   "name": "illinois200",
+   "archive": "illinois200",
+   "start": "dc"
+  },
+  {
+   "name": "south-carolina500",
+   "archive": "south-carolina500",
+   "start": "dc"
+  }
+ ]
+}

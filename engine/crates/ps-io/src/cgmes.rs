@@ -9,7 +9,6 @@
 //! Every class in the files appears in the [`Report`]: mapped into the model, used as supporting data, or not used
 //! (with the reason). Values the files leave out and the importer fills in are listed as notes.
 
-use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 
 use ps_model::{
@@ -22,39 +21,7 @@ use crate::ParseError;
 use crate::files::File;
 use crate::rdf::{Graph, Object};
 
-/// What became of one CIM class.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct ClassReport {
-    /// CIM class name.
-    pub class: String,
-    /// Objects in the files.
-    pub count: usize,
-    /// `mapped`, `used` or `not used`.
-    pub status: &'static str,
-    /// What it became, or why it is not used.
-    pub detail: String,
-}
-
-/// One file read.
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct FileReport {
-    /// File name.
-    pub name: String,
-    /// Profiles it declares (short names such as `CoreEquipment-EU`).
-    pub profiles: Vec<String>,
-}
-
-/// The import report.
-#[derive(Debug, Clone, Serialize, PartialEq, Default)]
-pub struct Report {
-    /// Files read.
-    pub files: Vec<FileReport>,
-    /// Every class found, mapped or not.
-    pub classes: Vec<ClassReport>,
-    /// Values filled in, approximations and skipped objects, in plain words.
-    pub notes: Vec<String>,
-}
+pub use crate::report::{ClassReport, FileReport, ImportReport as Report};
 
 /// A converted CGMES model.
 #[derive(Debug, Clone)]
@@ -919,20 +886,13 @@ fn transformers(cx: &mut Ctx) {
                 conn2: winding(g.enumeration(e2, "PowerTransformerEnd.connectionKind")),
                 r0: cx.numd(e1, "PowerTransformerEnd.r0") + cx.numd(e2, "PowerTransformerEnd.r0") * k,
                 x0: cx.numd(e1, "PowerTransformerEnd.x0") + cx.numd(e2, "PowerTransformerEnd.x0") * k,
-                ratio_tap: None,
+                ratio_taps: Vec::new(),
                 phase_tap: None,
                 limits,
             };
             for (end, e) in [(1u8, e1), (2u8, e2)] {
                 if let Some(tc) = ratio.get(&*e.id).copied() {
-                    if t.ratio_tap.is_some() {
-                        cx.notes.push(format!(
-                            "Transformer {} has ratio tap changers on both windings; the one on winding 1 is used.",
-                            pt.id
-                        ));
-                        continue;
-                    }
-                    t.ratio_tap = Some(ratio_tap(cx, tc, end));
+                    t.ratio_taps.push(ratio_tap(cx, tc, end));
                 }
                 if let Some(tc) = phase.get(&*e.id).copied() {
                     let xtx = if end == 2 {
@@ -957,29 +917,22 @@ fn transformers(cx: &mut Ctx) {
                     x: cx.numd(e, "PowerTransformerEnd.x"),
                     g: cx.numd(e, "PowerTransformerEnd.g"),
                     b: cx.numd(e, "PowerTransformerEnd.b"),
+                    phase_shift_deg: 0.0,
                     clock: (clock(e) - clock(data[0].0)).rem_euclid(12) as u8,
                     conn: winding(g.enumeration(e, "PowerTransformerEnd.connectionKind")),
                     open,
                 };
                 limits.extend(cx.current_limits(term, i as u8 + 1));
             }
-            let mut ratio_tap_found = None;
+            let mut ratio_taps = Vec::new();
+            let mut phase_taps = Vec::new();
             for (i, &(e, ..)) in data.iter().enumerate() {
                 if let Some(tc) = ratio.get(&*e.id).copied() {
-                    if ratio_tap_found.is_none() {
-                        ratio_tap_found = Some(ratio_tap(cx, tc, i as u8 + 1));
-                    } else {
-                        cx.notes.push(format!(
-                            "Transformer {} has more than one ratio tap changer; the first is used.",
-                            pt.id
-                        ));
-                    }
+                    ratio_taps.push(ratio_tap(cx, tc, i as u8 + 1));
                 }
-                if phase.contains_key(&*e.id) {
-                    cx.notes.push(format!(
-                        "Transformer {} has a phase tap changer on a three-winding unit; it is not modelled.",
-                        pt.id
-                    ));
+                if let Some(tc) = phase.get(&*e.id).copied() {
+                    // The winding's reactance, Ω at its own rated voltage, is what the tap's reactance varies from.
+                    phase_taps.push(phase_tap(cx, tc, i as u8 + 1, windings[i].x));
                 }
             }
             cx.m.transformers3.push(Transformer3 {
@@ -987,7 +940,8 @@ fn transformers(cx: &mut Ctx) {
                 name: cx.name(pt),
                 windings,
                 in_service,
-                ratio_tap: ratio_tap_found,
+                ratio_taps,
+                phase_taps,
                 limits,
             });
             cx.mark("PowerTransformer", "two- and three-winding transformers");

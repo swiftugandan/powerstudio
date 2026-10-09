@@ -6,6 +6,7 @@
 //! ps bench <case.m> [--repeat <n>] [--warm]                 time the load flow of a MATPOWER case
 //! ps inspect <file|folder|archive>... [--props]              list the CIM classes in CGMES files
 //! ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] import CGMES, print the import report (and a load flow)
+//! ps psse <case.raw> [--lf] [--warm] [--model]                import PSS/E RAW (versions 33 and 35), the same way
 //! ```
 //!
 //! `kind` is one of `loadflow`, `shortcircuit`, `contingency`, `contingency_plan`, `contingency_chunk` or `rms`;
@@ -16,7 +17,7 @@ use std::process::ExitCode;
 use ps_study::{LoadFlowRun, Silent, api};
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model]";
+const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model]\n       ps psse <case.raw> [--lf] [--warm] [--model]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -44,6 +45,47 @@ fn value<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .position(|a| a == name)
         .and_then(|i| args.get(i + 1))
         .map(String::as_str)
+}
+
+/// Prints an imported model's size, report and validation, with `--model` the model and with `--lf` a load flow
+/// (`--warm` starts it from the voltages in the files).
+fn imported(
+    m: &ps_model::Model,
+    report: &ps_io::report::ImportReport,
+    import_ms: f64,
+    args: &[String],
+) -> Result<String, String> {
+    let size = json!({
+        "nodes": m.nodes.len(), "switches": m.switches.len(), "lines": m.lines.len(), "transformers2": m.transformers2.len(),
+        "transformers3": m.transformers3.len(), "generators": m.generators.len(), "loads": m.loads.len(),
+        "shunts": m.shunts.len(), "svcs": m.svcs.len(), "import_ms": import_ms,
+    });
+    let mut out = json!({ "size": size, "report": report, "issues": m.validate() });
+    if flag(args, "--model") {
+        out["model"] = serde_json::to_value(m).map_err(|e| e.to_string())?;
+    }
+    if flag(args, "--lf") {
+        let start: Option<Vec<Option<(f64, f64)>>> = flag(args, "--warm").then(|| {
+            m.nodes
+                .iter()
+                .map(|n| (n.v0 > 0.0).then(|| (n.v0, n.angle0.to_radians())))
+                .collect()
+        });
+        let settings = ps_model::study::LoadFlowSettings {
+            tolerance: 1e-6,
+            ..Default::default()
+        };
+        let r = ps_study::loadflow::run(
+            m,
+            &LoadFlowRun {
+                settings,
+                start,
+                ..Default::default()
+            },
+        );
+        out["loadflow"] = serde_json::to_value(&r).map_err(|e| e.to_string())?;
+    }
+    Ok(out.to_string())
 }
 
 fn read(path: &str) -> Result<String, String> {
@@ -127,40 +169,17 @@ fn run(args: &[String]) -> Result<String, String> {
             let t0 = ps_num::clock::now_ms();
             let files = ps_io::files::read_paths(&paths).map_err(|e| e.to_string())?;
             let imp = ps_io::cgmes::import(&files).map_err(|e| e.to_string())?;
-            let import_ms = ps_num::clock::now_ms() - t0;
-            let m = &imp.model;
-            let size = json!({
-                "nodes": m.nodes.len(), "switches": m.switches.len(), "lines": m.lines.len(), "transformers2": m.transformers2.len(),
-                "transformers3": m.transformers3.len(), "generators": m.generators.len(), "loads": m.loads.len(),
-                "shunts": m.shunts.len(), "svcs": m.svcs.len(), "import_ms": import_ms,
-            });
-            let mut out = json!({ "size": size, "report": imp.report, "issues": m.validate() });
-            if flag(args, "--model") {
-                out["model"] = serde_json::to_value(m).map_err(|e| e.to_string())?;
-            }
-            if flag(args, "--lf") {
-                let warm = flag(args, "--warm");
-                let start: Option<Vec<Option<(f64, f64)>>> = warm.then(|| {
-                    m.nodes
-                        .iter()
-                        .map(|n| (n.v0 > 0.0).then(|| (n.v0, n.angle0.to_radians())))
-                        .collect()
-                });
-                let settings = ps_model::study::LoadFlowSettings {
-                    tolerance: 1e-6,
-                    ..Default::default()
-                };
-                let r = ps_study::loadflow::run(
-                    m,
-                    &LoadFlowRun {
-                        settings,
-                        start,
-                        ..Default::default()
-                    },
-                );
-                out["loadflow"] = serde_json::to_value(&r).map_err(|e| e.to_string())?;
-            }
-            Ok(out.to_string())
+            imported(&imp.model, &imp.report, ps_num::clock::now_ms() - t0, args)
+        }
+        Some("psse") => {
+            let path = args.get(1).ok_or(USAGE)?;
+            let t0 = ps_num::clock::now_ms();
+            let text = read(path)?;
+            let name = std::path::Path::new(path)
+                .file_name()
+                .map_or(path.as_str(), |n| n.to_str().unwrap_or(path));
+            let imp = ps_io::psse_model::import(&text, name).map_err(|e| format!("{path}: {e}"))?;
+            imported(&imp.model, &imp.report, ps_num::clock::now_ms() - t0, args)
         }
         Some("inspect") => {
             let paths: Vec<String> = args[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect();

@@ -2,13 +2,7 @@
 
 PowSyBl (pypowsybl, with OpenLoadFlow) is the reference for CGMES. For each configuration this records, by element
 identifier, what PowSyBl imported (impedances, ratings, set points, tap steps, switch states) and its load flow
-results (voltages at every element's terminals, flows and outputs). Every OpenLoadFlow parameter that departs from a
-plain Newton-Raphson is set explicitly and written into the golden's "source" field:
-
-* no distributed slack, no reactive limits, no tap, shunt or phase-shifter controls, no remote voltage control;
-* every connected component solved;
-* generators with a zero MW target still started, every voltage target accepted;
-* a tight convergence threshold.
+results (voltages at every element's terminals, flows and outputs), with the load flow settings in olf.py.
 
 PowSyBl 1.16.1 does not read the CGMES 3.0 attribute Equipment.inService ("false means that the equipment is treated
 by network applications as if it is not in the model"); it keeps such equipment connected. To solve the network the
@@ -25,7 +19,6 @@ The archives are read in place from .cache/reference (run node scripts/fetch-ref
 
 import io
 import json
-import math
 import re
 import sys
 import warnings
@@ -36,25 +29,13 @@ from pathlib import Path
 import pypowsybl as pp
 import pypowsybl.loadflow as lf
 
+from olf import num, parameters
+
 warnings.filterwarnings("ignore")
 ROOT = Path(__file__).resolve().parents[2]
 CASES = json.loads((ROOT / "tests" / "oracle" / "cgmes-cases.json").read_text())
 GOLDEN = ROOT / "tests" / "oracle" / "golden"
 CACHE = ROOT / ".cache" / "reference"
-
-PROVIDER = {
-    "slackBusSelectionMode": "NAME",
-    "voltageRemoteControl": "false",
-    "generatorsWithZeroMwTargetAreNotStarted": "false",
-    "minPlausibleTargetVoltage": "0.0",
-    "maxPlausibleTargetVoltage": "100.0",
-    "minNominalVoltageTargetVoltageCheck": "0.0",
-    "svcVoltageMonitoring": "false",
-    "newtonRaphsonConvEpsPerEq": "1.0E-10",
-    "maxNewtonRaphsonIterations": "50",
-    "useLoadModel": "false",
-}
-
 
 def xml_files(case):
     """The case's XML files, read from the archive (nested archives expanded)."""
@@ -106,10 +87,6 @@ def remove(n, i):
         return False
 
 
-def num(v):
-    return None if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
-
-
 def golden(case):
     files = xml_files(case)
     buf = io.BytesIO()
@@ -132,18 +109,7 @@ def golden(case):
         rank = (prio.get(gid, 0) or 10**9, -(num(g["rated_s"]) or 0.0))
         if comp not in slack or rank < slack[comp][0]:
             slack[comp] = (rank, gid, g["bus_id"])
-    provider = dict(PROVIDER, slackBusesIds=",".join(s[2] for s in slack.values()))
-    params = lf.Parameters(
-        distributed_slack=False,
-        use_reactive_limits=False,
-        transformer_voltage_control_on=False,
-        shunt_compensator_voltage_control_on=False,
-        phase_shifter_regulation_on=False,
-        twt_split_shunt_admittance=False,
-        connected_component_mode=lf.ConnectedComponentMode.ALL,
-        voltage_init_mode=lf.VoltageInitMode.PREVIOUS_VALUES if case["start"] == "sv" else lf.VoltageInitMode.DC_VALUES,
-        provider_parameters=provider,
-    )
+    params = parameters([s[2] for s in slack.values()], "previous" if case["start"] == "sv" else "dc")
     tables = {
         "lines": n.get_lines(all_attributes=True),
         "transformers2": n.get_2_windings_transformers(all_attributes=True),
