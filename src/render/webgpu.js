@@ -138,6 +138,34 @@ struct TextOut { @builtin(position) pos: vec4f, @location(0) uv: vec2f, @locatio
 
 const SAMPLES = 4;
 
+/**
+ * Proves the device works end to end before the app relies on it: clears a 1 × 1 texture to a known colour on the
+ * GPU and reads it back. Some environments hand out a device whose instance is already gone; they fail here and the
+ * app falls back to Canvas 2D with the reason. @param {GPUDevice} device
+ */
+async function selfTest(device) {
+  const texture = device.createTexture({ size: [1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+  const buffer = device.createBuffer({ size: 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const encoder = device.createCommandEncoder();
+  encoder.beginRenderPass({ colorAttachments: [{ view: texture.createView(), clearValue: { r: 0.2, g: 0.4, b: 0.6, a: 1 }, loadOp: 'clear', storeOp: 'store' }] }).end();
+  encoder.copyTextureToBuffer({ texture }, { buffer, bytesPerRow: 256 }, [1, 1]);
+  device.queue.submit([encoder.finish()]);
+  let timer = 0;
+  try {
+    await Promise.race([buffer.mapAsync(GPUMapMode.READ), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('the GPU did not answer within 3 s')), 3000); })]);
+    const px = new Uint8Array(buffer.getMappedRange(0, 4));
+    const ok = Math.abs(px[0] - 51) <= 2 && Math.abs(px[1] - 102) <= 2 && Math.abs(px[2] - 153) <= 2;
+    buffer.unmap();
+    if (!ok) throw new Error(`it returned rgb(${px[0]}, ${px[1]}, ${px[2]}) for rgb(51, 102, 153)`);
+  } catch (error) {
+    device.destroy();
+    throw new Error(`The WebGPU self-test failed: ${error instanceof Error ? error.message : error}.`);
+  } finally {
+    clearTimeout(timer);
+    texture.destroy();
+  }
+}
+
 export class WebGPURenderer {
   /** @param {HTMLCanvasElement} canvas @returns {Promise<WebGPURenderer>} Rejects with a reason when WebGPU is unavailable. */
   static async create(canvas) {
@@ -150,6 +178,7 @@ export class WebGPURenderer {
     if (!context) throw new Error('The canvas could not create a WebGPU context.');
     const format = gpu.getPreferredCanvasFormat();
     context.configure({ device, format, alphaMode: 'opaque' });
+    await selfTest(device);
     const info = adapter.info;
     const detail = info ? [info.vendor, info.architecture, info.isFallbackAdapter ? 'software' : ''].filter(Boolean).join(' · ') : '';
     return new WebGPURenderer(canvas, adapter, device, context, format, detail);

@@ -52,8 +52,10 @@ busbar, computed independently from the bus admittance matrix.
 
 `src/core/shortcircuit.js` implements the method of the equivalent voltage source at the fault location of
 IEC 60909-0. **It is IEC 60909-style, not certified**: the formulas follow pandapower 3.5.6's implementation of the
-standard (see `docs/research/sources.md`), and PowerStudio agrees with pandapower to about 1e-15 relative on both
-samples, for three-phase, line-to-line and line-to-earth faults, maximum and minimum.
+standard (see `docs/research/sources.md`), and PowerStudio agrees with pandapower on both samples, maximum and
+minimum, to about 1e-15 relative for three-phase and line-to-line faults and within 2e-8 for earth faults. The
+earth-fault difference comes from the tiny numerical earthing each program adds to otherwise isolated
+zero-sequence networks.
 
 - The only source is c·Un/√3 at the faulted busbar. Machines, grids and transformers become impedances; loads,
   shunts, line capacitances (positive sequence) and transformer magnetising branches are left out.

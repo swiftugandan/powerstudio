@@ -43,3 +43,9 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r scrip
 
 `tests/oracle.test.mjs` fails when the committed inputs no longer match the samples, so a sample cannot drift away
 from its goldens unnoticed. Moving a busbar on the diagram changes the inputs but not the goldens.
+
+## WebGPU in other environments
+
+`node scripts/webgpu-probe.mjs` (after `node build.mjs`) opens the built app in Chromium with several flag sets and
+prints, for each, the backend the app chose, its reason, and the share of diagram pixels in both a screenshot and the
+renderer's own read-back frame. The manual "WebGPU probe" workflow runs it on GitHub's Ubuntu runners.

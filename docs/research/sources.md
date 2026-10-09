@@ -42,7 +42,7 @@ not consulted for this project; the formulas and factor values were taken from p
 (`pandapower/build_bus.py` `_add_c_to_ppc`, `build_branch.py` `_transformer_correction_factor`,
 `shortcircuit/ppc_conversion.py`, `shortcircuit/kappa.py`, `shortcircuit/currents.py`, version 3.5.6), whose
 documentation states that it is validated against the IEC TR 60909-4 examples. PowerStudio's results agree with
-pandapower's to about 1e-15 relative. That establishes agreement with pandapower, not certification against the
+pandapower's to about 1e-15 relative for three-phase and line-to-line faults and within 2e-8 for earth faults. That establishes agreement with pandapower, not certification against the
 standard.
 
 ## Stability

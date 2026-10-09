@@ -32,6 +32,10 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Browser tests (WebGPU and Canvas 2D projects)
+        # Chromium's WebGPU instance does not survive on these runners (scripts/webgpu-probe.mjs, docs/TEST-REPORT.md),
+        # so the webgpu project checks truthful reporting and real drawing here; WebGPU itself is required on macOS.
+        env:
+          PS_WEBGPU: optional
         run: npm run test:browser
       - name: Record which backend each browser test used
         if: always()

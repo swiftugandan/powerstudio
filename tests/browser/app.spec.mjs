@@ -25,25 +25,34 @@ async function loadFlow(page) {
   await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('Converged');
 }
 
+// WebGPU is required in the webgpu project unless PS_WEBGPU=optional says the environment cannot provide it (GitHub's
+// Ubuntu runners: Chromium's WebGPU instance does not survive there; see docs/TEST-REPORT.md).
+const webgpuRequired = process.env.PS_WEBGPU !== 'optional';
+
 test('draws the diagram with the backend it reports, and that backend is the expected one', async ({ page }, info) => {
   await open(page);
   const facts = await page.evaluate(() => ({ backend: /** @type {any} */ (window).powerstudio.backend, reason: /** @type {any} */ (window).powerstudio.fallbackReason }));
+  info.annotations.push({ type: 'backend', description: `${facts.backend}${facts.reason ? ` (${facts.reason})` : ''}` });
   const badge = page.locator('.vp-badge');
   await expect(badge).toHaveAttribute('data-backend', facts.backend);
-  if (info.project.name === 'webgpu') {
+  await expect(badge).toContainText(facts.backend === 'webgpu' ? 'WebGPU' : 'Canvas 2D');
+  if (info.project.name === 'webgpu' && webgpuRequired) {
     expect(facts.backend, `WebGPU was expected in this project; fallback reason: ${facts.reason}`).toBe('webgpu');
-    await expect(badge).toContainText('WebGPU');
-  } else {
+  } else if (info.project.name === 'canvas') {
     expect(facts.backend).toBe('canvas2d');
     expect(facts.reason).toContain('WebGPU');
-    await expect(badge).toContainText('Canvas 2D');
   }
-  // The diagram is really on screen: 132 kV busbars are blue, 33 kV ones green (light theme tokens).
+  // The frame as the active renderer produced it (for WebGPU, read back from the GPU) shows the network:
+  // 132 kV busbars are blue and 33 kV ones green in the light theme.
   await page.waitForFunction(() => /** @type {any} */ (window).powerstudio.frames > 0);
+  const url = await page.evaluate(() => /** @type {any} */ (window).powerstudio.snapshot());
+  const frame = decodePNG(Buffer.from(url.split(',')[1], 'base64'));
+  expect(share(frame, [31, 92, 192])).toBeGreaterThan(0.0008);
+  expect(share(frame, [23, 128, 74])).toBeGreaterThan(0.0008);
+  // And the same frame reached the screen.
   const img = decodePNG(await page.locator('#viewport').screenshot());
   expect(share(img, [31, 92, 192])).toBeGreaterThan(0.0008);
   expect(share(img, [23, 128, 74])).toBeGreaterThan(0.0008);
-  info.annotations.push({ type: 'backend', description: `${facts.backend}${facts.reason ? ` (${facts.reason})` : ''}` });
 });
 
 test('runs a load flow from the keyboard and matches MATPOWER case14', async ({ page }) => {
