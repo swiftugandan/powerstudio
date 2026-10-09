@@ -580,9 +580,8 @@ impl Work {
         let mut p_load = vec![[0.0; 3]; n];
         let mut q_load = vec![[0.0; 3]; n];
         for (k, l) in self.net.loads.iter().enumerate() {
-            let p = self.load_p[k];
-            // A load moved by slack distribution keeps its power factor only when it started with one.
-            let q = if l.p != 0.0 && p != l.p { l.q * p / l.p } else { l.q };
+            // Slack distribution moves a load's active power only (OpenLoadFlow's default).
+            let (p, q) = (self.load_p[k], l.q);
             let (pz, qz) = if opt.zip_loads {
                 (l.p_zip, l.q_zip)
             } else {
@@ -641,9 +640,10 @@ impl Work {
             .enumerate()
             .map(|(k, l)| {
                 let v = vm.get(l.bus).copied().unwrap_or(1.0);
-                let p = self.load_p[k];
-                let q = if l.p != 0.0 && p != l.p { l.q * p / l.p } else { l.q };
-                let scaled = crate::PuLoad { p, q, ..*l };
+                let scaled = crate::PuLoad {
+                    p: self.load_p[k],
+                    ..*l
+                };
                 let (pl, ql, _, _) = scaled.at(v, opt.zip_loads);
                 (pl, ql)
             })
@@ -662,8 +662,9 @@ impl Work {
             .collect();
         let shunt_sections = self.net.shunt_controls.iter().map(|c| c.index).collect();
         let notes = std::mem::take(&mut self.notes);
+        // The buses that hold the mismatch, when Newton itself stopped short.
         let worst_buses = match s {
-            Some(s) if !converged && n > 0 => s.worst_buses(10),
+            Some(s) if !converged && n > 0 && worst > opt.tolerance => s.worst_buses(10),
             _ => Vec::new(),
         };
         Solution {

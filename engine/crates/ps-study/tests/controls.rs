@@ -32,6 +32,14 @@ fn settings(controls: &Value) -> LoadFlowSettings {
                 s.balance = Balance::MaxP;
                 s.slack_tolerance = 1e-4;
             }
+            "slack-p" | "slack-margin" | "slack-load" => {
+                s.balance = match c.as_str().unwrap() {
+                    "slack-p" => Balance::TargetP,
+                    "slack-margin" => Balance::Margin,
+                    _ => Balance::Load,
+                };
+                s.slack_tolerance = 1e-4;
+            }
             "qlim" => s.enforce_q_limits = true,
             "remote" => s.remote_voltage = true,
             "zip" => s.voltage_dependent_loads = true,
@@ -118,7 +126,11 @@ fn psse_case(case: &Value, rows: &mut Vec<String>, skipped: &mut Vec<String>) {
                     None => w.check("bus solved", id, 0.0, 1.0),
                 }
             }
-            let distributed = want["controls"].as_array().unwrap().iter().any(|c| c == "slack");
+            let distributed = want["controls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c.as_str().is_some_and(|c| c.starts_with("slack")));
             let at_slack = |id: &str| {
                 m.generators
                     .iter()
@@ -218,7 +230,11 @@ fn matpower_case(name: &str, file: &str, start: &str, rows: &mut Vec<String>) {
             }
             // Outputs by bus: OpenLoadFlow splits a bus's output among its machines by its own rules (an equal split
             // where limits are implausible), so the machines of a bus are compared by their total.
-            let distributed = want["controls"].as_array().unwrap().iter().any(|c| c == "slack");
+            let distributed = want["controls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c.as_str().is_some_and(|c| c.starts_with("slack")));
             let mut totals: std::collections::BTreeMap<usize, [f64; 4]> = Default::default();
             for u in &report.gens {
                 // Generators are in the case's row order; the report leaves out those switched off.

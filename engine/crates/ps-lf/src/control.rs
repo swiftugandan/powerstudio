@@ -151,6 +151,7 @@ fn distribute_on_machines(work: &mut Work, isl: usize, mismatch: f64, balance: B
         remaining += work.target_p[m] - work.initial_p[m];
         work.target_p[m] = work.initial_p[m];
     }
+    // The total to share (this round's imbalance and everything shared before) sets the margins' direction.
     let total = remaining;
     let factor = |m: usize, t: f64| -> f64 {
         let g = &net.machines[m];
@@ -164,7 +165,7 @@ fn distribute_on_machines(work: &mut Work, isl: usize, mismatch: f64, balance: B
                 } else {
                     (g.p_min.max(0.0), g.p_max)
                 };
-                if mismatch > 0.0 {
+                if total > 0.0 {
                     (hi - t).max(0.0)
                 } else {
                     (t - lo).max(0.0)

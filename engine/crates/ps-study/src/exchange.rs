@@ -62,11 +62,20 @@ pub fn sv_state(model: &Model, calc: &Calc, sol: &ps_lf::Solution, report: &Load
             slot.get_or_insert(node as usize);
         }
     }
+    // Positions the load flow's controls set.
+    let taps = report
+        .taps
+        .iter()
+        .map(|t| ((t.id.clone(), t.winding, t.kind == "ratio"), t.position))
+        .collect();
+    let sections = report.sections.iter().map(|x| (x.id.clone(), x.sections)).collect();
     State {
         node_v,
         flows,
         node_island,
         island_reference,
+        taps,
+        sections,
     }
 }
 

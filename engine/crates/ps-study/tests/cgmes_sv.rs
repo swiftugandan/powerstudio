@@ -105,3 +105,73 @@ fn exported_sv_reads_back_as_the_solved_state() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// After a load flow whose controls moved taps or sections, SV reports the solved positions (SvTapStep and
+/// SvShuntCompensatorSections), not the steady-state hypothesis's.
+#[test]
+fn sv_reports_the_positions_the_controls_set() {
+    let cases = json("tests/oracle/cgmes-cases.json");
+    let mut moved_total = 0;
+    for case in cases["cases"].as_array().unwrap() {
+        if case["loadflow"] == false {
+            continue;
+        }
+        let files = cgmes_files(case);
+        let mut model = ps_io::cgmes::import(&files).unwrap().model;
+        // Raise every regulating target so the controls have to act.
+        for t in &mut model.transformers2 {
+            for c in t.ratio_taps.iter_mut().filter_map(|r| r.control.as_mut()) {
+                c.target_kv *= 1.03;
+            }
+        }
+        for c in model.shunts.iter_mut().filter_map(|s| s.control.as_mut()) {
+            c.target_kv *= 1.03;
+        }
+        let run = LoadFlowRun {
+            settings: LoadFlowSettings {
+                tolerance: 1e-9,
+                max_iter: 50,
+                tap_control: true,
+                shunt_control: true,
+                ..LoadFlowSettings::plain()
+            },
+            ..Default::default()
+        };
+        let (calc, sol, report) = loadflow::solve(&model, &run);
+        if !report.converged {
+            continue;
+        }
+        let state = ps_study::exchange::sv_state(&model, &calc, &sol, &report);
+        let opt = ps_io::cgmes_sv::Options::default();
+        let sv = ps_io::cgmes_sv::write(&files, &model, &state, &opt).unwrap().text;
+        let values = |tag: &str| -> Vec<i64> {
+            sv.split(&format!("<cim:{tag}>"))
+                .skip(1)
+                .filter_map(|s| s.split('<').next()?.trim().parse().ok())
+                .collect()
+        };
+        let (steps, sections) = (
+            values("SvTapStep.position"),
+            values("SvShuntCompensatorSections.sections"),
+        );
+        for t in report.taps.iter().filter(|t| t.position != t.start) {
+            moved_total += 1;
+            assert!(
+                steps.contains(&i64::from(t.position)),
+                "{}: SvTapStep lacks position {}",
+                t.id,
+                t.position
+            );
+        }
+        for x in report.sections.iter().filter(|x| x.sections != x.start) {
+            moved_total += 1;
+            assert!(
+                sections.contains(&i64::from(x.sections)),
+                "{}: SV lacks {} sections",
+                x.id,
+                x.sections
+            );
+        }
+    }
+    assert!(moved_total > 0, "no control moved anything, so nothing was checked");
+}

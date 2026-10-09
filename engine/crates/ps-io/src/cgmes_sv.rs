@@ -31,6 +31,10 @@ pub struct State {
     pub node_island: Vec<Option<u32>>,
     /// Per island, the node whose angle is the reference.
     pub island_reference: Vec<Option<usize>>,
+    /// Tap positions the load flow moved, by (transformer, winding, ratio changer); others are the model's.
+    pub taps: HashMap<(String, u8, bool), i32>,
+    /// Sections the load flow switched, by shunt; others are the model's.
+    pub sections: HashMap<String, u32>,
 }
 
 /// Export settings.
@@ -336,7 +340,9 @@ pub fn write(files: &[File], m: &Model, state: &State, opt: &Options) -> Result<
                 (false, None, Some(t)) => t.phase_taps.iter().find(|x| x.end == end).map(|x| x.position),
                 _ => None,
             };
-            let Some(position) = position else { continue };
+            let Some(position) = state.taps.get(&(pt.to_string(), end, ratio)).copied().or(position) else {
+                continue;
+            };
             let _ = writeln!(
                 body,
                 "  <cim:SvTapStep rdf:ID=\"_{}\">\n    <cim:SvTapStep.position>{position}</cim:SvTapStep.position>\n    <cim:SvTapStep.TapChanger rdf:resource=\"{}\"/>\n  </cim:SvTapStep>",
@@ -388,7 +394,7 @@ pub fn write(files: &[File], m: &Model, state: &State, opt: &Options) -> Result<
             body,
             "  <cim:SvShuntCompensatorSections rdf:ID=\"_{}\">\n    <cim:SvShuntCompensatorSections.sections>{}</cim:SvShuntCompensatorSections.sections>\n    <cim:SvShuntCompensatorSections.ShuntCompensator rdf:resource=\"{}\"/>\n  </cim:SvShuntCompensatorSections>",
             uuid(&format!("{seed}/SvShuntCompensatorSections/{}", s.id)),
-            s.sections,
+            state.sections.get(&s.id).copied().unwrap_or(s.sections),
             r(&s.id)
         );
         written += 1;

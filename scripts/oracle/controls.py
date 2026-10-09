@@ -34,6 +34,9 @@ GOLDEN = ROOT / "tests" / "oracle" / "golden"
 # Each variant enables these controls (olf.CONTROLS).
 VARIANTS = {
     "slack": ("slack",),
+    "slack-p": ("slack-p",),
+    "slack-margin": ("slack-margin",),
+    "slack-load": ("slack-load",),
     "qlim": ("qlim",),
     "remote": ("remote",),
     "remote-qlim": ("remote", "qlim"),
@@ -54,7 +57,7 @@ STRESS = 1.02
 
 # MATPOWER cases with controls goldens, and the variants that apply (MATPOWER data has no remote control or loads
 # with voltage dependence).
-MATPOWER = {"activsg2000": ("slack", "qlim"), "activsg10k": ("slack", "qlim")}
+MATPOWER = {"activsg2000": ("slack", "slack-p", "slack-margin", "slack-load", "qlim"), "activsg10k": ("slack", "qlim")}
 
 
 def r12(x):
