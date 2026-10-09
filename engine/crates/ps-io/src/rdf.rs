@@ -46,6 +46,10 @@ pub struct Header {
     pub id: String,
     /// Profile URIs.
     pub profiles: Vec<String>,
+    /// `md:Model.scenarioTime`, the time the model describes.
+    pub scenario_time: Option<String>,
+    /// `md:Model.modelingAuthoritySet`, who made it.
+    pub authority: Option<String>,
 }
 
 /// Objects read from one or more files.
@@ -248,7 +252,7 @@ impl Graph {
                             header = Some(Header {
                                 file: file.into(),
                                 id: about.unwrap_or_default(),
-                                profiles: Vec::new(),
+                                ..Default::default()
                             })
                         }
                         1 => {
@@ -308,10 +312,13 @@ impl Graph {
 
     fn push(&mut self, current: Option<u32>, header: &mut Option<Header>, s: Sym, v: Value) {
         if let Some(h) = header.as_mut() {
-            if self.name(s) == "Model.profile"
-                && let Value::Text(t) = &v
-            {
-                h.profiles.push(t.to_string());
+            if let Value::Text(t) = &v {
+                match self.name(s) {
+                    "Model.profile" => h.profiles.push(t.to_string()),
+                    "Model.scenarioTime" => h.scenario_time = Some(t.to_string()),
+                    "Model.modelingAuthoritySet" => h.authority = Some(t.to_string()),
+                    _ => {}
+                }
             }
             return;
         }

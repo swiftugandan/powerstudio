@@ -100,10 +100,9 @@ impl Ids {
         if let Some(w) = wanted
             .map(str::trim)
             .filter(|w| !w.is_empty() && w.chars().count() <= 2)
+            && used.insert(w.to_string())
         {
-            if used.insert(w.to_string()) {
-                return w.to_string();
-            }
+            return w.to_string();
         }
         let fresh = (1..=99)
             .map(|k| k.to_string())
@@ -698,7 +697,9 @@ fn shunts(w: &mut Writer) -> (Vec<String>, Vec<String>) {
         if blocks.len() > 8 {
             w.count("switched shunt(s) with more than eight distinct steps cut to eight blocks");
         }
-        let control = s.control.filter(|c| c.enabled && c.target_kv - c.deadband_kv / 2.0 > 0.0);
+        let control = s
+            .control
+            .filter(|c| c.enabled && c.target_kv - c.deadband_kv / 2.0 > 0.0);
         let (modsw, hi, lo, rem) = match control {
             Some(c) => {
                 let kv = m.nominal_kv(c.node);

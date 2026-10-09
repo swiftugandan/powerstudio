@@ -16,6 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 quick-xml = "0.42"
 miniz_oxide = "0.9"
+sha2 = { version = "0.11", default-features = false }
 
 [lints]
 workspace = true

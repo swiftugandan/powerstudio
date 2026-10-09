@@ -81,6 +81,10 @@ cd engine && cargo build --release -p ps-cli && cd ..
 .venv/bin/python scripts/oracle/export_check.py    # every CGMES and PSS/E case, both versions
 ```
 
+CGMES state variables export is checked the same two ways: `engine/crates/ps-study/tests/cgmes_sv.rs` reads every
+exported SV back with PowerStudio's importer, and `scripts/oracle/sv_check.py` has PowSyBl read it in place of each
+configuration's own SV and compares the flows it takes with PowerStudio's.
+
 A case whose files no load flow can solve is marked `"loadflow": false` with the reason in `why`; its import is
 still compared. `ps cgmes <files>` and `ps psse <file.raw>` print an import's report, validation and, with `--lf`,
 a load flow, which is the quickest way to look at a case that fails.

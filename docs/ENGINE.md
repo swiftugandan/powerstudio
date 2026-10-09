@@ -229,6 +229,22 @@ tap changers, and the load flow at every bus and equipment terminal. Every case 
 p.u. or better (IEEE 300 to 2e-12 p.u.); `docs/research/sources.md` lists the corrections the comparison makes to
 PowSyBl's network and why.
 
+## CGMES state variables export
+
+After a load flow, `ps-io` (`cgmes_sv.rs`) writes the state variables (SV) profile for the CGMES files the model came
+from, so the result travels with the operator's own EQ, TP and SSH files. It reads those files again for the
+identifiers SV refers to: an `SvVoltage` for every topological node (zero for nodes without supply), a
+`TopologicalIsland` for every island with its angle reference, an `SvPowerFlow` for every terminal PowerStudio solved
+(load sign, power into the equipment), an `SvTapStep` for every tap changer, an `SvStatus` for every conducting
+equipment and an `SvShuntCompensatorSections` for every shunt compensator. The version (2.4.15 or 3.0) follows the
+input; the SV model depends on the input's TP and SSH models and takes their scenario time and modelling authority.
+New identifiers derive from the input and the element, so the same state always gives the same file.
+
+**Checked by** `engine/crates/ps-study/tests/cgmes_sv.rs`, which writes the SV of every solved conformity
+configuration, reads the configuration back with it in place of its own SV, and requires every node to start at the
+solved voltage and the load flow to need no iteration from there. And by `scripts/oracle/sv_check.py`, in which PowSyBl
+reads the exported SV: it takes every flow PowerStudio wrote, on all eleven configurations, without difference.
+
 ## PSS/E RAW export
 
 `ps-io` (`psse_write.rs`) writes any model as a RAW file of version 33 or 35. RAW is bus-branch, so nodes joined by
@@ -250,7 +266,8 @@ solves them: every node keeps its voltage to 1e-14 p.u. And by `scripts/oracle/e
 read the same files: its load flow agrees with PowerStudio's on all 64 files to 4.2e-11 p.u. or better.
 
 The app does not open CGMES or RAW files yet; `ps cgmes <files> [--lf]` and `ps psse <file.raw> [--lf]` import them
-and print the report, the validation and a load flow, and `ps export <input>... --raw 33|35` writes RAW.
+and print the report, the validation and a load flow; `ps export <input>... --raw 33|35` writes RAW and
+`ps cgmes <files> --sv <out.xml>` writes the SV of a load flow.
 
 ## Requests
 

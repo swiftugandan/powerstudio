@@ -87,8 +87,10 @@ def remove(n, i):
         return False
 
 
-def golden(case):
-    files = xml_files(case)
+def network(case, files):
+    """PowSyBl's network of a case's files, prepared as the goldens solve it: equipment whose SSH inService is false
+    removed, and load flow parameters with PowerStudio's slack. Returns the network, the parameters, the removed
+    identifiers and the slack machines."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
         for name, data in files:
@@ -96,7 +98,6 @@ def golden(case):
     n = pp.network.load_from_binary_buffer(io.BytesIO(buf.getvalue()))
     removed = sorted(i for i in out_of_service(files) if remove(n, i))
     buses = n.get_buses()
-    vls = n.get_voltage_levels()
     gens = n.get_generators(all_attributes=True)
 
     # The slack: per synchronous component, best reference priority, then largest rating.
@@ -110,6 +111,14 @@ def golden(case):
         if comp not in slack or rank < slack[comp][0]:
             slack[comp] = (rank, gid, g["bus_id"])
     params = parameters([s[2] for s in slack.values()], "previous" if case["start"] == "sv" else "dc")
+    return n, params, removed, sorted(s[1] for s in slack.values())
+
+
+def golden(case):
+    files = xml_files(case)
+    n, params, removed, slack = network(case, files)
+    vls = n.get_voltage_levels()
+    gens = n.get_generators(all_attributes=True)
     tables = {
         "lines": n.get_lines(all_attributes=True),
         "transformers2": n.get_2_windings_transformers(all_attributes=True),
@@ -141,7 +150,7 @@ def golden(case):
         "source": f"pypowsybl {version('pypowsybl')} OpenLoadFlow; parameters {params}",
         "case": case["name"],
         "data": "ENTSO-E CGMES test configuration, read from the archive (not redistributed)",
-        "slack": sorted(s[1] for s in slack.values()),
+        "slack": slack,
         "removed": removed,
         "imported": imported,
     }

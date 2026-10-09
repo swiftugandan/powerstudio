@@ -553,15 +553,36 @@ impl Calc {
         self.start_internal_buses();
     }
 
-    /// Starting voltages of buses no node stands for (transformer star points, open branch ends): the voltage behind
-    /// the ideal transformer of their most tightly coupled branch, seen from its other end. Stored solutions carry no
-    /// voltage for them, and a flat 1 p.u. at 0° next to a winding of almost no impedance would start Newton far off.
+    /// Starting voltages of buses no node stands for (transformer star points, open branch ends). Stored solutions
+    /// carry no voltage for them, and a flat 1 p.u. at 0° next to a winding of almost no impedance would start Newton
+    /// far off. Nothing is injected there, so the voltage that balances the currents of their branches is exact
+    /// whenever the neighbours' starting voltages are: a restart from a solved state needs no iteration.
     fn start_internal_buses(&mut self) {
         let net = &mut self.net;
         for (i, b) in self.topo.buses.iter().enumerate() {
             if !b.nodes.is_empty() {
                 continue;
             }
+            // Nothing is injected at a star point or an open branch end, so its voltage follows from its neighbours':
+            // the currents its branches carry into it sum to zero (V_i = −Σ y_ij·V_j / Σ y_ii).
+            let (mut num, mut den) = (C64::ZERO, C64::ZERO);
+            for br in net.branches.iter().filter(|br| (br.f == i) != (br.t == i)) {
+                let (other, y_self, y_other) = if br.t == i {
+                    (br.f, br.ytt, br.ytf)
+                } else {
+                    (br.t, br.yff, br.yft)
+                };
+                let o = &net.buses[other];
+                num += y_other * C64::from_polar(o.vm0, o.va0);
+                den += y_self;
+            }
+            let v = -(num / den);
+            if den.abs() > 1e-12 && v.abs().is_finite() && v.abs() > 0.0 {
+                net.buses[i].vm0 = v.abs();
+                net.buses[i].va0 = v.im.atan2(v.re);
+                continue;
+            }
+            // Without a usable sum, the voltage behind the strongest branch.
             let best = net
                 .branches
                 .iter()

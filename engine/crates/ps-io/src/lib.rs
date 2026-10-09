@@ -4,6 +4,7 @@
 //! units). Conversion into the engine's canonical model happens in a separate step that reports every approximation.
 
 pub mod cgmes;
+pub mod cgmes_sv;
 pub mod files;
 pub mod matpower;
 pub mod matpower_model;

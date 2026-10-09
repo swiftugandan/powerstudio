@@ -6,6 +6,9 @@
 //! ps bench <case.m> [--repeat <n>] [--warm]                 time the load flow of a MATPOWER case
 //! ps inspect <file|folder|archive>... [--props]              list the CIM classes in CGMES files
 //! ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] import CGMES, print the import report (and a load flow)
+//! ps cgmes <file|folder|archive>... --sv <out.xml> [--warm] [--solution <file>]
+//!                                                             solve and write the state variables (SV) profile, and
+//!                                                             the state by element and node as JSON
 //! ps psse <case.raw> [--lf] [--warm] [--model]                import PSS/E RAW (versions 33 and 35), the same way
 //! ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]
 //!                                                             write any model PowerStudio reads as PSS/E RAW, and
@@ -20,7 +23,7 @@ use std::process::ExitCode;
 use ps_study::{LoadFlowRun, Silent, api};
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]";
+const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] [--sv <out.xml>]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -91,6 +94,30 @@ fn imported(
     Ok(out.to_string())
 }
 
+/// The current time in UTC, ISO 8601 to the second.
+fn iso_now() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs()) as i64;
+    let (days, rem) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
 /// Arguments that are not flags or flag values.
 fn positional(args: &[String]) -> Vec<String> {
     let mut out = Vec::new();
@@ -101,7 +128,7 @@ fn positional(args: &[String]) -> Vec<String> {
         } else if a.starts_with("--") {
             skip = matches!(
                 a.as_str(),
-                "--raw" | "--out" | "--solution" | "--options" | "--tol" | "--repeat"
+                "--raw" | "--out" | "--solution" | "--sv" | "--options" | "--tol" | "--repeat"
             );
         } else {
             out.push(a.clone());
@@ -216,10 +243,63 @@ fn run(args: &[String]) -> Result<String, String> {
             )
         }
         Some("cgmes") => {
-            let paths: Vec<String> = args[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect();
+            let paths = positional(args);
             let t0 = ps_num::clock::now_ms();
             let files = ps_io::files::read_paths(&paths).map_err(|e| e.to_string())?;
             let imp = ps_io::cgmes::import(&files).map_err(|e| e.to_string())?;
+            if let Some(path) = value(args, "--sv") {
+                // State variables of the model's load flow, for the files it was read from.
+                let settings = ps_model::study::LoadFlowSettings {
+                    tolerance: 1e-8,
+                    max_iter: 50,
+                    ..Default::default()
+                };
+                let start: Option<Vec<Option<(f64, f64)>>> = flag(args, "--warm").then(|| {
+                    imp.model
+                        .nodes
+                        .iter()
+                        .map(|n| (n.v0 > 0.0).then(|| (n.v0, n.angle0.to_radians())))
+                        .collect()
+                });
+                let (calc, sol, report) = ps_study::loadflow::solve(
+                    &imp.model,
+                    &LoadFlowRun {
+                        settings,
+                        start,
+                        ..Default::default()
+                    },
+                );
+                if !report.converged {
+                    return Err(format!("the load flow does not converge: {}", report.message));
+                }
+                let state = ps_study::exchange::sv_state(&imp.model, &calc, &sol, &report);
+                if let Some(out) = value(args, "--solution") {
+                    // The state by element: voltage (p.u. of each end's node, degrees) and power into each terminal.
+                    let mut elements = serde_json::Map::new();
+                    for (id, flows) in &state.flows {
+                        elements.insert(id.clone(), json!(flows));
+                    }
+                    let nodes: serde_json::Map<String, Value> = imp
+                        .model
+                        .nodes
+                        .iter()
+                        .zip(&state.node_v)
+                        .filter_map(|(n, v)| Some((n.id.clone(), json!(v.as_ref()?))))
+                        .collect();
+                    let solution = json!({ "flows": elements, "nodes": nodes });
+                    std::fs::write(out, solution.to_string()).map_err(|e| format!("{out}: {e}"))?;
+                }
+                let opt = ps_io::cgmes_sv::Options {
+                    created: iso_now(),
+                    description: "Load flow by PowerStudio".into(),
+                };
+                let sv = ps_io::cgmes_sv::write(&files, &imp.model, &state, &opt)?;
+                std::fs::write(path, &sv.text).map_err(|e| format!("{path}: {e}"))?;
+                for note in &sv.notes {
+                    eprintln!("note: {note}");
+                }
+                return Ok(json!({ "written": path, "counts": sv.counts }).to_string());
+            }
             imported(&imp.model, &imp.report, ps_num::clock::now_ms() - t0, args)
         }
         Some("psse") => {
@@ -276,7 +356,7 @@ fn run(args: &[String]) -> Result<String, String> {
             }
         }
         Some("inspect") => {
-            let paths: Vec<String> = args[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect();
+            let paths = positional(args);
             let t0 = ps_num::clock::now_ms();
             let files = ps_io::files::read_paths(&paths).map_err(|e| e.to_string())?;
             let mut graph = ps_io::rdf::Graph::new();

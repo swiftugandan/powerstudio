@@ -553,8 +553,14 @@ PSS/E RAW export (versions 33 and 35) is done: every reference model written and
 every node voltage to 1e-14 p.u., and PowSyBl reads all 64 exported files to PowerStudio's solution within 4.2e-11
 p.u.
 
-Still to do in phase 2: CGMES SSH/SV export, validated by reloading in PowSyBl; opening CGMES and RAW files in the
-app with the import report and validation shown to the user.
+CGMES SV export is done: every conformity configuration's exported SV reads back to the solved state (a restart
+needs no iteration), and PowSyBl reads every exported flow exactly. Writing it showed that the starting voltage of a
+three-winding star point can be solved exactly from its windings, so restarts from stored solutions now need no
+iteration on those either.
+
+Still to do in phase 2: SSH export (it carries edited set points, which arrive with the workspace on the model in
+phase 4, and is scheduled there); opening CGMES and RAW files in the app with the import report and validation shown
+to the user.
 
 ## 12. Risks
 
