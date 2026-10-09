@@ -96,5 +96,13 @@ export class Canvas2DRenderer {
     }
   }
 
+  /** The current frame's pixels. @param {Camera} camera @param {Palette} palette @param {number} dpr
+   * @returns {Promise<{ width: number, height: number, rgba: Uint8ClampedArray }>} */
+  async snapshot(camera, palette, dpr) {
+    this.draw(camera, palette, dpr);
+    const { width, height } = this.canvas;
+    return { width, height, rgba: this.ctx.getImageData(0, 0, width, height).data };
+  }
+
   destroy() { this.list = null; }
 }

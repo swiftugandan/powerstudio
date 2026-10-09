@@ -22,8 +22,8 @@ const sets = [
     ['headed, angle vulkan, no surface', { channel: 'chromium', headless: false, args: ['--enable-unsafe-webgpu', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface', '--use-webgpu-adapter=swiftshader'] }],
   ] : []),
 ];
-console.log('| Flags | Backend | Detail or reason | Blue pixel share | Console errors |');
-console.log('| --- | --- | --- | --- | --- |');
+console.log('| Flags | Backend | Detail or reason | Blue share, screenshot | Blue share, renderer readback | Console errors |');
+console.log('| --- | --- | --- | --- | --- | --- |');
 for (const [label, opts] of sets) {
   let row;
   try {
@@ -37,10 +37,12 @@ for (const [label, opts] of sets) {
     await page.waitForTimeout(1500);
     const f = await page.evaluate(() => ({ b: /** @type {any} */ (window).powerstudio.backend, d: /** @type {any} */ (window).powerstudio.backendDetail, r: /** @type {any} */ (window).powerstudio.fallbackReason }));
     const img = decodePNG(await page.locator('#viewport').screenshot());
-    row = [label, f.b, f.d || f.r || '', share(img, [31, 92, 192]).toFixed(4), errors.length ? errors.join('; ').slice(0, 120) : ''];
+    const dataUrl = await page.evaluate(() => /** @type {any} */ (window).powerstudio.snapshot());
+    const frame = decodePNG(Buffer.from(dataUrl.split(',')[1], 'base64'));
+    row = [label, f.b, f.d || f.r || '', share(img, [31, 92, 192]).toFixed(4), share(frame, [31, 92, 192]).toFixed(4), errors.length ? errors.join('; ').slice(0, 120) : ''];
     await browser.close();
   } catch (error) {
-    row = [label, 'launch failed', String(error).split('\n')[0].slice(0, 120), '', ''];
+    row = [label, 'launch failed', String(error).split('\n')[0].slice(0, 120), '', '', ''];
   }
   console.log(`| ${row.join(' | ')} |`);
 }

@@ -23,6 +23,8 @@ Object.defineProperty(window, 'powerstudio', {
     get backendDetail() { return app.viewport.renderer?.detail ?? ''; },
     get fallbackReason() { return app.viewport.fallbackReason; },
     get frames() { return app.viewport.frames; },
+    /** The current frame read back from the active renderer, as a PNG data URL. */
+    snapshot: () => app.viewport.snapshotPNG(),
   }),
 });
 

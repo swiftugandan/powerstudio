@@ -225,6 +225,18 @@ export class Viewport {
     this.invalidate(false);
   }
 
+  /** The frame as the active renderer produced it (WebGPU: read back from the GPU), as a PNG data URL. */
+  async snapshotPNG() {
+    const r = this.renderer;
+    if (!r) return '';
+    if (this.sceneDirty) this.render();
+    const frame = await r.snapshot(this.camera, this.app.palette, this.dpr);
+    const canvas = document.createElement('canvas');
+    canvas.width = frame.width; canvas.height = frame.height;
+    /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d')).putImageData(new ImageData(new Uint8ClampedArray(frame.rgba), frame.width, frame.height), 0, 0);
+    return canvas.toDataURL('image/png');
+  }
+
   // ----- Export -----
 
   exportSVG() {

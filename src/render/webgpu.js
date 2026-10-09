@@ -152,11 +152,13 @@ export class WebGPURenderer {
     context.configure({ device, format, alphaMode: 'opaque' });
     const info = adapter.info;
     const detail = info ? [info.vendor, info.architecture, info.isFallbackAdapter ? 'software' : ''].filter(Boolean).join(' · ') : '';
-    return new WebGPURenderer(canvas, device, context, format, detail);
+    return new WebGPURenderer(canvas, adapter, device, context, format, detail);
   }
 
-  /** @param {HTMLCanvasElement} canvas @param {GPUDevice} device @param {GPUCanvasContext} context @param {GPUTextureFormat} format @param {string} detail */
-  constructor(canvas, device, context, format, detail) {
+  /** @param {HTMLCanvasElement} canvas @param {GPUAdapter} adapter @param {GPUDevice} device @param {GPUCanvasContext} context @param {GPUTextureFormat} format @param {string} detail */
+  constructor(canvas, adapter, device, context, format, detail) {
+    /** Held for the renderer's lifetime so the adapter (and the instance behind it) is not collected. */
+    this.adapter = adapter;
     this.backend = /** @type {const} */ ('webgpu');
     this.label = 'WebGPU';
     this.detail = detail;
@@ -273,11 +275,41 @@ export class WebGPURenderer {
 
   /** @param {Camera} camera @param {Palette} palette @param {number} dpr */
   draw(camera, palette, dpr) {
+    this.encode(camera, palette, dpr, this.context.getCurrentTexture().createView());
+  }
+
+  /**
+   * Renders the current view into a texture and reads it back: the frame exactly as the GPU produced it, independent
+   * of how the browser composites the canvas. @param {Camera} camera @param {Palette} palette @param {number} dpr
+   * @returns {Promise<{ width: number, height: number, rgba: Uint8ClampedArray }>}
+   */
+  async snapshot(camera, palette, dpr) {
+    const w = this.canvas.width, h = this.canvas.height, device = this.device;
+    const target = device.createTexture({ size: [w, h], format: this.format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+    this.encode(camera, palette, dpr, target.createView());
+    const bytesPerRow = Math.ceil(w * 4 / 256) * 256;
+    const buffer = device.createBuffer({ size: bytesPerRow * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const encoder = device.createCommandEncoder();
+    encoder.copyTextureToBuffer({ texture: target }, { buffer, bytesPerRow }, [w, h]);
+    device.queue.submit([encoder.finish()]);
+    await buffer.mapAsync(GPUMapMode.READ);
+    const src = new Uint8Array(buffer.getMappedRange()), rgba = new Uint8ClampedArray(w * h * 4);
+    const bgra = this.format.startsWith('bgra');
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const i = y * bytesPerRow + x * 4, o = (y * w + x) * 4;
+      rgba[o] = src[i + (bgra ? 2 : 0)]; rgba[o + 1] = src[i + 1]; rgba[o + 2] = src[i + (bgra ? 0 : 2)]; rgba[o + 3] = 255;
+    }
+    buffer.unmap(); buffer.destroy(); target.destroy();
+    return { width: w, height: h, rgba };
+  }
+
+  /** @param {Camera} camera @param {Palette} palette @param {number} dpr @param {GPUTextureView} resolveTarget */
+  encode(camera, palette, dpr, resolveTarget) {
     const w = this.canvas.width, h = this.canvas.height;
     this.device.queue.writeBuffer(this.uniform, 0, new Float32Array([w, h, camera.cx, camera.cy, camera.zoom * dpr, dpr, 20, 0, ...palette.bg, ...palette.grid]));
     const encoder = this.device.createCommandEncoder();
     const pass = encoder.beginRenderPass({ colorAttachments: [{
-      view: /** @type {GPUTexture} */ (this.msaa).createView(), resolveTarget: this.context.getCurrentTexture().createView(),
+      view: /** @type {GPUTexture} */ (this.msaa).createView(), resolveTarget,
       clearValue: { r: palette.bg[0], g: palette.bg[1], b: palette.bg[2], a: 1 }, loadOp: 'clear', storeOp: 'discard',
     }] });
     pass.setBindGroup(0, this.bindGroup);
