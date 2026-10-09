@@ -7,6 +7,9 @@
 //! ps inspect <file|folder|archive>... [--props]              list the CIM classes in CGMES files
 //! ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] import CGMES, print the import report (and a load flow)
 //! ps psse <case.raw> [--lf] [--warm] [--model]                import PSS/E RAW (versions 33 and 35), the same way
+//! ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]
+//!                                                             write any model PowerStudio reads as PSS/E RAW, and
+//!                                                             the engine's load flow by RAW bus number
 //! ```
 //!
 //! `kind` is one of `loadflow`, `shortcircuit`, `contingency`, `contingency_plan`, `contingency_chunk` or `rms`;
@@ -17,7 +20,7 @@ use std::process::ExitCode;
 use ps_study::{LoadFlowRun, Silent, api};
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model]\n       ps psse <case.raw> [--lf] [--warm] [--model]";
+const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -86,6 +89,54 @@ fn imported(
         out["loadflow"] = serde_json::to_value(&r).map_err(|e| e.to_string())?;
     }
     Ok(out.to_string())
+}
+
+/// Arguments that are not flags or flag values.
+fn positional(args: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut skip = true; // the command itself
+    for a in args {
+        if skip {
+            skip = false;
+        } else if a.starts_with("--") {
+            skip = matches!(
+                a.as_str(),
+                "--raw" | "--out" | "--solution" | "--options" | "--tol" | "--repeat"
+            );
+        } else {
+            out.push(a.clone());
+        }
+    }
+    out
+}
+
+/// A model from any format PowerStudio reads, by file extension: `.json` (PowerStudio), `.m` (MATPOWER), `.raw`
+/// (PSS/E); anything else is read as CGMES (XML files, folders or zip archives).
+fn load_any(paths: &[String]) -> Result<ps_model::Model, String> {
+    let first = paths.first().ok_or(USAGE)?;
+    let ext = std::path::Path::new(first)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("json") => Ok(ps_io::powerstudio::parse(&read(first)?)
+            .map_err(|e| format!("{first}: {e}"))?
+            .model),
+        Some("m") => {
+            let case = ps_io::matpower::parse(&read(first)?).map_err(|e| format!("{first}: {e}"))?;
+            Ok(ps_io::matpower_model::to_model(&case).model)
+        }
+        Some("raw") => {
+            let bytes = std::fs::read(first).map_err(|e| format!("{first}: {e}"))?;
+            Ok(ps_io::psse_model::import(&ps_io::psse::decode(&bytes), first)
+                .map_err(|e| format!("{first}: {e}"))?
+                .model)
+        }
+        _ => {
+            let files = ps_io::files::read_paths(paths).map_err(|e| e.to_string())?;
+            Ok(ps_io::cgmes::import(&files).map_err(|e| e.to_string())?.model)
+        }
+    }
 }
 
 fn read(path: &str) -> Result<String, String> {
@@ -174,12 +225,55 @@ fn run(args: &[String]) -> Result<String, String> {
         Some("psse") => {
             let path = args.get(1).ok_or(USAGE)?;
             let t0 = ps_num::clock::now_ms();
-            let text = read(path)?;
+            let text = ps_io::psse::decode(&std::fs::read(path).map_err(|e| format!("{path}: {e}"))?);
             let name = std::path::Path::new(path)
                 .file_name()
                 .map_or(path.as_str(), |n| n.to_str().unwrap_or(path));
             let imp = ps_io::psse_model::import(&text, name).map_err(|e| format!("{path}: {e}"))?;
             imported(&imp.model, &imp.report, ps_num::clock::now_ms() - t0, args)
+        }
+        Some("export") => {
+            let inputs: Vec<String> = positional(args);
+            let model = load_any(&inputs)?;
+            let rev: u32 = value(args, "--raw")
+                .ok_or(USAGE)?
+                .parse()
+                .map_err(|e| format!("--raw: {e}"))?;
+            let written = ps_io::psse_write::write(&model, &ps_io::psse_write::Options { rev, voltages: None })?;
+            for note in &written.notes {
+                eprintln!("note: {note}");
+            }
+            if let Some(path) = value(args, "--solution") {
+                // The engine's own load flow of the model, by RAW bus number: [V p.u., angle degrees].
+                let settings = ps_model::study::LoadFlowSettings {
+                    tolerance: 1e-8,
+                    max_iter: 50,
+                    ..Default::default()
+                };
+                let (calc, sol, report) = ps_study::loadflow::solve(
+                    &model,
+                    &LoadFlowRun {
+                        settings,
+                        ..Default::default()
+                    },
+                );
+                let mut buses = serde_json::Map::new();
+                for (k, bus) in written.bus_of_node.iter().enumerate() {
+                    let (Some(bus), Some(b)) = (bus, calc.topo.bus_of(ps_model::NodeRef(k as u32))) else {
+                        continue;
+                    };
+                    buses.insert(bus.to_string(), json!([sol.vm[b], sol.va[b].to_degrees()]));
+                }
+                let out = json!({ "converged": report.converged, "message": report.message, "buses": buses });
+                std::fs::write(path, out.to_string()).map_err(|e| format!("{path}: {e}"))?;
+            }
+            match value(args, "--out") {
+                Some(path) => {
+                    std::fs::write(path, &written.text).map_err(|e| format!("{path}: {e}"))?;
+                    Ok(format!("{path}: {} bytes", written.text.len()))
+                }
+                None => Ok(written.text),
+            }
         }
         Some("inspect") => {
             let paths: Vec<String> = args[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect();

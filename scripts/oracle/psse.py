@@ -82,7 +82,9 @@ def fields(line):
 def sections(path):
     """The records of a RAW file up to the transformers, as lists of fields (a transformer's four or five lines are
     joined into one list of lines)."""
-    lines = [line for line in path.read_text(encoding="latin-1").splitlines() if not line.lstrip().startswith("@!")]
+    # Split on newlines only: Latin-1 text can hold characters Python's splitlines() also breaks at.
+    text = path.read_bytes().decode("latin-1")
+    lines = [line.rstrip("\r") for line in text.split("\n") if not line.lstrip().startswith("@!")]
     rev = int(float(fields(lines[0])[2]))
     names = ["bus", "load", "fixed_shunt", "generator", "branch", "transformer"]
     if rev >= 35:

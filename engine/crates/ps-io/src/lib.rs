@@ -10,6 +10,7 @@ pub mod matpower_model;
 pub mod powerstudio;
 pub mod psse;
 pub mod psse_model;
+pub mod psse_write;
 pub mod rdf;
 pub mod report;
 pub mod zip;

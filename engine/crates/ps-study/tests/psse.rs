@@ -25,19 +25,6 @@ const FLOW_TOL: f64 = 1e-3;
 /// Imported data, relative to the value (absolute below 1).
 const DATA_TOL: f64 = 1e-9;
 
-fn import(case: &Value) -> ps_io::psse_model::Imported {
-    let cases = json("tests/oracle/psse-cases.json");
-    let file = cases["archives"][case["archive"].as_str().unwrap()]["file"]
-        .as_str()
-        .unwrap();
-    let path = repo(&format!(".cache/reference/{file}"));
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("{}: {e}. Run node scripts/fetch-reference.mjs first.", path.display()));
-    // RAW files are ASCII or Latin-1; names are the only text that can carry other bytes.
-    let text: String = bytes.iter().map(|&b| char::from(b)).collect();
-    ps_io::psse_model::import(&text, file).unwrap_or_else(|e| panic!("{file}: {e}"))
-}
-
 fn compare_import(m: &Model, golden: &Value, w: &mut Worst) {
     let im = &golden["imported"];
     let missing = |w: &mut Worst, what: &str, id: &str| w.check(&format!("{what} missing"), id, 1.0, 0.0);
@@ -358,7 +345,7 @@ fn psse_cases_match_powsybl() {
     for case in cases["cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
         let golden = golden(&format!("psse-{name}"));
-        let imported = import(case);
+        let imported = psse_import(case);
         eprintln!("{name}:");
         let mut w = Worst::default();
         compare_import(&imported.model, &golden, &mut w);

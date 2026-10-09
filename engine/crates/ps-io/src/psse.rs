@@ -333,6 +333,14 @@ fn begins(comment: &str) -> Option<Section> {
     all.copied().find(|s| s.name() == name)
 }
 
+/// The text of a RAW file's bytes: UTF-8 when they are valid UTF-8, otherwise Latin-1 (what older tools write).
+pub fn decode(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(_) => bytes.iter().map(|&b| char::from(b)).collect(),
+    }
+}
+
 /// Reads a RAW file.
 pub fn parse(text: &str) -> Result<RawCase, ParseError> {
     let lines: Vec<&str> = text.lines().collect();

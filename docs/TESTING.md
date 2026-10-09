@@ -71,6 +71,16 @@ Mvar and imported data to 1e-9 relative, and print the worst difference per quan
 cd engine && cargo test --release -p ps-study --test psse -- --nocapture
 ```
 
+The PSS/E RAW export is checked both ways. `engine/crates/ps-study/tests/roundtrip.rs` (part of `npm run test:engine`)
+writes every reference model as RAW 33 and 35, reads it back with PowerStudio's importer and compares every node's
+voltage. `scripts/oracle/export_check.py` has PowSyBl read the same files and compares its load flow with
+PowerStudio's; it needs the release `ps` program and writes nothing into the repository:
+
+```sh
+cd engine && cargo build --release -p ps-cli && cd ..
+.venv/bin/python scripts/oracle/export_check.py    # every CGMES and PSS/E case, both versions
+```
+
 A case whose files no load flow can solve is marked `"loadflow": false` with the reason in `why`; its import is
 still compared. `ps cgmes <files>` and `ps psse <file.raw>` print an import's report, validation and, with `--lf`,
 a load flow, which is the quickest way to look at a case that fails.

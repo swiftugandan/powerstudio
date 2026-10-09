@@ -598,6 +598,9 @@ version = "0.2.0"
 dependencies = [
  "miniz_oxide",
  "ps-model",
+ "ps-net",
+ "ps-num",
+ "ps-topology",
  "quick-xml",
  "serde",
  "serde_json",

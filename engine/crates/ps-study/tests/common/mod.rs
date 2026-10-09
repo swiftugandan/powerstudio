@@ -58,3 +58,38 @@ impl Worst {
         self.rows.iter().find(|r| r.0 == what).map_or(0.0, |r| r.1)
     }
 }
+
+/// The files of a CGMES case in tests/oracle/cgmes-cases.json, read from its archive in `.cache/reference`.
+pub fn cgmes_files(case: &serde_json::Value) -> Vec<ps_io::files::File> {
+    let cases = json("tests/oracle/cgmes-cases.json");
+    let archive = &cases["archives"][case["archive"].as_str().unwrap()];
+    let path = repo(&format!(".cache/reference/{}", archive["file"].as_str().unwrap()));
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}. Run node scripts/fetch-reference.mjs first.", path.display()));
+    let prefixes: Vec<&str> = case["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e.as_str().unwrap())
+        .collect();
+    ps_io::zip::read_matching(&bytes, &prefixes)
+        .unwrap()
+        .into_iter()
+        .map(|e| ps_io::files::File {
+            name: e.name,
+            data: e.data,
+        })
+        .collect()
+}
+
+/// A PSS/E case in tests/oracle/psse-cases.json, read from `.cache/reference` and imported.
+pub fn psse_import(case: &serde_json::Value) -> ps_io::psse_model::Imported {
+    let cases = json("tests/oracle/psse-cases.json");
+    let file = cases["archives"][case["archive"].as_str().unwrap()]["file"]
+        .as_str()
+        .unwrap();
+    let path = repo(&format!(".cache/reference/{file}"));
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}. Run node scripts/fetch-reference.mjs first.", path.display()));
+    ps_io::psse_model::import(&ps_io::psse::decode(&bytes), file).unwrap_or_else(|e| panic!("{file}: {e}"))
+}

@@ -25,28 +25,6 @@ const V_TOL: f64 = 1e-6;
 const ANGLE_TOL: f64 = 1e-4;
 const FLOW_TOL: f64 = 1e-3;
 
-fn case_files(case: &Value) -> Vec<ps_io::files::File> {
-    let cases = json("tests/oracle/cgmes-cases.json");
-    let archive = &cases["archives"][case["archive"].as_str().unwrap()];
-    let path = repo(&format!(".cache/reference/{}", archive["file"].as_str().unwrap()));
-    let bytes = std::fs::read(&path)
-        .unwrap_or_else(|e| panic!("{}: {e}. Run node scripts/fetch-reference.mjs first.", path.display()));
-    let prefixes: Vec<&str> = case["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|e| e.as_str().unwrap())
-        .collect();
-    ps_io::zip::read_matching(&bytes, &prefixes)
-        .unwrap()
-        .into_iter()
-        .map(|e| ps_io::files::File {
-            name: e.name,
-            data: e.data,
-        })
-        .collect()
-}
-
 /// PowSyBl's dangling-line convention: a boundary line's shunt admittance all at its network end.
 fn boundary_shunts_at_network_end(m: &Model) -> Model {
     let mut m = m.clone();
@@ -287,7 +265,7 @@ fn cgmes_configurations_match_powsybl() {
     for case in cases["cases"].as_array().unwrap() {
         let name = case["name"].as_str().unwrap();
         let golden = golden(&format!("cgmes-{name}"));
-        let imported = ps_io::cgmes::import(&case_files(case)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let imported = ps_io::cgmes::import(&cgmes_files(case)).unwrap_or_else(|e| panic!("{name}: {e}"));
         eprintln!("{name}:");
         let mut w = Worst::default();
         compare_import(&imported.model, &golden, &mut w);

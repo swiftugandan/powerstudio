@@ -229,8 +229,28 @@ tap changers, and the load flow at every bus and equipment terminal. Every case 
 p.u. or better (IEEE 300 to 2e-12 p.u.); `docs/research/sources.md` lists the corrections the comparison makes to
 PowSyBl's network and why.
 
+## PSS/E RAW export
+
+`ps-io` (`psse_write.rs`) writes any model as a RAW file of version 33 or 35. RAW is bus-branch, so nodes joined by
+closed switches become one bus and open switches are left out. Each branch is written from the engine's own per-unit
+form of its element (`ps-net`), which keeps the file's solution the engine's: the ideal transformer's ratio and angle
+become WINDV1 and ANG1 (CW, CZ and CM all 1), the magnetising admittance moves from behind the ideal transformer to
+bus I, divided by the ratio squared, and an admittance a record has no place for (at a transformer's other end, at a
+three-winding transformer's windings 2 and 3, a switched shunt's conductance) becomes a fixed shunt at the same bus.
+A three-winding transformer's star impedances become the pairwise ones (Z12 = Z1 + Z2), and branches with an open end
+get a bus of their own for that end. Tap ranges and controls are written for two-winding transformers; a machine with
+fixed reactive output on a voltage-controlled bus is pinned there with QT = QB = QG. Names are written in ASCII.
+Identifiers that came from RAW (`B12`, `B12-L1`, `L-1-2-1`) keep their numbers; other models get fresh ones. The
+export returns notes on everything it approximated: impedance that varies with tap position, the tap ranges of
+three-winding transformers, asymmetric static var compensator ranges, controls without a positive voltage band.
+
+**Checked by** `engine/crates/ps-study/tests/roundtrip.rs`, which writes every reference model (the samples, MATPOWER
+cases up to 2,869 buses, the CGMES configurations and the PSS/E files) in both versions, reads the files back and
+solves them: every node keeps its voltage to 1e-14 p.u. And by `scripts/oracle/export_check.py`, which has PowSyBl
+read the same files: its load flow agrees with PowerStudio's on all 64 files to 4.2e-11 p.u. or better.
+
 The app does not open CGMES or RAW files yet; `ps cgmes <files> [--lf]` and `ps psse <file.raw> [--lf]` import them
-and print the report, the validation and a load flow.
+and print the report, the validation and a load flow, and `ps export <input>... --raw 33|35` writes RAW.
 
 ## Requests
 

@@ -549,8 +549,12 @@ The comparisons found and fixed two engine faults besides the importers' own: th
 tap changers (PSS/E and CGMES), and the reactive output of several machines on one bus is now split exactly as
 MATPOWER splits it (the reference machine used to take all of a slack bus's reactive power).
 
-Still to do in phase 2: PSS/E RAW and CGMES SSH/SV export, validated by reloading in PowSyBl and in PowerStudio's
-own importers; opening CGMES and RAW files in the app with the import report and validation shown to the user.
+PSS/E RAW export (versions 33 and 35) is done: every reference model written and read back by PowerStudio keeps
+every node voltage to 1e-14 p.u., and PowSyBl reads all 64 exported files to PowerStudio's solution within 4.2e-11
+p.u.
+
+Still to do in phase 2: CGMES SSH/SV export, validated by reloading in PowSyBl; opening CGMES and RAW files in the
+app with the import report and validation shown to the user.
 
 ## 12. Risks
 
