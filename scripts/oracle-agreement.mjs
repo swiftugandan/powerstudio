@@ -4,11 +4,12 @@
 import { readFileSync } from 'node:fs';
 import { EngineHost } from '../src/engine/host.js';
 import { Studies } from '../src/engine/studies.js';
-import { importMatpower } from '../src/core/matpower.js';
+import { importFiles } from '../src/engine/exchange.js';
 
 const read = (/** @type {string} */ p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 /** The engine the app ships, built by npm run build:engine. */
-const engine = new Studies(await EngineHost.create(readFileSync(new URL('../src/engine/powerstudio-engine.wasm', import.meta.url))));
+const host = await EngineHost.create(readFileSync(new URL('../src/engine/powerstudio-engine.wasm', import.meta.url)));
+const engine = new Studies(host);
 const golden = (/** @type {string} */ n) => JSON.parse(read(`tests/oracle/golden/${n}.json`));
 const input = (/** @type {string} */ n) => JSON.parse(read(`tests/oracle/inputs/${n}.json`));
 const e = (/** @type {number} */ v) => v.toExponential(1);
@@ -18,7 +19,7 @@ console.log('| --- | --- | --- |');
 for (const c of ['case14', 'case30', 'case118']) {
   const g = golden(`matpower-${c}`);
   const t0 = performance.now();
-  const r = engine.loadflow(importMatpower(read(`tests/fixtures/${c}.m`)).doc, { tolerance: 1e-8 });
+  const r = engine.loadflow(importFiles(host, [{ name: `${c}.m`, bytes: new TextEncoder().encode(read(`tests/fixtures/${c}.m`)) }]).doc, { tolerance: 1e-8 });
   const ms = performance.now() - t0;
   let dv = 0, da = 0;
   g.bus.forEach((/** @type {number} */ b, /** @type {number} */ k) => { const x = /** @type {any} */ (r.buses.find(y => y.id === `B${b}`)); dv = Math.max(dv, Math.abs(x.vm - g.vm[k])); da = Math.max(da, Math.abs(x.va - g.va[k])); });

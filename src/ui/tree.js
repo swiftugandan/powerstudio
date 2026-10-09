@@ -79,7 +79,7 @@ export class ModelTree {
     li.innerHTML = `${r.kind === 'group' ? icon('chevronDown', 14).replace('class="icon"', 'class="icon twisty"') : '<span style="width:14px;flex:none"></span>'}`
       + `${icon(r.iconName, 16).replace('class="icon"', 'class="icon glyph"')}<span class="label">${esc(r.label)}</span>`
       + (r.status ? `<span class="status" style="background:${r.status}"></span>` : '')
-      + `<span class="meta">${esc(r.meta)}</span>`;
+      + `<span class="meta" title="${esc(r.meta)}">${esc(r.meta)}</span>`;
     return li;
   }
 

@@ -1,0 +1,665 @@
+//! Canonical model → PowerStudio document (the editor's format, `src/core/catalog.js`).
+//!
+//! The document is a bus-branch format with seven classes, so the conversion reduces what it cannot hold and says so:
+//! nodes joined by closed switches become one busbar; a three-winding transformer becomes a star busbar with three
+//! two-winding transformers; a transformer whose impedance has a negative part or no reactance, which the document's
+//! uk and uR cannot express, gets a line from an intermediate busbar for that part; static var compensators
+//! become machines without active power; switched shunts keep their present admittance.
+//!
+//! Electrical values come from the engine's own per-unit form of each element (`ps-net`), so what the document can
+//! express it expresses exactly: a transformer's present ratio becomes its rated HV voltage, its impedance uk and uR on
+//! its rating, and a line's shunt admittance that is not symmetric goes into shunt elements at its ends. The document
+//! splits a transformer's magnetising admittance evenly between its windings; where the model's is not even, the
+//! difference is small and counted in the notes. Whoever calls this measures how far the document's load flow is from
+//! the model's (`ps-study`'s `exchange::editor_fidelity`).
+
+use std::collections::{HashMap, HashSet};
+
+use ps_model::{Class, MachineControl, Model, NodeRef, Transformer2, Winding};
+use ps_net::{TransformerOptions, TransformerPu, line_pu, shunt_admittance, transformer2_pu, transformer3_winding_pu};
+use ps_num::C64;
+use serde_json::{Map, Value, json};
+
+/// Vector groups the document accepts (`VECTOR_GROUPS` in `src/core/catalog.js`; a test keeps the two equal).
+pub const VECTOR_GROUPS: [&str; 17] = [
+    "YNyn0", "YNd1", "YNd5", "YNd11", "Dyn1", "Dyn5", "Dyn11", "Yd1", "Yd5", "Yd11", "Dy1", "Dy5", "Dy11", "Yy0",
+    "YNy0", "Yyn0", "Dd0",
+];
+
+/// Where a busbar the conversion adds (no node stands for it) gets its starting voltage.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Internal {
+    /// The star point of three-winding transformer `row`.
+    Star(usize),
+    /// Behind an ideal transformer from busbar `bus`: that busbar's voltage over `ratio`, lagging by `shift` radians.
+    Behind {
+        /// The busbar on the other side of the ideal transformer.
+        bus: String,
+        /// Its ratio.
+        ratio: f64,
+        /// Its phase shift, radians.
+        shift: f64,
+    },
+}
+
+/// A converted model.
+#[derive(Debug, Clone)]
+pub struct Converted {
+    /// The document, ready for the editor's import gate.
+    pub doc: Value,
+    /// The busbar standing for each node (`None` for removed nodes).
+    pub bus_of_node: Vec<Option<String>>,
+    /// Busbars the conversion added, and where their starting voltage comes from.
+    pub internal: Vec<(String, Internal)>,
+    /// What the conversion reduced or approximated, in plain words.
+    pub notes: Vec<String>,
+}
+
+const DEG: f64 = 180.0 / std::f64::consts::PI;
+/// Reactive limits beyond this are written as this: the document holds finite numbers.
+const Q_LIMIT: f64 = 99_999.0;
+
+struct Doc<'a> {
+    m: &'a Model,
+    sb: f64,
+    elements: Vec<Value>,
+    ids: HashSet<String>,
+    /// Busbar id and base voltage of every bus-branch bus.
+    buses: Vec<(String, f64)>,
+    bus_of: Vec<Option<usize>>,
+    counts: HashMap<&'static str, usize>,
+    internal: Vec<(String, Internal)>,
+}
+
+impl Doc<'_> {
+    fn count(&mut self, what: &'static str) {
+        *self.counts.entry(what).or_default() += 1;
+    }
+
+    /// A unique identifier, `wanted` when free.
+    fn id(&mut self, wanted: &str) -> String {
+        let base = if wanted.is_empty() {
+            "E".to_string()
+        } else {
+            wanted.to_string()
+        };
+        let mut id = base.clone();
+        let mut k = 2;
+        while !self.ids.insert(id.clone()) {
+            id = format!("{base}~{k}");
+            k += 1;
+        }
+        id
+    }
+
+    fn bus(&self, node: NodeRef) -> Option<(String, f64)> {
+        self.bus_of
+            .get(node.index())
+            .copied()
+            .flatten()
+            .map(|b| self.buses[b].clone())
+    }
+
+    fn push(&mut self, cls: &str, wanted: &str, name: &str, fields: Value) -> String {
+        let id = self.id(wanted);
+        let mut el = Map::new();
+        el.insert("id".into(), json!(id));
+        el.insert("cls".into(), json!(cls));
+        el.insert("name".into(), json!(name));
+        if let Value::Object(f) = fields {
+            el.extend(f);
+        }
+        self.elements.push(Value::Object(el));
+        id
+    }
+
+    /// A shunt element for an admittance in p.u. on the bus base at `bus` (base voltage `kv`).
+    fn shunt(&mut self, wanted: &str, name: &str, bus: &str, kv: f64, y: C64, on: bool) {
+        if y == C64::ZERO {
+            return;
+        }
+        if y.re < 0.0 {
+            self.count("shunt admittance(s) with negative conductance written without it (the editor's losses are not negative)");
+        }
+        self.push(
+            "shunt",
+            wanted,
+            name,
+            json!({ "bus": bus, "inService": on, "q": y.im * self.sb, "p": (y.re * self.sb).max(0.0), "vn": kv }),
+        );
+    }
+
+    /// A transformer element from a branch's per-unit form between `hv` (base `vh`) and `lv` (base `vl`): the present
+    /// ratio as the rated HV voltage, the impedance as uk and uR on the rating, the magnetising admittance as iron
+    /// losses and no-load current, or as shunt elements where those cannot express it. `None` when the impedance has
+    /// a negative part.
+    #[allow(clippy::too_many_arguments)]
+    fn transformer(
+        &mut self,
+        wanted: &str,
+        name: &str,
+        hv: (&str, f64),
+        lv: (&str, f64),
+        p: &TransformerPu,
+        rating: f64,
+        on: bool,
+        conns: Option<(Winding, Winding)>,
+        extra: Value,
+    ) -> Option<String> {
+        if p.z.re < 0.0 || p.z.im <= 0.0 {
+            // Negative resistance or no positive reactance, as star equivalents and some grid data have, which uk and
+            // uR cannot express: the transformer keeps the ratio, any positive resistance and a small reactance, and a
+            // line from an intermediate busbar on the LV base carries the rest of the impedance.
+            const X_HEAD: f64 = 1e-4;
+            let mid = self.push(
+                "bus",
+                &format!("{wanted}.mid"),
+                name,
+                json!({ "vn": lv.1, "vmin": 0.5, "vmax": 1.5, "zone": "" }),
+            );
+            self.internal.push((
+                mid.clone(),
+                Internal::Behind {
+                    bus: hv.0.to_string(),
+                    ratio: p.ratio,
+                    shift: p.shift,
+                },
+            ));
+            let head = TransformerPu {
+                z: C64::new(p.z.re.max(0.0), X_HEAD),
+                y_to: C64::ZERO,
+                ..*p
+            };
+            let id = self.transformer(wanted, name, hv, (&mid, lv.1), &head, rating, on, conns, extra)?;
+            let zb = lv.1 * lv.1 / self.sb;
+            let (r, x) = (p.z.re.min(0.0) * zb, (p.z.im - X_HEAD) * zb);
+            self.push(
+                "line",
+                &format!("{wanted}.z"),
+                name,
+                json!({
+                    "from": mid, "to": lv.0, "inService": on, "length": 1, "parallel": 1, "r1": r, "x1": x, "b1": 0,
+                    "ratedA": 0, "r0": r.abs(), "x0": x.abs().max(1e-6), "b0": 0,
+                }),
+            );
+            self.shunt(&format!("{wanted}.y2"), name, lv.0, lv.1, p.y_to, on);
+            self.count(
+                "transformer(s) with negative resistance or no positive reactance written with a line for that part",
+            );
+            return Some(id);
+        }
+        let sn = if rating > 0.0 { rating } else { self.sb };
+        let (vn_hv, vn_lv) = (p.ratio * hv.1, lv.1);
+        let uk = p.z.abs() * sn / self.sb * 100.0;
+        let ur = p.z.re * sn / self.sb * 100.0;
+        // Magnetising admittance: the document draws it half at each winding or all at one (behind the ratio on the
+        // HV side), from iron losses and no-load current, which cannot be capacitive or negative. Whatever that cannot
+        // hold goes into shunt elements, which is exact (the HV one moves outside the ratio).
+        let tiny = 1e-12 * (p.y_from.abs() + p.y_to.abs()).max(1e-300);
+        let (placement, held, uneven) = if p.y_to.abs() <= tiny {
+            ("hv", p.y_from, C64::ZERO)
+        } else if p.y_from.abs() <= tiny {
+            ("lv", p.y_to, C64::ZERO)
+        } else if (p.y_from - p.y_to).abs() <= tiny {
+            ("both", p.y_from + p.y_to, C64::ZERO)
+        } else {
+            ("hv", p.y_from, p.y_to)
+        };
+        let (held, rest_hv, rest_lv) = if held.re >= 0.0 && held.im <= 0.0 {
+            (held, C64::ZERO, uneven)
+        } else {
+            (C64::ZERO, p.y_from, p.y_to)
+        };
+        if rest_hv != C64::ZERO || rest_lv != C64::ZERO {
+            let ratio2 = p.ratio * p.ratio;
+            self.shunt(
+                &format!("{wanted}.y1"),
+                name,
+                hv.0,
+                hv.1,
+                rest_hv.scale(1.0 / ratio2),
+                on,
+            );
+            self.shunt(&format!("{wanted}.y2"), name, lv.0, lv.1, rest_lv, on);
+            self.count(
+                "transformer admittance(s) that iron losses and no-load current cannot express written as shunts",
+            );
+        }
+        let (g, b) = (held.re * self.sb / sn, held.im * self.sb / sn);
+        let (pfe, i0) = (held.re * self.sb * 1000.0, (g * g + b * b).sqrt() * 100.0);
+        // The phase shift as a listed vector group where it is a whole clock number; otherwise a clock-0 group and
+        // the rest as the additional shift.
+        let shift = p.shift * DEG;
+        let clock = (shift / 30.0).round();
+        let whole = (shift - 30.0 * clock).abs() < 1e-9;
+        let clock = (clock as i64).rem_euclid(12) as u8;
+        let listed = |c: u8| match conns {
+            Some((a, b)) => group_of(a, b, c).or_else(|| any_group(c)),
+            None => any_group(c),
+        };
+        let (group, extra_shift) = match (whole, listed(clock)) {
+            (true, Some(g)) => (g, 0.0),
+            _ => (listed(0).unwrap_or("YNyn0"), (shift + 180.0).rem_euclid(360.0) - 180.0),
+        };
+        let mut fields = json!({
+            "hv": hv.0, "lv": lv.0, "inService": on, "sn": sn, "vnHV": vn_hv, "vnLV": vn_lv, "uk": uk, "ur": ur,
+            "i0": i0, "pfe": pfe, "magnetising": placement, "vectorGroup": group, "shift": extra_shift, "uk0": uk, "ur0": ur,
+            "tapStep": 0, "tapPos": 0, "tapNeutral": 0, "tapMin": 0, "tapMax": 0,
+        });
+        if let (Value::Object(f), Value::Object(e)) = (&mut fields, extra) {
+            f.extend(e);
+        }
+        Some(self.push("trafo", wanted, name, fields))
+    }
+}
+
+/// Converts a model into a PowerStudio document.
+pub fn to_document(m: &Model) -> Converted {
+    let view = crate::busbranch::reduce(m);
+    let mut d = Doc {
+        m,
+        sb: m.meta.base_mva,
+        elements: Vec::new(),
+        ids: HashSet::new(),
+        buses: Vec::new(),
+        bus_of: view.bus_of.clone(),
+        counts: HashMap::new(),
+        internal: Vec::new(),
+    };
+    let mut notes = Vec::new();
+    if !m.switches.is_empty() {
+        notes.push(format!(
+            "{} switch(es): {} closed ones joined their nodes into one busbar and open ones were left out; the editor has no switches yet.",
+            m.switches.len(),
+            view.closed_switches
+        ));
+    }
+    let sane = |v: f64, d: f64| if v > 0.0 && v < 10.0 { v } else { d };
+    for nodes in &view.nodes {
+        let n = &m.nodes[nodes[0] as usize];
+        // The busbar's name: a busbar section's, else any node's, else its voltage level's, else the node's id.
+        let named = |k: &&u32| !m.nodes[**k as usize].name.is_empty();
+        let section = nodes
+            .iter()
+            .filter(named)
+            .find(|&&k| m.nodes[k as usize].kind == ps_model::NodeKind::BusbarSection);
+        let name = match section.or_else(|| nodes.iter().find(named)) {
+            Some(&k) => m.nodes[k as usize].name.clone(),
+            None => n
+                .voltage_level
+                .and_then(|v| m.voltage_levels.get(v as usize))
+                .filter(|v| !v.name.is_empty())
+                .map_or(n.id.clone(), |v| v.name.clone()),
+        };
+        let zone = n
+            .area
+            .and_then(|a| m.areas.get(a as usize))
+            .map_or(String::new(), |a| a.name.clone());
+        let kv = if n.nominal_kv > 0.0 { n.nominal_kv } else { 1.0 };
+        let id = d.push(
+            "bus",
+            &n.id,
+            &name,
+            json!({ "vn": kv, "vmin": sane(n.v_min, 0.95), "vmax": sane(n.v_max, 1.05), "zone": zone }),
+        );
+        d.buses.push((id, kv));
+    }
+    let bus_of_node: Vec<Option<String>> = view.bus_of.iter().map(|b| b.map(|b| d.buses[b].0.clone())).collect();
+    lines(&mut d);
+    transformers2(&mut d);
+    transformers3(&mut d);
+    injections(&mut d);
+    let mut counted: Vec<(&&str, &usize)> = d.counts.iter().collect();
+    counted.sort();
+    notes.extend(counted.into_iter().map(|(what, k)| format!("{k} {what}.")));
+    let doc = json!({
+        "format": "powerstudio",
+        "version": 1,
+        "name": m.meta.name,
+        "description": m.meta.description,
+        "baseMVA": m.meta.base_mva,
+        "frequency": m.meta.frequency_hz,
+        "elements": d.elements,
+    });
+    Converted {
+        doc,
+        bus_of_node,
+        internal: d.internal,
+        notes,
+    }
+}
+
+/// The admittance seen at one end of a branch whose other end is open: its own end shunt in parallel with the series
+/// impedance and the open end's shunt, in p.u. on that end's base.
+fn open_end_equivalent(p: &TransformerPu, open_end: u8) -> C64 {
+    let through = |y_far: C64| {
+        if y_far == C64::ZERO {
+            C64::ZERO
+        } else {
+            (p.z + y_far.inv()).inv()
+        }
+    };
+    if open_end == 2 {
+        // Seen from end 1, behind the ideal transformer.
+        (p.y_from + through(p.y_to)).scale(1.0 / (p.ratio * p.ratio))
+    } else {
+        p.y_to + through(p.y_from)
+    }
+}
+
+fn rating_ka(limits: &[ps_model::CurrentLimit]) -> f64 {
+    limits
+        .iter()
+        .filter(|l| l.end == 1 && l.duration_s.is_none())
+        .map(|l| l.amps / 1000.0)
+        .fold(0.0, f64::max)
+}
+
+fn lines(d: &mut Doc) {
+    let m = d.m;
+    for (k, l) in m.lines.iter().enumerate() {
+        if !m.alive(Class::Line, k) {
+            continue;
+        }
+        let (Some(a), Some(b)) = (d.bus(l.node1), d.bus(l.node2)) else {
+            continue;
+        };
+        let p = line_pu(l, a.1, b.1, d.sb, ps_net::Seq::Positive);
+        match l.open {
+            [true, true] => {
+                d.count("branch(es) open at both ends left out");
+                continue;
+            }
+            [false, true] | [true, false] => {
+                let (end, bus) = if l.open[1] { (2, &a) } else { (1, &b) };
+                let y = open_end_equivalent(&p, end);
+                d.shunt(&l.id, &l.name, &bus.0.clone(), bus.1, y, l.in_service);
+                d.count("branch(es) open at one end written as the shunt they present at the other");
+                continue;
+            }
+            _ => {}
+        }
+        if a.0 == b.0 {
+            d.count("branch(es) whose ends fell on one busbar left out");
+            continue;
+        }
+        if (a.1 - b.1).abs() > 1e-12 * a.1.max(b.1) {
+            // Ends of different base voltage: a transformer at the ratio of the bases, as the per-unit data mean.
+            if d.transformer(
+                &l.id,
+                &l.name,
+                (&a.0, a.1),
+                (&b.0, b.1),
+                &p,
+                d.sb,
+                l.in_service,
+                None,
+                json!({}),
+            )
+            .is_none()
+            {
+                d.count("branch(es) between different voltages that could not be written left out");
+            }
+            continue;
+        }
+        // Charging split evenly where both ends carry it; the rest as shunts at the ends.
+        let (y1, y2) = (C64::new(l.g1, l.b1), C64::new(l.g2, l.b2));
+        let b_sym = if y1.im > 0.0 && y2.im > 0.0 {
+            2.0 * y1.im.min(y2.im)
+        } else {
+            0.0
+        };
+        let zb = a.1 * a.1 / d.sb;
+        let id = d.push(
+            "line",
+            &l.id,
+            &l.name,
+            json!({
+                "from": a.0, "to": b.0, "inService": l.in_service, "length": 1, "parallel": 1,
+                "r1": l.r, "x1": l.x, "b1": b_sym * 1e6, "ratedA": rating_ka(&l.limits),
+                "r0": l.r0, "x0": if l.x0 > 0.0 { l.x0 } else { 3.0 * l.x.abs() }, "b0": l.b0.max(0.0) * 1e6,
+            }),
+        );
+        let rest1 = C64::new(y1.re, y1.im - b_sym / 2.0).scale(zb);
+        let rest2 = C64::new(y2.re, y2.im - b_sym / 2.0).scale(zb);
+        if rest1 != C64::ZERO || rest2 != C64::ZERO {
+            d.count("line(s) with uneven or lossy shunt admittance written with shunt elements at their ends");
+        }
+        d.shunt(&format!("{id}.y1"), &l.name, &a.0.clone(), a.1, rest1, l.in_service);
+        d.shunt(&format!("{id}.y2"), &l.name, &b.0.clone(), b.1, rest2, l.in_service);
+    }
+}
+
+/// Tap fields of a two-winding transformer with the present position as 0 (the present ratio is the rated HV
+/// voltage): its range around it and its step on winding 1, when it has an even one.
+fn taps(t: &Transformer2) -> Value {
+    match t
+        .ratio_taps
+        .iter()
+        .find(|r| r.end == 1 && r.table.is_empty() && r.high > r.low)
+    {
+        Some(r) => json!({
+            "tapStep": r.step_pct, "tapPos": 0, "tapNeutral": 0, "tapMin": r.low - r.position, "tapMax": r.high - r.position,
+        }),
+        None => json!({}),
+    }
+}
+
+/// Any listed vector group with this clock number.
+fn any_group(clock: u8) -> Option<&'static str> {
+    VECTOR_GROUPS
+        .iter()
+        .find(|g| crate::powerstudio::vector_group(g).is_some_and(|v| v.2 == clock))
+        .copied()
+}
+
+/// The document's vector group for a transformer's windings and clock, when it lists one.
+fn group_of(conn1: Winding, conn2: Winding, clock: u8) -> Option<&'static str> {
+    VECTOR_GROUPS
+        .iter()
+        .find(|g| crate::powerstudio::vector_group(g) == Some((conn1, conn2, clock)))
+        .copied()
+}
+
+fn transformers2(d: &mut Doc) {
+    let m = d.m;
+    for (k, t) in m.transformers2.iter().enumerate() {
+        if !m.alive(Class::Transformer2, k) {
+            continue;
+        }
+        let (Some(a), Some(b)) = (d.bus(t.node1), d.bus(t.node2)) else {
+            continue;
+        };
+        let p = transformer2_pu(t, a.1, b.1, d.sb, TransformerOptions::default());
+        if t.open[0] || t.open[1] {
+            if t.open[0] && t.open[1] {
+                d.count("branch(es) open at both ends left out");
+                continue;
+            }
+            let (end, bus) = if t.open[1] { (2, &a) } else { (1, &b) };
+            let y = open_end_equivalent(&p, end);
+            d.shunt(&t.id, &t.name, &bus.0.clone(), bus.1, y, t.in_service);
+            d.count("branch(es) open at one end written as the shunt they present at the other");
+            continue;
+        }
+        if a.0 == b.0 {
+            d.count("branch(es) whose ends fell on one busbar left out");
+            continue;
+        }
+        let conns = Some((t.conn1, t.conn2));
+        if d.transformer(
+            &t.id,
+            &t.name,
+            (&a.0, a.1),
+            (&b.0, b.1),
+            &p,
+            t.rated_mva,
+            t.in_service,
+            conns,
+            taps(t),
+        )
+        .is_none()
+        {
+            d.count("transformer(s) that could not be written left out");
+        }
+    }
+}
+
+fn transformers3(d: &mut Doc) {
+    let m = d.m;
+    for (k, t) in m.transformers3.iter().enumerate() {
+        if !m.alive(Class::Transformer3, k) {
+            continue;
+        }
+        let ends: Option<Vec<(String, f64)>> = t.windings.iter().map(|w| d.bus(w.node)).collect();
+        let Some(ends) = ends else { continue };
+        let pus: Vec<TransformerPu> = (0..3).map(|w| transformer3_winding_pu(t, w, ends[w].1, d.sb)).collect();
+        let open: Vec<usize> = (0..3).filter(|&w| t.windings[w].open).collect();
+        if !open.is_empty() {
+            d.count("three-winding transformer(s) with an open winding written with that winding left out");
+        }
+        // A star busbar on winding 1's rated voltage, and one transformer per winding from its busbar to the star (a
+        // winding with negative impedance gets a line for it, as any transformer does).
+        let k1 = t.windings[0].rated_kv;
+        let label = if t.name.is_empty() {
+            t.id.clone()
+        } else {
+            t.name.clone()
+        };
+        let star = d.push(
+            "bus",
+            &format!("{}.star", t.id),
+            &format!("{label} star"),
+            json!({ "vn": k1, "vmin": 0.5, "vmax": 1.5, "zone": "" }),
+        );
+        d.internal.push((star.clone(), Internal::Star(k)));
+        for w in (0..3).filter(|w| !open.contains(w)) {
+            let conns = Some((t.windings[w].conn, t.windings[0].conn));
+            let id = format!("{}.w{}", t.id, w + 1);
+            let rating = t.windings[w].rated_mva;
+            d.transformer(
+                &id,
+                &t.name,
+                (&ends[w].0, ends[w].1),
+                (&star, k1),
+                &pus[w],
+                rating,
+                t.in_service,
+                conns,
+                json!({}),
+            );
+        }
+        d.count("three-winding transformer(s) written as a star busbar with three two-winding transformers");
+    }
+}
+
+fn injections(d: &mut Doc) {
+    let m = d.m;
+    let promoted: HashSet<u32> = ps_topology::Topology::build(m, &ps_topology::Outages::none())
+        .promoted
+        .into_iter()
+        .collect();
+    let mut remote = 0;
+    let clamp_q = |q: f64| q.clamp(-Q_LIMIT, Q_LIMIT);
+    for (k, g) in m.generators.iter().enumerate() {
+        if !m.alive(Class::Generator, k) {
+            continue;
+        }
+        let Some(bus) = d.bus(g.node) else { continue };
+        // A machine the topology chose as an island's reference stays its reference: the document does not carry the
+        // priorities that chose it.
+        let mode = match g.control {
+            MachineControl::Reference => "Reference",
+            _ if promoted.contains(&(k as u32)) => "Reference",
+            MachineControl::Pv => "PV",
+            MachineControl::Pq => "PQ",
+        };
+        if g.regulated_node.is_some_and(|r| r != g.node) {
+            remote += 1;
+        }
+        let vset = g.v_set.clamp(0.5, 1.5);
+        if vset != g.v_set && g.control != MachineControl::Pq {
+            d.count("voltage set point(s) outside 0.5 to 1.5 p.u. limited to that range");
+        }
+        let positive = |x: f64, def: f64| if x > 0.0 && x.is_finite() { x } else { def };
+        d.push(
+            "gen",
+            &g.id,
+            &g.name,
+            json!({
+                "bus": bus.0, "inService": g.in_service, "mode": mode, "p": g.p, "q": g.q, "vset": vset, "angle": g.angle,
+                "qmin": clamp_q(g.q_min), "qmax": clamp_q(g.q_max), "sn": positive(g.rated_mva, d.sb),
+                "vn": positive(g.rated_kv, bus.1), "cosphi": g.sc.cos_phi.clamp(0.01, 1.0), "xdss": positive(g.sc.xdss, 0.2),
+                "rs": g.sc.rs.max(0.0), "xdt": positive(g.dynamics.xdt, 0.3), "h": positive(g.dynamics.h, 4.0),
+                "damping": g.dynamics.d.max(0.0),
+            }),
+        );
+    }
+    if remote > 0 {
+        d.count("machine(s) regulating a remote node written as regulating their own (the load flow does so today)");
+        let _ = remote;
+    }
+    for (k, c) in m.svcs.iter().enumerate() {
+        if !m.alive(Class::Svc, k) {
+            continue;
+        }
+        let Some(bus) = d.bus(c.node) else { continue };
+        let kv2 = bus.1 * bus.1;
+        // A compensator holds its voltage within its susceptance range like a machine without active power; a very
+        // large subtransient reactance keeps it out of short-circuit currents.
+        d.push(
+            "gen",
+            &c.id,
+            &c.name,
+            json!({
+                "bus": bus.0, "inService": c.in_service, "mode": if c.regulating { "PV" } else { "PQ" }, "p": 0, "q": c.q,
+                "vset": c.v_set.clamp(0.5, 1.5), "angle": 0, "qmin": clamp_q(c.b_min * kv2), "qmax": clamp_q(c.b_max * kv2),
+                "sn": d.sb, "vn": bus.1, "cosphi": 0.85, "xdss": 1e6, "rs": 0, "xdt": 1e6, "h": 0.01, "damping": 0,
+            }),
+        );
+        d.count("static var compensator(s) written as machines without active power");
+    }
+    for (k, x) in m.external_grids.iter().enumerate() {
+        if !m.alive(Class::ExternalGrid, k) {
+            continue;
+        }
+        let Some(bus) = d.bus(x.node) else { continue };
+        d.push(
+            "extgrid",
+            &x.id,
+            &x.name,
+            json!({
+                "bus": bus.0, "inService": x.in_service, "vset": x.v_set.clamp(0.5, 1.5), "angle": x.angle,
+                "skMax": x.sk_max, "skMin": x.sk_min, "rxMax": x.rx_max, "rxMin": x.rx_min, "x0x1": x.x0x1, "r0x0": x.r0x0,
+            }),
+        );
+    }
+    for (k, l) in m.loads.iter().enumerate() {
+        if !m.alive(Class::Load, k) {
+            continue;
+        }
+        let Some(bus) = d.bus(l.node) else { continue };
+        if l.p_zip[2] != 1.0 || l.q_zip[2] != 1.0 {
+            d.count(
+                "voltage-dependent load(s) written as constant power at 1 p.u. (as the load flow treats them today)",
+            );
+        }
+        d.push(
+            "load",
+            &l.id,
+            &l.name,
+            json!({ "bus": bus.0, "inService": l.in_service, "p": l.p, "q": l.q }),
+        );
+    }
+    for (k, s) in m.shunts.iter().enumerate() {
+        if !m.alive(Class::Shunt, k) {
+            continue;
+        }
+        let Some(bus) = d.bus(s.node) else { continue };
+        if !s.points.is_empty() || s.max_sections > 1 {
+            d.count("switchable shunt(s) written at their present admittance");
+        }
+        let y = shunt_admittance(s).scale(bus.1 * bus.1 / d.sb);
+        d.shunt(&s.id, &s.name, &bus.0.clone(), bus.1, y, s.in_service);
+    }
+}

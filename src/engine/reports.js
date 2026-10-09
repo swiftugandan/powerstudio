@@ -34,6 +34,14 @@
  * @typedef {{ t: Float32Array, machines: MachineTrace[], busIds: string[], voltages: Float32Array[], events: Array<SimEvent & { applied: boolean, note: string }>,
  *   stable: boolean, lossOfSynchronism: number | null, angleReference: 'grid' | 'coi', steps: number, message: string }} RmsResult
  * @typedef {{ loadflow: LoadFlowResult, shortcircuit: ShortCircuitResult, contingency: ContingencyResult, rms: RmsResult }} ResultOf
+ * @typedef {{ class: string, count: number, status: 'mapped' | 'used' | 'not used', detail: string }} ImportClass
+ * @typedef {{ files: Array<{ name: string, profiles: string[] }>, classes: ImportClass[], notes: string[] }} ImportReport
+ * @typedef {{ severity: 'warning' | 'error', class: string, id: string, message: string }} ModelIssue
+ * @typedef {{ busIds: string[], vm: number[], va: number[] }} StartVoltages
+ * @typedef {{ solved: boolean, maxDv: number, maxDa: number, worst: string, editorConverges: boolean, start: StartVoltages }} Fidelity
+ * @typedef {{ nodes: number, branches: number, sources: number, loads: number, switches: number }} ImportSize
+ * @typedef {{ format: 'cgmes' | 'psse' | 'matpower', report: ImportReport, validation: ModelIssue[], conversion: string[],
+ *   fidelity: Fidelity, size: ImportSize, ms: number }} ImportSummary
  */
 
 /** @param {number | null | undefined} v */

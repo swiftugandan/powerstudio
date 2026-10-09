@@ -35,6 +35,9 @@ docs/ARCHITECTURE.md for the structure and docs/ENGINE.md for what every calcula
   docs/research/sources.md.
 - The short-circuit calculation is "IEC 60909-style". Do not call it compliant or certified anywhere.
 - Element fields are defined once, in `src/core/catalog.js`; the inspector and the import gate read them from there.
+  The engine's document writer (`ps-io/src/powerstudio_write.rs`) mirrors `VECTOR_GROUPS`; a test keeps them equal.
+- Other tools' files (CGMES, PSS/E RAW, MATPOWER) open through the engine (`src/engine/exchange.js`); there is no
+  importer in JavaScript.
 - Every document edit goes through `store.transact` so undo, redo, autosave and staleness work.
 - Buttons get behaviour from `data-cmd` and a registered command; never attach click handlers to command buttons.
 - The bundler supports only single-line `import { … } from '…'` and `export function|class|const|let`. Keep the one

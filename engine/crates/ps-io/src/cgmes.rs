@@ -262,10 +262,7 @@ pub fn import(files: &[File]) -> Result<Imported, ParseError> {
         limits: HashMap::new(),
         groups: HashMap::new(),
     };
-    cx.m.meta.name = files
-        .first()
-        .map(|f| f.name.trim_end_matches(".xml").to_string())
-        .unwrap_or_default();
+    cx.m.meta.name = model_name(cx.g, files);
     cx.m.meta.description = "Imported from CGMES.".into();
     containers(&mut cx);
     nodes(&mut cx);
@@ -1436,5 +1433,45 @@ fn report(cx: &Ctx, g: &Graph) -> Report {
         files,
         classes,
         notes: cx.notes.clone(),
+    }
+}
+
+/// A name for the model from its equipment files (not the boundary set): their names without the profile and
+/// version part (`20210325T1530Z_1D_BE_EQ_001` → `20210325T1530Z_1D_BE`), several joined by their common start
+/// (`…_1D_BE + NL`).
+fn model_name(g: &Graph, files: &[File]) -> String {
+    let stem = |f: &str| {
+        let base = f.rsplit(['/', '\\']).next().unwrap_or(f);
+        let base = base
+            .strip_suffix(".xml")
+            .or_else(|| base.strip_suffix(".XML"))
+            .unwrap_or(base);
+        base.find("_EQ").map_or(base, |at| &base[..at]).to_string()
+    };
+    let mut stems: Vec<String> = g
+        .headers
+        .iter()
+        .filter(|h| {
+            h.profiles
+                .iter()
+                .any(|p| p.contains("Equipment") && !p.contains("Boundary"))
+        })
+        .map(|h| stem(&h.file))
+        .collect();
+    stems.dedup();
+    match stems.len() {
+        0 => files.first().map(|f| stem(&f.name)).unwrap_or_default(),
+        1 => stems.remove(0),
+        _ => {
+            let first = &stems[0];
+            let common = stems
+                .iter()
+                .map(|s| first.bytes().zip(s.bytes()).take_while(|(a, b)| a == b).count())
+                .min()
+                .unwrap_or(0);
+            let cut = first[..common].rfind('_').map_or(0, |i| i + 1);
+            let parts: Vec<&str> = stems.iter().map(|s| &s[cut..]).collect();
+            format!("{}{}", &first[..cut], parts.join(" + "))
+        }
     }
 }

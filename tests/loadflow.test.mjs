@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { read, golden, input, studies } from './helpers.mjs';
-import { importMatpower } from '../src/core/matpower.js';
+import { read, golden, input, studies, engine } from './helpers.mjs';
+import { importFiles } from '../src/engine/exchange.js';
 import { busesOf } from '../src/core/document.js';
 import { ieee14 } from '../src/samples/ieee14.js';
 import { riverside } from '../src/samples/riverside.js';
@@ -20,7 +20,7 @@ function worstBusError(r, g) {
 
 for (const c of ['case14', 'case30', 'case118']) {
   test(`MATPOWER ${c}: imported network solves to the PYPOWER (MATPOWER) solution`, () => {
-    const { doc } = importMatpower(read(`tests/fixtures/${c}.m`));
+    const { doc } = importFiles(engine, [{ name: `${c}.m`, bytes: new TextEncoder().encode(read(`tests/fixtures/${c}.m`)) }]);
     const r = studies.loadflow(doc, { tolerance: 1e-8 });
     assert.ok(r.converged, r.message);
     const { dv, da } = worstBusError(r, golden(`matpower-${c}`));

@@ -2,9 +2,10 @@
 //!
 //! A 0.1 document stores equipment as a network engineer enters it (Ω/km, %, kV, MVA) together with diagram
 //! positions. The conversion keeps every electrical value: per-length line data become totals, transformer uk and uR
-//! become impedances referred to the HV winding, iron losses and no-load current become a magnetising admittance split
-//! half to each winding, as the 0.1 engine modelled it. Diagram fields stay with the document. Missing fields take the
-//! 0.1 catalogue defaults (src/core/catalog.js), so a hand-written document reads the same in both.
+//! become impedances referred to the HV winding, iron losses and no-load current become a magnetising admittance at
+//! the winding `magnetising` names (half to each by default, as the 0.1 engine modelled it), and `shift` adds to the
+//! vector group's phase shift. Diagram fields stay with the document. Missing fields take the catalogue defaults
+//! (src/core/catalog.js), so a hand-written document reads the same in both.
 
 use ps_model::study::StudyCase;
 use ps_model::{
@@ -238,6 +239,12 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                 let g = e.num("pfe", 20.0) / 1000.0 / sn;
                 let ym = e.num("i0", 0.05) / 100.0;
                 let bm = -(ym * ym - g * g).max(0.0).sqrt();
+                // Share of the magnetising branch at winding 1: half by default, or all at one winding.
+                let at_hv = match e.text("magnetising") {
+                    "hv" => 1.0,
+                    "lv" => 0.0,
+                    _ => 0.5,
+                };
                 let group = e.text("vectorGroup");
                 let (conn1, conn2, clock) = vector_group(if group.is_empty() { "Dyn11" } else { group })
                     .unwrap_or_else(|| {
@@ -256,12 +263,12 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     rated_mva: sn,
                     r,
                     x,
-                    g1: g / zb1 / 2.0,
-                    b1: bm / zb1 / 2.0,
-                    g2: g / zb1 / 2.0,
-                    b2: bm / zb1 / 2.0,
+                    g1: g / zb1 * at_hv,
+                    b1: bm / zb1 * at_hv,
+                    g2: g / zb1 * (1.0 - at_hv),
+                    b2: bm / zb1 * (1.0 - at_hv),
                     clock,
-                    phase_shift_deg: 0.0,
+                    phase_shift_deg: e.num("shift", 0.0),
                     conn1,
                     conn2,
                     r0,

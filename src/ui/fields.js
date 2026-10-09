@@ -66,5 +66,6 @@ export function enumLabel(key, v) {
   if (key === 'lvTolerance') return `${v} % (cmax ${v === '6' ? '1.05' : '1.10'})`;
   if (key === 'orient') return v === 'h' ? 'Horizontal' : 'Vertical';
   if (key === 'side') return v === 'above' ? 'Above / left' : 'Below / right';
+  if (key === 'magnetising') return /** @type {Record<string, string>} */ ({ both: 'Both windings', hv: 'HV winding', lv: 'LV winding' })[v] ?? v;
   return v;
 }

@@ -358,72 +358,42 @@ pub fn write(m: &Model, opt: &Options) -> Result<Written, String> {
 
 fn buses(w: &mut Writer, opt: &Options) {
     let m = w.m;
-    // Nodes joined by closed switches form one bus.
-    let mut parent: Vec<usize> = (0..m.nodes.len()).collect();
-    fn root(parent: &mut [usize], mut x: usize) -> usize {
-        while parent[x] != x {
-            parent[x] = parent[parent[x]];
-            x = parent[x];
-        }
-        x
-    }
-    let mut closed = 0;
-    for (k, s) in m.switches.iter().enumerate() {
-        if !m.alive(Class::Switch, k) || s.open {
-            continue;
-        }
-        closed += 1;
-        let (a, b) = (root(&mut parent, s.node1.index()), root(&mut parent, s.node2.index()));
-        if a != b {
-            parent[a.max(b)] = a.min(b);
-        }
-    }
+    let view = crate::busbranch::reduce(m);
     if !m.switches.is_empty() {
         w.notes.push(format!(
-            "{} switch(es): closed ones join their nodes into one bus ({closed}), open ones are left out; RAW is a bus-branch format.",
-            m.switches.len()
+            "{} switch(es): closed ones join their nodes into one bus ({}), open ones are left out; RAW is a bus-branch format.",
+            m.switches.len(),
+            view.closed_switches
         ));
     }
-    let topo = Topology::build(m, &Outages::none());
-    let mut index: HashMap<usize, usize> = HashMap::new();
-    for k in 0..m.nodes.len() {
-        if !m.alive(Class::Node, k) {
-            continue;
-        }
-        let r = root(&mut parent, k);
-        let g = *index.entry(r).or_insert_with(|| {
-            let node = &m.nodes[k];
-            let v = opt
-                .voltages
-                .as_ref()
-                .and_then(|vs| vs.get(k).copied().flatten())
-                .unwrap_or((if node.v0 > 0.0 { node.v0 } else { 1.0 }, node.angle0));
-            w.buses.push(Bus {
-                number: 0,
-                name: if node.name.is_empty() {
-                    node.id.clone()
-                } else {
-                    node.name.clone()
-                },
-                kv: node.nominal_kv,
-                nodes: Vec::new(),
-                energised: false,
-                area: node.area.map_or(1, |a| {
-                    m.areas
-                        .get(a as usize)
-                        .and_then(|ar| ar.id.strip_prefix('A')?.parse().ok())
-                        .unwrap_or(i64::from(a) + 1)
-                }),
-                v,
-                limits: (node.v_max, node.v_min),
-            });
-            w.buses.len() - 1
+    w.group = view.bus_of.clone();
+    for (nodes, energised) in view.nodes.into_iter().zip(view.energised) {
+        let node = &m.nodes[nodes[0] as usize];
+        let k = nodes[0] as usize;
+        let v = opt
+            .voltages
+            .as_ref()
+            .and_then(|vs| vs.get(k).copied().flatten())
+            .unwrap_or((if node.v0 > 0.0 { node.v0 } else { 1.0 }, node.angle0));
+        w.buses.push(Bus {
+            number: 0,
+            name: if node.name.is_empty() {
+                node.id.clone()
+            } else {
+                node.name.clone()
+            },
+            kv: node.nominal_kv,
+            nodes,
+            energised,
+            area: node.area.map_or(1, |a| {
+                m.areas
+                    .get(a as usize)
+                    .and_then(|ar| ar.id.strip_prefix('A')?.parse().ok())
+                    .unwrap_or(i64::from(a) + 1)
+            }),
+            v,
+            limits: (node.v_max, node.v_min),
         });
-        w.group[k] = Some(g);
-        w.buses[g].nodes.push(k as u32);
-        if topo.node_bus.get(k).copied().flatten().is_some() {
-            w.buses[g].energised = true;
-        }
     }
     // Bus numbers: the one a node's identifier names when unique, otherwise fresh numbers above them all.
     let named: Vec<Option<i64>> = w

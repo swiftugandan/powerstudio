@@ -171,15 +171,13 @@ equilibrium.
 
 ## MATPOWER import
 
-There are two MATPOWER importers. The engine's names branches and generators by their row in the case, as MATPOWER
-identifies them (`L17` or `T17` for branch row 17, `G4` for generator row 4). The app's (`src/core/matpower.js`) turns a case into a PowerStudio document with a
-diagram laid out by `src/core/layout.js`: lines get a length of 1 km and their total impedance per km, transformer
-line charging becomes two shunts with exactly MATPOWER's admittances, and phase shifts that are not multiples of
-30° are dropped with a warning. The engine's (`ps-io`) goes straight to the model and is exact for everything
-MATPOWER describes: transformers keep arbitrary phase shifts and carry their charging as magnetising admittance,
-generators keep their active power limits, and buses keep the case's stored voltages for warm starts. MATPOWER has no
-zero-sequence, machine or inertia data; both importers fill them with stated typical values and list them in the
-import's issues.
+`ps-io` reads MATPOWER cases of format version 2 straight into the model and is exact for everything MATPOWER
+describes: transformers keep arbitrary phase shifts and carry their charging as magnetising admittance, generators
+keep their active power limits, and buses keep the case's stored voltages for warm starts. Branches and generators
+are named by their row in the case, as MATPOWER identifies them (`L17` or `T17` for branch row 17, `G4` for generator
+row 4). MATPOWER has no zero-sequence, machine or inertia data; the importer fills them with stated typical values and
+lists them in the import's notes. The app opens cases through it like any other file (see "Opening other tools'
+files in the app").
 
 ## CGMES import
 
@@ -265,9 +263,29 @@ cases up to 2,869 buses, the CGMES configurations and the PSS/E files) in both v
 solves them: every node keeps its voltage to 1e-14 p.u. And by `scripts/oracle/export_check.py`, which has PowSyBl
 read the same files: its load flow agrees with PowerStudio's on all 64 files to 4.2e-11 p.u. or better.
 
-The app does not open CGMES or RAW files yet; `ps cgmes <files> [--lf]` and `ps psse <file.raw> [--lf]` import them
-and print the report, the validation and a load flow; `ps export <input>... --raw 33|35` writes RAW and
-`ps cgmes <files> --sv <out.xml>` writes the SV of a load flow.
+On the command line, `ps cgmes <files> [--lf]` and `ps psse <file.raw> [--lf]` import and print the report, the
+validation and a load flow; `ps export <input>... --raw 33|35` writes RAW and `ps cgmes <files> --sv <out.xml>`
+writes the SV of a load flow.
+
+## Opening other tools' files in the app
+
+The app opens CGMES models, RAW files and MATPOWER cases through the engine's `import` request
+(`ps-study/src/exchange.rs`). The engine recognises the format by extension, or by content when a file has none,
+imports the model, validates it, and converts it into the editor's document (`ps-io/src/powerstudio_write.rs`). The
+document has seven classes, so the conversion reduces what it cannot hold: closed switches join their nodes into one
+busbar, a three-winding transformer becomes a star busbar with three two-winding transformers, a static var
+compensator becomes a machine without active power that holds its voltage, switchable shunts keep their present
+admittance. Electrical values come from the engine's per-unit form of each element, so the document reproduces what
+it holds exactly: a transformer's present ratio becomes its rated HV voltage, its phase shift a vector group or an
+additional shift, its magnetising admittance a branch at one or both windings; uneven line charging becomes shunt
+elements; an impedance with a negative part or no reactance, which uk and uR cannot express, gets a line from an
+intermediate busbar for that part. The engine then solves the model and the document, the document started from the
+model's solution, and reports the largest voltage difference with the voltages to start the editor's load flows from.
+
+**Checked by** `engine/crates/ps-study/tests/document.rs`: every reference model (MATPOWER cases up to ACTIVSg70k,
+the CGMES configurations, the PSS/E files) converts into a document whose load flow agrees with the model's to
+2e-12 p.u. or better, and `tests/import.test.mjs`, which imports MATPOWER and RAW files through the WebAssembly
+engine and checks the document passes the editor's import gate unchanged.
 
 ## Requests
 

@@ -56,10 +56,13 @@ async function render(app, page, close) {
   }
   if (page === 'open') return [h('h1', { text: 'Open' }), h('p', { class: 'lead', text: app.library.persistent ? 'Networks saved in this browser. They stay on this device and are not uploaded anywhere.' : 'This browser does not allow local storage here, so networks last only for this session. Export them to keep them.' }), await docList(app, close, 200)];
   if (page === 'import') {
-    return [h('h1', { text: 'Import' }), h('p', { class: 'lead', text: 'Bring in a PowerStudio file or a MATPOWER case. Imported networks open as new documents; nothing is overwritten. You can also drop a file anywhere on the window.' }),
+    return [h('h1', { text: 'Import' }), h('p', { class: 'lead', text: 'Bring in a network from PowerStudio or another tool. Imported networks open as new documents; nothing is overwritten. You can also drop files anywhere on the window.' }),
       h('div', { class: 'cards' },
         card('PowerStudio file', 'A .powerstudio.json file exported from this app.', 'open', () => app.importFile('.json,.powerstudio.json,application/json')),
-        card('MATPOWER case', 'A MATPOWER version 2 .m case file. The diagram is laid out automatically.', 'import', () => app.importFile('.m,text/plain')))];
+        card('CGMES model', 'CGMES 2.4.15 or 3.0: the EQ, TP, SSH and SV files with the boundary set, as XML files or ZIP archives. Select them together.', 'import', () => app.importFile('.xml,.zip')),
+        card('PSS/E RAW file', 'A RAW file of version 33 or 35, bus-branch or node-breaker.', 'import', () => app.importFile('.raw')),
+        card('MATPOWER case', 'A MATPOWER version 2 .m case file.', 'import', () => app.importFile('.m,text/plain'))),
+      h('p', { class: 'note', text: 'PowerStudio shows what it read, what the diagram simplifies and how closely the result matches before the network opens. Diagrams are laid out automatically.' })];
   }
   if (page === 'export') {
     return [h('h1', { text: 'Export' }), h('p', { class: 'lead', text: 'Save copies outside the browser.' }),

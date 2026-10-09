@@ -376,7 +376,7 @@ export class Viewport {
       if (this.pinch && this.touches.size === 2) {
         const [a, b] = [...this.touches.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y), mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-        const target = Math.min(8, Math.max(0.05, this.pinch.zoom * d / Math.max(this.pinch.d, 1)));
+        const target = Math.min(8, Math.max(0.01, this.pinch.zoom * d / Math.max(this.pinch.d, 1)));
         this.camera.zoomAt(target / this.camera.zoom, mid.x, mid.y);
         this.camera.cx -= (mid.x - this.pinch.mid.x) / this.camera.zoom;
         this.camera.cy -= (mid.y - this.pinch.mid.y) / this.camera.zoom;

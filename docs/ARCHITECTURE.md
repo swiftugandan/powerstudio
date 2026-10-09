@@ -36,8 +36,9 @@ class and its fields (type, unit, limits, group, help text); the inspector, the 
 from it. `document.js` holds the document shape, the study case settings and `normalizeDocument`, the single gate
 every opened or imported file passes. `store.js` is the only way to change a document: transactions record each
 operation with the value it replaced, so undo and redo are exact, and edits that share a coalescing key (a drag,
-typing in one field) merge into one step. `matpower.js` and `layout.js` import MATPOWER cases as documents with a
-diagram.
+typing in one field) merge into one step. `layout.js` draws a diagram for networks that arrive without one: an exact
+force-directed layout up to 400 busbars, and above that a cell-grid variant whose busbars are packed into rows, so
+2,000 busbars lay out in about 0.3 s and 10,000 in about 2 s.
 
 **Engine (`engine/`).** A Cargo workspace; `docs/ENGINE.md` describes what it computes.
 
@@ -62,7 +63,8 @@ warning, and bans `unwrap`, `expect` and `panic` outside tests: engine errors re
 **Engine in the browser (`src/engine/`).** `module.js` compiles the WebAssembly module once per page, from the
 embedded copy in the built file or from the file in the source tree. `host.js` instantiates it and exchanges
 envelopes with it; it runs unchanged on the main thread, in a worker and in Node. `studies.js` sends study requests
-and translates the app's options. `reports.js` defines the result types and turns the engine's JSON reports into
+and translates the app's options. `exchange.js` sends other tools' files (CGMES, PSS/E RAW, MATPOWER) to the engine,
+which returns an import summary and a document. `reports.js` defines the result types and turns the engine's JSON reports into
 them (typed arrays for traces, NaN where JSON carries null).
 
 **Rendering (`src/render/`).** `geometry.js` defines the single-line diagram: busbar bars, orthogonal branch routes
@@ -102,6 +104,20 @@ runs on the main thread.
 3. `App` stores the adapted result with the current network revision, logs a summary in the Output panel, and
    `ui/overlay.js` turns the result into diagram annotations (colours and result boxes) and a legend.
 4. The dock shows the result tables; the inspector shows the selected element's results.
+
+## Data flow of an import
+
+1. `App.importFiles` takes the picked or dropped files. A PowerStudio document goes straight through
+   `normalizeDocument`; anything else is read as bytes and sent to the engine client, which transfers the buffers to
+   the first worker (`{ type: 'import', files }`).
+2. The engine (`ps-study`'s `exchange::import_for_editor`) recognises the format by extension or content, imports it
+   into its model with the import report, validates the model, converts it into a document (`ps-io`'s
+   `powerstudio_write`), and solves both to measure how closely the document reproduces the model. The worker lays
+   the document out and sends it back with the summary.
+3. `ui/import-dialog.js` shows the summary: format and size, the measured agreement, what the editor's document
+   simplifies, the import notes, the validation findings and every class read. Opening the network passes the
+   document through `normalizeDocument` like any file, and its load flows start from the imported voltages, then
+   from their own last solution.
 
 ## Build
 

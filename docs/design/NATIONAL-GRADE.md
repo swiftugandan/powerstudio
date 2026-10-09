@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | In progress: phases 0 and 1 complete, phase 2 under way (see section 11) |
+| Status | In progress: phases 0, 1 and 2 complete (see section 11) |
 | Date | 2026-10-09 |
 | Scope | Take PowerStudio from a small-network study tool to studies a national transmission operator can rely on, still entirely in the browser, with no server |
 | Starting point | PowerStudio 0.1.0 (this repository): JavaScript solvers with dense matrices, bus-branch model, WebGPU diagram |
@@ -469,7 +469,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | --- | --- | --- |
 | **0. Spikes** — done | Sparse LU in `wasm32` on ACTIVSg25k and 70k; faer confirmed; WebAssembly memory measured | See the phase 0 results below |
 | **1. Engine foundation** — done | Rust workspace, model and operations, snapshot format, topology processor, per-unit network, and all four 0.1 calculations ported at 0.1 parity (sparse Newton-Raphson with 0.1's controls, short circuit, N-1, classical stability; the national-grade versions are phases 3, 5 and 6); coordinator and worker pool; `ps-cli` | Every 0.1 oracle test passes on the engine; ACTIVSg25k solves within target; the JavaScript solvers are deleted. See the phase 1 results below |
-| **2. Data exchange** — under way | CGMES 2.4.15 and 3.0 import (EQ, TP, SSH, SV, DL, GL) and SSH/SV export; PSS/E RAW import and export; validation reports | CGMES conformity configurations and ACTIVSg cases import and agree with PowSyBl to the fidelity bar |
+| **2. Data exchange** — done | CGMES 2.4.15 and 3.0 import (EQ, TP, SSH, SV, DL, GL) and SSH/SV export; PSS/E RAW import and export; validation reports | CGMES conformity configurations and ACTIVSg cases import and agree with PowSyBl to the fidelity bar |
 | **3. Steady-state completeness** | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis |
 | **4. Workspace at scale** (runs alongside 2 and 3) | Projects, variants, scenarios, study cases; data manager; substation diagrams; renderer at scale; result browser and comparison; reports | A 70,000-bus project is usable end to end with no frame over 100 ms |
 | **5. Dynamics** | DAE solver, events, DYR import, wave D1, then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases |
@@ -558,9 +558,16 @@ needs no iteration), and PowSyBl reads every exported flow exactly. Writing it s
 three-winding star point can be solved exactly from its windings, so restarts from stored solutions now need no
 iteration on those either.
 
-Still to do in phase 2: SSH export (it carries edited set points, which arrive with the workspace on the model in
-phase 4, and is scheduled there); opening CGMES and RAW files in the app with the import report and validation shown
-to the user.
+Opening CGMES and RAW files in the app is done. The engine imports the files, validates the model, converts it into
+the editor's document and measures how closely that document reproduces the model's load flow; the import dialog
+shows all of it before the network opens. Every reference model converts to within 2e-12 p.u., ACTIVSg70k included,
+because the conversion works from the engine's per-unit two-ports and gives the document what it lacked for exact
+transformers (an additional phase shift and the magnetising branch's placement). The MATPOWER importer in JavaScript
+is gone: one importer per format, in the engine. Automatic layout now takes 0.3 s at 2,000 busbars and 2 s at
+10,000, run in the worker.
+
+SSH export moves to phase 4. SSH carries the set points an operator edits, and edits on an imported model arrive
+with the workspace on the model; until then an exported SSH would repeat the input.
 
 ## 12. Risks
 

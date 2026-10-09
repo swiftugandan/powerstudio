@@ -32,6 +32,7 @@ const attach = (key, label) => num(key, label, 0, { group: 'graphic', min: -0.5,
 export const VECTOR_GROUPS = /** @type {const} */ (['YNyn0', 'YNd1', 'YNd5', 'YNd11', 'Dyn1', 'Dyn5', 'Dyn11', 'Yd1', 'Yd5', 'Yd11', 'Dy1', 'Dy5', 'Dy11', 'Yy0', 'YNy0', 'Yyn0', 'Dd0']);
 export const GEN_MODES = /** @type {const} */ (['PV', 'PQ', 'Reference']);
 export const SIDES = /** @type {const} */ (['below', 'above']);
+export const MAGNETISING = /** @type {const} */ (['both', 'hv', 'lv']);
 
 /** @type {Readonly<Record<ElementClass, ClassSpec>>} */
 export const CLASSES = {
@@ -55,8 +56,8 @@ export const CLASSES = {
       name, bus('from', 'From busbar'), bus('to', 'To busbar'), inService,
       num('length', 'Length', 10, { unit: 'km', min: 0, exclusiveMin: true }),
       int('parallel', 'Parallel systems', 1, { min: 1, max: 10 }),
-      num('r1', 'Resistance R′', 0.12, { unit: 'Ω/km', min: 0, symbol: 'R1' }),
-      num('x1', 'Reactance X′', 0.39, { unit: 'Ω/km', min: 0, exclusiveMin: true, symbol: 'X1' }),
+      num('r1', 'Resistance R′', 0.12, { unit: 'Ω/km', symbol: 'R1', help: 'Negative only in equivalents, such as the star of a three-winding transformer.' }),
+      num('x1', 'Reactance X′', 0.39, { unit: 'Ω/km', symbol: 'X1', help: 'Negative for series capacitors.' }),
       num('b1', 'Susceptance B′', 2.9, { unit: 'µS/km', min: 0, symbol: 'B1' }),
       num('ratedA', 'Rated current', 0.6, { unit: 'kA', min: 0, symbol: 'Ir', help: 'Zero means the line has no rating and its loading is not reported.' }),
       num('r0', 'Zero-sequence R0′', 0.36, { unit: 'Ω/km', min: 0, group: 'shortcircuit' }),
@@ -77,7 +78,11 @@ export const CLASSES = {
       num('ur', 'Copper losses (resistive part)', 0.4, { unit: '%', min: 0, symbol: 'uR' }),
       num('i0', 'No-load current', 0.05, { unit: '%', min: 0, group: 'loadflow' }),
       num('pfe', 'Iron losses', 20, { unit: 'kW', min: 0, group: 'loadflow' }),
+      { key: 'magnetising', label: 'Magnetising branch', type: 'enum', group: 'loadflow', default: 'both', options: MAGNETISING,
+        help: 'Where the no-load current and iron losses are drawn: half at each winding, or all at the HV or the LV winding.' },
       { key: 'vectorGroup', label: 'Vector group', type: 'enum', group: 'basic', default: 'Dyn11', options: VECTOR_GROUPS },
+      num('shift', 'Additional phase shift', 0, { unit: '°', min: -180, max: 180, group: 'loadflow',
+        help: 'How far the LV side lags the HV side beyond the vector group, as in phase-shifting transformers.' }),
       num('tapStep', 'Tap step (HV side)', 1.25, { unit: '%', group: 'loadflow' }),
       int('tapPos', 'Tap position', 0, { group: 'loadflow' }),
       int('tapNeutral', 'Neutral position', 0, { group: 'loadflow' }),

@@ -8,11 +8,14 @@
 import { engineModule } from '../engine/module.js';
 import { EngineHost, jsonPayload } from '../engine/host.js';
 import { request } from '../engine/studies.js';
+import { importFiles } from '../engine/exchange.js';
+import { autoLayout } from '../core/layout.js';
 import { adapt } from '../engine/reports.js';
 
 /** @typedef {import('../engine/reports.js').CalcKind} CalcKind */
 /** @typedef {(done: number, total: number) => void} OnProgress */
-/** @typedef {{ id: number, resolve: (v: { bytes: Uint8Array, ms: number }) => void, reject: (e: Error) => void, onProgress?: OnProgress }} Pending */
+/** @typedef {{ bytes: Uint8Array, ms: number, summary?: import('../engine/reports.js').ImportSummary }} Reply */
+/** @typedef {{ id: number, resolve: (v: Reply) => void, reject: (e: Error) => void, onProgress?: OnProgress }} Pending */
 
 /** Outages below which contingency analysis stays on one worker. */
 const PARALLEL_FROM = 16;
@@ -58,7 +61,7 @@ export class EngineClient {
       if (!p || msg.id !== p.id) return;
       if (msg.type === 'progress') { p.onProgress?.(msg.done, msg.total); return; }
       s.pending = null;
-      if (msg.type === 'result') p.resolve({ bytes: msg.bytes, ms: msg.ms });
+      if (msg.type === 'result') p.resolve({ bytes: msg.bytes, ms: msg.ms, summary: msg.summary });
       else p.reject(new Error(msg.message));
     };
     worker.onerror = e => {
@@ -116,6 +119,37 @@ export class EngineClient {
         : await this.exec(0, module, kind, doc, options, onProgress);
       this.check(token);
       return { result: adapt(kind, jsonPayload(bytes)), ms: performance.now() - t0 };
+    } finally {
+      this.active--;
+    }
+  }
+
+  /**
+   * Opens other tools' files (CGMES, PSS/E RAW, MATPOWER) as a laid-out document. Cancels a calculation in progress: the
+   * document it was running on is being replaced. The files' buffers are transferred to the worker.
+   * @param {import('../engine/exchange.js').NamedBytes[]} files
+   * @returns {Promise<{ summary: import('../engine/reports.js').ImportSummary, doc: import('../core/document.js').PowerDocument }>}
+   */
+  async importFiles(files) {
+    if (this.busy) this.cancel();
+    this.active++;
+    try {
+      const module = await engineModule();
+      const s = this.slot(0, module);
+      if (!s) {
+        this.host ??= await EngineHost.create(module);
+        const imported = importFiles(this.host, files);
+        autoLayout(imported.doc);
+        return imported;
+      }
+      /** @type {Reply} */
+      const reply = await new Promise((resolve, reject) => {
+        const id = ++this.seq;
+        s.pending = { id, resolve, reject };
+        s.worker.postMessage({ id, type: 'import', files }, files.map(f => f.bytes.buffer));
+      });
+      if (!reply.summary) throw new Error('The engine returned no import summary.');
+      return { summary: reply.summary, doc: jsonPayload(reply.bytes) };
     } finally {
       this.active--;
     }

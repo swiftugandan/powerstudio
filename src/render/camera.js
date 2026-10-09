@@ -23,7 +23,7 @@ export class Camera {
   /** Zooms by a factor while keeping the world point under (sx, sy) fixed. @param {number} factor @param {number} sx @param {number} sy */
   zoomAt(factor, sx, sy) {
     const before = this.toWorld(sx, sy);
-    this.zoom = Math.min(8, Math.max(0.05, this.zoom * factor));
+    this.zoom = Math.min(8, Math.max(0.01, this.zoom * factor));
     const after = this.toWorld(sx, sy);
     this.cx += before.x - after.x;
     this.cy += before.y - after.y;
@@ -33,7 +33,7 @@ export class Camera {
    * @param {{ x0: number, y0: number, x1: number, y1: number }} box @param {number} [margin] */
   fit(box, margin = 48) {
     const w = Math.max(box.x1 - box.x0, 1), h = Math.max(box.y1 - box.y0, 1);
-    this.zoom = Math.min(4, Math.max(0.05, Math.min((this.width - 2 * margin) / w, (this.height - 2 * margin) / h)));
+    this.zoom = Math.min(4, Math.max(0.01, Math.min((this.width - 2 * margin) / w, (this.height - 2 * margin) / h)));
     this.cx = (box.x0 + box.x1) / 2;
     this.cy = (box.y0 + box.y1) / 2;
   }

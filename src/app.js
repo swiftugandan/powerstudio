@@ -4,7 +4,6 @@
 import { DocumentStore } from './core/store.js';
 import { emptyDocument, nextId, normalizeDocument, validateForCalculation, busesOf } from './core/document.js';
 import { makeElement, CLASSES } from './core/catalog.js';
-import { importMatpower } from './core/matpower.js';
 import { autoLayout, snap } from './core/layout.js';
 import { SAMPLES } from './samples/index.js';
 import { Commands } from './ui/commands.js';
@@ -20,6 +19,8 @@ import { buildOverlay } from './ui/overlay.js';
 import { openPalette } from './ui/palette.js';
 import { openBackstage, closeBackstage } from './ui/backstage.js';
 import { openStudyDialog } from './ui/study.js';
+import { importDialog } from './ui/import-dialog.js';
+import { IMPORT_TYPES } from './engine/exchange.js';
 import { toast, contextMenu } from './ui/feedback.js';
 import { h, byId, download, fileName } from './ui/dom.js';
 import { icon, logo } from './ui/icons.js';
@@ -46,6 +47,8 @@ export class App {
     this.rendererPreference = opt.renderer;
     this.store = new DocumentStore(emptyDocument());
     this.docId = '';
+    /** Starting voltages for an imported network's load flow (see calc). @type {import('./engine/reports.js').StartVoltages | null} */
+    this.start = null;
     /** @type {Set<string>} */
     this.selection = new Set();
     this.hover = '';
@@ -165,6 +168,7 @@ export class App {
     this.selection = new Set();
     this.setTool('select');
     this.store.load(doc);
+    this.start = null;
     this.viewport.fit();
     this.refreshLegend();
     this.dock.render();
@@ -243,33 +247,56 @@ export class App {
     el.innerHTML = `<span class="dot"></span><span>${text}</span>`;
   }
 
-  /** Imports a file the user picks. @param {string} accept */
+  /** Imports files the user picks. @param {string} accept */
   importFile(accept) {
-    const input = h('input', { type: 'file', accept, style: 'display:none' });
-    input.addEventListener('change', () => { const f = input.files?.[0]; if (f) this.importFileObject(f); input.remove(); });
+    const input = h('input', { type: 'file', accept, multiple: true, style: 'display:none' });
+    input.addEventListener('change', () => { const files = [...(input.files ?? [])]; if (files.length) this.importFiles(files); input.remove(); });
     document.body.append(input);
     input.click();
   }
 
-  /** @param {File} file */
-  async importFileObject(file) {
+  /**
+   * Imports files: a PowerStudio document opens directly; other tools' files (CGMES XML files or archives, a PSS/E
+   * RAW file, a MATPOWER case) go through the engine, and the import dialog shows what it found before the network
+   * opens.
+   * @param {File[]} files
+   */
+  async importFiles(files) {
+    const label = files.length === 1 ? files[0].name : `${files.length} files`;
     try {
-      const text = await file.text();
-      let doc, issues;
-      if (/\.m$/i.test(file.name) || /mpc\.bus\s*=/.test(text)) ({ doc, issues } = importMatpower(text));
-      else {
+      // A PowerStudio document: by its extension, or by its content when the name has none.
+      const head = files.length === 1 ? (await files[0].slice(0, 64).text()).trimStart() : '';
+      if (files.length === 1 && (/\.json$/i.test(files[0].name) || head.startsWith('{'))) {
         let json;
-        try { json = JSON.parse(text); } catch { throw new Error('The file is neither JSON nor a MATPOWER case.'); }
-        ({ doc, issues } = normalizeDocument(json));
+        try { json = JSON.parse(await files[0].text()); } catch { throw new Error('The file is not valid JSON.'); }
+        const { doc, issues } = normalizeDocument(json);
+        this.load(doc, newDocId());
+        await this.save();
+        this.log('ok', `Imported “${label}” as “${doc.name}” with ${doc.elements.length} elements.`);
+        for (const i of issues) this.log('warn', i);
+        toast(issues.length ? 'warn' : 'ok', issues.length ? `${issues.length} note${issues.length === 1 ? '' : 's'} in the Output panel.` : `${doc.elements.length} elements.`, { title: `Imported ${label}` });
+        return;
       }
+      this.setStatusMessage(`Reading ${label}…`);
+      const named = await Promise.all(files.map(async f => ({ name: f.name, bytes: new Uint8Array(await f.arrayBuffer()) })));
+      const { summary, doc: raw } = await this.engine.importFiles(named);
+      this.setStatusMessage('');
+      if (!(await importDialog(summary, files.map(f => f.name)))) { this.log('info', `Import of “${label}” cancelled.`); return; }
+      // The engine's document passes the same gate as any file; it should need no changes.
+      const { doc, issues } = normalizeDocument(raw);
       this.load(doc, newDocId());
+      this.start = summary.fidelity.start.busIds.length ? summary.fidelity.start : null;
       await this.save();
-      this.log('ok', `Imported “${file.name}” as “${doc.name}” with ${doc.elements.length} elements.`);
+      const z = summary.size;
+      this.log('ok', `Imported “${label}” as “${doc.name}”: ${z.nodes} nodes and ${z.branches} branches as ${doc.elements.length} elements.`);
+      for (const n of [...summary.report.notes, ...summary.conversion]) this.log('info', n);
+      for (const v of summary.validation) this.log(v.severity === 'error' ? 'error' : 'warn', `${v.id}: ${v.message}`);
       for (const i of issues) this.log('warn', i);
-      toast(issues.length ? 'warn' : 'ok', issues.length ? `${issues.length} note${issues.length === 1 ? '' : 's'} in the Output panel.` : `${doc.elements.length} elements.`, { title: `Imported ${file.name}` });
+      toast('ok', `${doc.elements.length.toLocaleString('en-GB')} elements. The import notes are in the Output panel.`, { title: `Imported ${label}` });
     } catch (error) {
+      this.setStatusMessage('');
       const msg = error instanceof Error ? error.message : String(error);
-      this.log('error', `Import of “${file.name}” failed: ${msg}`);
+      this.log('error', `Import of “${label}” failed: ${msg}`);
       toast('error', msg, { title: 'Import failed' });
     }
   }
@@ -277,10 +304,10 @@ export class App {
   installDrop() {
     window.addEventListener('dragover', e => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); });
     window.addEventListener('drop', e => {
-      const f = e.dataTransfer?.files?.[0];
-      if (!f) return;
+      const files = [...(e.dataTransfer?.files ?? [])];
+      if (!files.length) return;
       e.preventDefault();
-      this.importFileObject(f);
+      this.importFiles(files);
     });
   }
 
@@ -536,7 +563,12 @@ export class App {
     const revision = this.networkRevision;
     const t0 = performance.now();
     try {
-      const { result, ms } = await this.engine.run(kind, doc, {}, (done, total) => this.showProgress(done, total));
+      // An imported network's load flow starts from the import's voltages, then from its own last solution.
+      const options = kind === 'loadflow' && this.start ? { start: this.start } : {};
+      const { result, ms } = await this.engine.run(kind, doc, options, (done, total) => this.showProgress(done, total));
+      if (kind === 'loadflow' && this.start && result.converged) {
+        this.start = { busIds: result.buses.map((/** @type {any} */ b) => b.id), vm: result.buses.map((/** @type {any} */ b) => b.vm), va: result.buses.map((/** @type {any} */ b) => b.va) };
+      }
       this.results[kind] = { result, ms, revision };
       this.report(kind, result, ms, !!opt.auto);
       if (kind === 'rms') this.rmsIndex = result.t.length - 1;
@@ -801,7 +833,7 @@ export class App {
     c.add({ id: 'file.new', label: 'New network', icon: 'new', group: 'File', run: () => this.newDocument() });
     c.add({ id: 'file.open', label: 'Open saved network', icon: 'open', keys: ['Mod+O'], global: true, group: 'File', run: () => openBackstage(this, 'open') });
     c.add({ id: 'file.save', label: 'Save now', icon: 'save', keys: ['Mod+S'], global: true, group: 'File', hint: 'Networks save automatically; this saves immediately', run: async () => { await this.save(); toast('ok', this.library.persistent ? 'Saved in this browser.' : 'Kept for this session. Export to keep a copy.'); } });
-    c.add({ id: 'file.import', label: 'Import file', icon: 'import', keys: ['Mod+Shift+O'], global: true, group: 'File', hint: 'Import a PowerStudio file or a MATPOWER case', run: () => this.importFile('.json,.m,application/json,text/plain') });
+    c.add({ id: 'file.import', label: 'Import file', icon: 'import', keys: ['Mod+Shift+O'], global: true, group: 'File', hint: 'Import a PowerStudio file, a CGMES model, a PSS/E RAW file or a MATPOWER case', run: () => this.importFile(`.json,${IMPORT_TYPES}`) });
     c.add({ id: 'file.export', label: 'Export PowerStudio file', icon: 'export', keys: ['Mod+Shift+S'], global: true, group: 'File', run: () => this.exportJSON() });
     c.add({ id: 'file.exportSvg', label: 'Export diagram as SVG', icon: 'image', group: 'File', run: () => { download(new Blob([this.viewport.exportSVG()], { type: 'image/svg+xml' }), fileName(this.store.doc.name, '.svg')); this.log('ok', 'Exported the diagram as SVG.'); } });
     c.add({ id: 'file.exportPng', label: 'Export diagram as PNG', icon: 'image', group: 'File', run: async () => { download(await this.viewport.exportPNG(), fileName(this.store.doc.name, '.png')); this.log('ok', 'Exported the diagram as PNG.'); } });

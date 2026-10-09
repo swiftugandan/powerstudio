@@ -220,11 +220,32 @@ test('imports a MATPOWER case and solves it to the MATPOWER solution', async ({ 
   const chooser = page.waitForEvent('filechooser');
   await page.locator('.backstage .card', { hasText: 'MATPOWER case' }).click();
   await (await chooser).setFiles('tests/fixtures/case30.m');
+  await expect(page.locator('.dialog .import-status .pill')).toHaveText('Exact');
+  await page.locator('.dialog .btn.primary', { hasText: 'Open network' }).click();
   await expect(page.locator('#doc-name')).toHaveValue('case30');
   await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('30');
   await loadFlow(page);
   const k = golden.bus.indexOf(30);
   await expect(page.locator('table.grid tbody tr[data-id="B30"]')).toContainText(golden.vm[k].toFixed(4));
+});
+
+test('imports a PSS/E RAW file, shows what it read, and solves it to the MATPOWER solution', async ({ page }) => {
+  const case14 = JSON.parse(readFileSync(new URL('../oracle/golden/matpower-case14.json', import.meta.url), 'utf8'));
+  await open(page);
+  const chooser = page.waitForEvent('filechooser');
+  await page.keyboard.press('ControlOrMeta+Shift+O');
+  await (await chooser).setFiles('tests/fixtures/case14.raw');
+  const dialog = page.locator('.dialog');
+  await expect(dialog.locator('h2')).toHaveText('Import case14.raw');
+  await expect(dialog.locator('.import-lead')).toContainText('PSS/E RAW version 33 · 14 nodes · 20 branches');
+  await expect(dialog.locator('.import-status .pill')).toHaveText('Exact');
+  await dialog.locator('summary', { hasText: 'What was read' }).click();
+  await expect(dialog.locator('.import-classes')).toContainText('BUS DATA');
+  await dialog.locator('.btn.primary', { hasText: 'Open network' }).click();
+  await expect(page.locator('#doc-name')).toHaveValue('case14');
+  await loadFlow(page);
+  const k = case14.bus.indexOf(14);
+  await expect(page.locator('table.grid tbody tr[data-id="B14"]')).toContainText(case14.vm[k].toFixed(4));
 });
 
 test('exports a PowerStudio file that imports again unchanged', async ({ page }) => {

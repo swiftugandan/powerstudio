@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { ieee14 } from '../src/samples/ieee14.js';
-import { importMatpower } from '../src/core/matpower.js';
+import { importFiles } from '../src/engine/exchange.js';
 import { EngineHost } from '../src/engine/host.js';
 import { Studies } from '../src/engine/studies.js';
 import { buildScene } from '../src/render/scene.js';
@@ -18,7 +18,8 @@ import { buildOverlay } from '../src/ui/overlay.js';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (/** @type {string} */ p) => readFileSync(join(root, p), 'utf8');
 /** The engine the app ships, built by npm run build:engine. */
-const engine = new Studies(await EngineHost.create(readFileSync(join(root, 'src/engine/powerstudio-engine.wasm'))));
+const host = await EngineHost.create(readFileSync(join(root, 'src/engine/powerstudio-engine.wasm')));
+const engine = new Studies(host);
 
 /** The diagram palette of a theme, read from the app's own style sheet tokens. @param {'light' | 'dark'} theme */
 export function palette(theme) {
@@ -91,7 +92,7 @@ export function agreement() {
   let mp = 0;
   for (const c of ['case14', 'case30', 'case118']) {
     const g = golden(`matpower-${c}`);
-    const r = engine.loadflow(importMatpower(read(`tests/fixtures/${c}.m`)).doc, { tolerance: 1e-8 });
+    const r = engine.loadflow(importFiles(host, [{ name: `${c}.m`, bytes: new TextEncoder().encode(read(`tests/fixtures/${c}.m`)) }]).doc, { tolerance: 1e-8 });
     g.bus.forEach((/** @type {number} */ b, /** @type {number} */ k) => { mp = Math.max(mp, Math.abs(/** @type {any} */ (r.buses.find(x => x.id === `B${b}`)).vm - g.vm[k])); });
   }
   let pp = 0;

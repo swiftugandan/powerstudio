@@ -26,7 +26,7 @@ Offline copy: download `PowerStudio.html` from the [latest release](https://gith
 | Contingency | N-1 outages of lines, transformers and machines, run in parallel across workers, ranked, with loading and voltage violations and the worst case per element on the diagram | Each case matches an independent load flow with the element out; parallel runs equal the sequential result |
 | Stability | Classical-model RMS simulation with fault, clearing, tripping and load-step events; rotor angle, speed, power and voltage plots; time cursor on the diagram | Equal-area critical clearing time and the linearised swing frequency |
 | Results | Result boxes and colour coding on the diagram, sortable tables, CSV export, an output log, results marked stale after edits, optional recalculation on edit | Browser tests compare table values with MATPOWER |
-| Files | Documents saved automatically in IndexedDB; import PowerStudio JSON or MATPOWER `.m` cases (also by drag and drop); export JSON, SVG, PNG and CSV | Browser tests reload the page, import case30 and round-trip an export |
+| Files | Documents saved automatically in IndexedDB; open CGMES 2.4.15 and 3.0 models, PSS/E RAW files (versions 33 and 35) and MATPOWER `.m` cases (also by drag and drop), with a dialog that shows what was read, what the diagram simplifies and how closely it reproduces the imported load flow; export JSON, SVG, PNG and CSV | The engine's imports agree with PowSyBl on 12 CGMES configurations, 23 RAW files and 7 large MATPOWER grids; the editor's version of every one reproduces the imported load flow to 2e-12 p.u.; browser tests import case30 and a RAW file and round-trip an export |
 | Workspace | Ribbon, model tree, inspector, results dock, status bar, command palette, keyboard shortcuts, undo and redo, light and dark themes, phone layout | Browser tests cover the palette, undo and redo, theme and phone width |
 | Samples | IEEE 14-bus system (MATPOWER case14 data) and Riverside, a 110/20/0.4 kV distribution network | Both are oracle inputs |
 
@@ -126,8 +126,11 @@ loads are constant impedances; faults are bolted three-phase faults at busbars. 
 **Not part of PowerStudio at all.** Protection coordination, harmonics, optimal power flow, state estimation,
 reliability, unbalanced three-phase load flow, cable sizing, arc flash.
 
-**Data and samples.** MATPOWER import reads format version 2 and was tested on case14, case30 and case118. Phase
-shifts that are not multiples of 30° are dropped with a warning. The IEEE 14 sample's ratings and machine data are
+**Data and samples.** MATPOWER import reads format version 2. The diagram has no switches, three-winding
+transformers or static var compensators yet: an imported network's closed switches join their nodes into one busbar,
+a three-winding transformer becomes a star busbar with three two-winding ones, and a compensator becomes a machine
+without active power; the import dialog lists every such simplification. Networks of several thousand busbars open
+and solve, but their automatic diagram is dense; substation diagrams for them are planned (design phase 4). The IEEE 14 sample's ratings and machine data are
 assumptions; on its 132 kV side nothing is earthed, so its earth-fault currents there are a few hundred amperes by
 design. Riverside is invented.
 

@@ -9,6 +9,7 @@
 //! | `study` | `kind`, `options` | PowerStudio document (JSON text); none for `contingency_merge` | the report as JSON text |
 //! | `load_matpower` | | MATPOWER case text | model size and conversion issues |
 //! | `solve_model` | `tolerance` (MVA), `warm_start`, `dc_start`, `q_limits` | | load flow summary |
+//! | `import` | `files`: `[{ name, size }]` | the files' bytes, one after another | format, import report, validation, conversion notes, fidelity and size; the editor's document as payload |
 //!
 //! Reports travel as a payload, not in the header, so the header stays small and the host can parse them separately.
 
@@ -176,6 +177,36 @@ impl Engine {
                     }),
                     Vec::new(),
                 ))
+            }
+            "import" => {
+                // The payload holds the files one after another, in the order and sizes the header lists.
+                let list = req
+                    .header
+                    .get("files")
+                    .and_then(Value::as_array)
+                    .ok_or("the import request lists no files")?;
+                let mut files = Vec::new();
+                let mut at = 0usize;
+                for f in list {
+                    let name = f.get("name").and_then(Value::as_str).ok_or("a file has no name")?;
+                    let size = f.get("size").and_then(Value::as_u64).ok_or("a file has no size")? as usize;
+                    let end = at
+                        .checked_add(size)
+                        .filter(|&e| e <= req.payload.len())
+                        .ok_or("the files exceed the payload")?;
+                    files.push(ps_io::files::File {
+                        name: name.to_string(),
+                        data: req.payload[at..end].to_vec(),
+                    });
+                    at = end;
+                }
+                let t0 = ps_num::clock::now_ms();
+                let result = ps_study::exchange::import_for_editor(files)?;
+                let mut header = serde_json::to_value(&result).map_err(|e| e.to_string())?;
+                if let Some(h) = header.as_object_mut() {
+                    h.insert("ms".into(), json!(ps_num::clock::now_ms() - t0));
+                }
+                Ok(ok(header, result.doc.to_string().into_bytes()))
             }
             other => Err(format!("unknown op \"{other}\"")),
         }

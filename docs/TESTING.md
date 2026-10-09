@@ -81,6 +81,11 @@ cd engine && cargo build --release -p ps-cli && cd ..
 .venv/bin/python scripts/oracle/export_check.py    # every CGMES and PSS/E case, both versions
 ```
 
+Opening other tools' files in the app is checked by `engine/crates/ps-study/tests/document.rs`, which converts every
+reference model into the editor's document and requires its load flow to reproduce the model's, and by
+`tests/import.test.mjs`, which imports MATPOWER and RAW files through the WebAssembly engine
+(`tests/fixtures/case14.raw` is MATPOWER case14 written by `ps export --raw 33`) and lays out a 600-bus network.
+
 CGMES state variables export is checked the same two ways: `engine/crates/ps-study/tests/cgmes_sv.rs` reads every
 exported SV back with PowerStudio's importer, and `scripts/oracle/sv_check.py` has PowSyBl read it in place of each
 configuration's own SV and compares the flows it takes with PowerStudio's.
