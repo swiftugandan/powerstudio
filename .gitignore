@@ -6,3 +6,6 @@ playwright-report/
 .venv/
 __pycache__/
 *.tmp.mjs
+
+engine/target/
+.cache/

@@ -1,0 +1,3 @@
+[target.wasm32-unknown-unknown]
+# SIMD128 is available in every browser PowerStudio supports (Chromium, Firefox, Safari 16.4+).
+rustflags = ["-C", "target-feature=+simd128"]

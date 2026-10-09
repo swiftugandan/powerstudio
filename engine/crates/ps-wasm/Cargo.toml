@@ -1,0 +1,32 @@
+[package]
+name = "ps-wasm"
+description = "The PowerStudio engine's WebAssembly interface: one message-based entry point."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ps-io.workspace = true
+ps-lf.workspace = true
+ps-num = { path = "../ps-num" }
+ps-bridge = { path = "../ps-bridge" }
+serde_json.workspace = true
+
+# The workspace forbids unsafe code; this crate is the one boundary that needs it (raw memory shared with the host),
+# so here it is denied by default and allowed only on the exported functions.
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"

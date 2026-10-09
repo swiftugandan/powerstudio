@@ -1,0 +1,45 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2024"
+rust-version = "1.96"
+license = "MIT"
+repository = "https://github.com/swiftugandan/powerstudio"
+publish = false
+
+[workspace.dependencies]
+faer = { version = "0.24", default-features = false, features = ["std", "sparse-linalg"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ps-sparse = { path = "crates/ps-sparse" }
+ps-io = { path = "crates/ps-io" }
+ps-lf = { path = "crates/ps-lf" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+print_stdout = "warn"
+needless_range_loop = "allow"
+too_many_arguments = "allow"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+
+[profile.bench]
+inherits = "release"
+debug = true

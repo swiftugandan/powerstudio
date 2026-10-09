@@ -1,0 +1,11 @@
+[package]
+name = "ps-num"
+description = "Numeric primitives shared by the PowerStudio engine: complex numbers and the engine clock."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

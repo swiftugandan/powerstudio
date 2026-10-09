@@ -1,0 +1,16 @@
+[package]
+name = "ps-bridge"
+description = "Converts bus-branch formats (MATPOWER today) directly into the load flow's per-unit network."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ps-io.workspace = true
+ps-lf.workspace = true
+ps-num = { path = "../ps-num" }
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Proposal, not started |
+| Status | In progress: phase 0 complete (see section 11) |
 | Date | 2026-10-09 |
 | Scope | Take PowerStudio from a small-network study tool to studies a national transmission operator can rely on, still entirely in the browser, with no server |
 | Starting point | PowerStudio 0.1.0 (this repository): JavaScript solvers with dense matrices, bus-branch model, WebGPU diagram |
@@ -286,16 +286,18 @@ without changing the pool design.
 
 ### 6.3 Memory budget
 
-Each worker has its own 4 GiB ceiling, but the tab as a whole must stay modest. The budget per engine instance, to
-be confirmed by phase 0 measurements:
+Each worker has its own 4 GiB ceiling, but the tab as a whole must stay modest. Phase 0 measured the WebAssembly
+memory of one engine instance after loading a MATPOWER case and solving it (the module's linear memory, which never
+shrinks, so this is the peak):
 
-| Item | 10,000 buses | 70,000 buses |
-| --- | --- | --- |
-| Model (columnar, all classes, about 30 attributes per element) | ~15 MB | ~100 MB |
-| Admittance matrix and Jacobian (about 1 M non-zeros at 70k) | ~4 MB | ~25 MB |
-| LU factors (assuming 3× fill after ordering) | ~10 MB | ~75 MB |
-| Working set for one load flow or one contingency | ~10 MB | ~50 MB |
-| **Per instance** | **~40 MB** | **~250 MB** |
+| Case | Buses | Branches | Engine memory |
+| --- | --- | --- | --- |
+| ACTIVSg10k | 10,000 | 12,706 | 18 MB |
+| ACTIVSg25k | 25,000 | 32,229 | 50 MB |
+| ACTIVSg70k | 70,000 | 88,207 | 256 MB |
+
+The 70k figure includes the 19 MB case text and its parse; the canonical model and result storage will move it, and
+it is re-measured at the end of phase 1.
 
 At 70,000 buses, eight workers need about 2 GB, which a desktop browser can hold. The pool shrinks automatically
 when `navigator.deviceMemory` or a failed allocation says otherwise, and studies degrade to fewer workers rather than
@@ -439,13 +441,14 @@ writes a difference report. The design's own verification makes this comparison 
 | ADR | Decision | Main alternative rejected, and why |
 | --- | --- | --- |
 | 1 | All calculation moves to a Rust engine compiled to WebAssembly; the JavaScript solvers are retired once the engine passes their tests | Optimising the JavaScript solvers: sparse factorisation and dynamic simulation at national scale need memory layout control and SIMD that JavaScript does not give |
-| 2 | Sparse LU behind a `SparseSolver` trait; faer first, an in-house KLU-style solver as fallback, decided by the phase 0 spike | Committing to one library from its documentation: the properties that matter (ordering, symbolic reuse, wasm speed) are undocumented |
+| 2 | Sparse LU behind a `SparseSolver` trait, implemented with faer (confirmed by phase 0: COLAMD ordering, symbolic factorisation reused across numeric refactorisations, near-native speed in `wasm32` with SIMD128) | An in-house KLU-style solver: not needed at the measured speeds; the trait keeps the option open |
 | 3 | Worker pool of independent wasm instances; no SharedArrayBuffer | `coi-serviceworker`: reload on first visit, no `file://`, and a moving part in a sealed app |
 | 4 | Node-breaker model shaped after the CGMES profiles; bus-branch is a derived view | Bus-branch only: national models and switching studies are node-breaker |
 | 5 | Edits travel as typed operations; one log serves undo, workers, scenarios and audit | Re-sending documents: impossible at 70,000 buses |
 | 6 | Projects in OPFS, catalogue in IndexedDB, File System Access where available | IndexedDB only: poor for large binary files and streaming results |
 | 7 | UI stays plain ES modules with strict `checkJs`; engine types reach the UI through generated `.d.ts` files | A framework or a TypeScript build step: no benefit that outweighs the dependency and the break with the current codebase |
 | 8 | Dynamic models in Rust behind a `DynModel` trait, delivered in validated waves | A model description language interpreted at run time: slower, and harder to verify than compiled, tested models |
+| 10 | The WebAssembly boundary is one exported function, `ps_call`, taking and returning an envelope (u32 header length, JSON header, binary payload), plus `ps_alloc` and `ps_free`; no generated bindings | `wasm-bindgen`: generated glue tied to a tool version, many exports that grow with the engine. A single entry point keeps the boundary stable and the build free of extra tools |
 | 9 | Short circuit validated against open references only (pandapower's encoding of the TR 60909-4 and VDE examples); it stays "IEC 60909-style" | Buying the standard to claim conformance: the project makes no purchases. Claiming conformance from formulas alone: not evidence |
 
 ## 11. Roadmap
@@ -454,7 +457,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 
 | Phase | Delivers | Exit criteria |
 | --- | --- | --- |
-| **0. Spikes** | Sparse LU in `wasm32` on ACTIVSg25k and 70k Jacobians (faer and a minimal KLU-style prototype); worker pool with snapshot transfer; OPFS throughput; embedded-wasm size | Measured numbers recorded in this document; ADR-2 confirmed or switched; memory budget table replaced with measurements |
+| **0. Spikes** — done | Sparse LU in `wasm32` on ACTIVSg25k and 70k; faer confirmed; WebAssembly memory measured | See the phase 0 results below |
 | **1. Engine foundation** | Rust workspace, model and operations, snapshot format, topology processor, sparse Newton-Raphson with 0.1's controls, coordinator and pool, `ps-cli` | Every 0.1 oracle test passes on the engine; ACTIVSg25k solves within target; the JavaScript solvers are deleted |
 | **2. Data exchange** | CGMES 2.4.15 and 3.0 import (EQ, TP, SSH, SV, DL, GL) and SSH/SV export; PSS/E RAW import and export; validation reports | CGMES conformity configurations and ACTIVSg cases import and agree with PowSyBl to the fidelity bar |
 | **3. Steady-state completeness** | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis |
@@ -462,6 +465,32 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | **5. Dynamics** | DAE solver, events, DYR import, wave D1, then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases |
 | **6. Short circuit** | Breaking and steady-state currents, DC component, power station units, converter sources, all fault types; the superposition method | The TR 60909-4 example network from pandapower's open test suite reproduced to its stated tolerances for three-phase and line-to-line faults, maximum and minimum, power station units included |
 | **7. Release hardening** | Reproducible builds, SBOM, attestations, Firefox and WebKit test projects, accessibility audit, user guide, operator benchmark kit | The assurance bar passes; 1.0.0 released |
+
+### Phase 0 results (measured 2026-10-09)
+
+Engine at commit `phase-0`: Rust 1.96.0, faer 0.24.4, `wasm32-unknown-unknown` with SIMD128, release profile with
+fat LTO. Native runs on an Apple M5 Pro; WebAssembly runs under Node 26 (V8, the JavaScript engine of Chromium).
+Solve times are full AC Newton-Raphson load flows to 1e-8 p.u., best of three, including ordering:
+
+| Case | Buses | Native | WebAssembly | Iterations |
+| --- | --- | --- | --- | --- |
+| ACTIVSg2000 | 2,000 | 20 ms | 22 ms | 4 |
+| PEGASE 9241 | 9,241 | 79 ms | — | 6 |
+| ACTIVSg10k | 10,000 | 75 ms | 82 ms | 5 |
+| PEGASE 13659 | 13,659 | 83 ms | 91 ms | 5 |
+| ACTIVSg25k | 25,000 | 280 ms | 285 ms | 5 |
+| ACTIVSg70k, started from the case's stored voltages | 70,000 | 488 ms | 664 ms | 6 |
+
+Findings:
+
+- **faer meets the scale bar in WebAssembly.** The 70,000-bus load flow takes 0.66 s, within the 2 s target; the
+  warm-start target of 0.5 s is narrowly missed and is revisited when the canonical model replaces the bridge code.
+- **Agreement with MATPOWER is unchanged:** case14, case30 and case118 match the PYPOWER goldens to 5e-10 p.u.
+- **ACTIVSg70k does not converge from a flat or DC start, in PowerStudio or in PYPOWER**; both converge from the
+  voltages stored in the case. Real operator models always carry a previous solution (CGMES SV), so warm starts are
+  the normal path, but cold-start robustness (an optimal step multiplier, a fast-decoupled pre-solve) is added to
+  phase 3.
+- **The module is 486 KB** before compression.
 
 ## 12. Risks
 

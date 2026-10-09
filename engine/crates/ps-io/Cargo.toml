@@ -1,0 +1,11 @@
+[package]
+name = "ps-io"
+description = "Importers and exporters for power system data formats: MATPOWER, PSS/E RAW and DYR, CGMES."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
