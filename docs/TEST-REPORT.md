@@ -1,6 +1,6 @@
 # Test report
 
-Everything below was executed on 2026-10-09 for commit `d6cc360`. Numbers are
+Everything below was executed on 2026-10-09 for commit `6e803ce` (release v0.1.0). Numbers are
 copied from the runs; nothing here is estimated. Re-run the commands in [TESTING.md](TESTING.md) to reproduce them.
 
 ## Environments
@@ -8,7 +8,7 @@ copied from the runs; nothing here is estimated. Re-run the commands in [TESTING
 | Environment | Details |
 | --- | --- |
 | Local | macOS 26.7.1 (25G241), Apple M5 Pro, Node.js v26.0.0, Playwright 1.64.0 with Chromium 156.0.8078.4 (Chrome for Testing) and Chromium headless shell 156.0.8078.4 |
-| CI | GitHub Actions `ubuntu-24.04`, Node.js v22.23.3, the same Playwright and Chromium builds; [run 37953787556](https://github.com/swiftugandan/powerstudio/actions/runs/37953787556) |
+| CI | GitHub Actions `ubuntu-24.04`, Node.js v22.23.3, the same Playwright and Chromium builds; [run 37955865278](https://github.com/swiftugandan/powerstudio/actions/runs/37955865278) |
 | Oracles | Python 3.12 (uv), pandapower 3.5.6, PYPOWER 5.1.21, numpy 2.4.6, scipy 1.18.1, run locally to produce `tests/oracle/golden/` |
 
 ## Results
@@ -16,10 +16,10 @@ copied from the runs; nothing here is estimated. Re-run the commands in [TESTING
 | Suite | Local (macOS) | CI (Ubuntu) |
 | --- | --- | --- |
 | Type checking (`npm run check`, both configs) | passed | passed |
-| Unit and engine tests (`npm test`) | 61 passed, 0 failed, 152 ms | 61 passed, 0 failed, 792 ms |
+| Unit and engine tests (`npm test`) | 63 passed, 0 failed, 309 ms | 63 passed, 0 failed, 1316 ms |
 | Browser tests, `webgpu` project | 14 passed, 0 failed | 14 passed, 0 failed |
 | Browser tests, `canvas` project | 14 passed, 0 failed | 14 passed, 0 failed |
-| Browser suite wall time | 10.2 s | 24.0 s |
+| Browser suite wall time | 9.7 s | 23.4 s |
 
 The browser tests cover the WebGPU and fallback backends, the load flow against MATPOWER, inspector editing with
 undo and redo, drawing a network with the insert tools, copy and paste, switching in and out of service, keyboard
@@ -82,10 +82,10 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Check | Result |
 | --- | --- |
 | Build determinism | Two builds of the same source are byte-identical (`tests/build.test.mjs`); the local build (Node 26) and the CI build (Node 22) of this commit have the same SHA-256 |
-| Build output | `dist/PowerStudio.html`, 539.3 KiB, sha256 `1a23924cbfbf47d64ff9b7b96db653778bdbfaa73ada2c639cdc16c02cbf0a56` |
-| Published page | The workflow's verify job fetched https://swiftugandan.github.io/powerstudio/ and got the same SHA-256 on the first attempt |
-| Independent check | `curl` of the live page from this machine after deployment returned the same SHA-256 |
-| Live page in a browser | Opened from the Pages origin in local Chromium (build `1a23924c…`): it drew with WebGPU (Apple, metal-3), the IEEE 14 load flow converged in 3 iterations, and the only requests were the page itself and the worker's `blob:` URL |
+| Build output | `dist/PowerStudio.html`, 539.8 KiB, sha256 `1d52de7e4181ddc5ae68093cf6138d73363d98c3487ebc79b8a0d790bbef8eee` |
+| Published site | The workflow's verify job fetched https://swiftugandan.github.io/powerstudio/app/ and `/PowerStudio.html` and got the build's SHA-256 for both on the first attempt; the website at `/` answered 200 |
+| Independent check | The release asset `PowerStudio.html` of v0.1.0, downloaded from GitHub, passes `shasum -a 256 -c` against its published checksum, and equals the local build |
+| Live site in a browser | Opened https://swiftugandan.github.io/powerstudio/ in local Chromium: the website showed the build-time figures (13.393 MW, 27.35 kA, 10 of 20, stays in step); its "Open PowerStudio" button opened `/app/`, which drew with WebGPU (Apple, metal-3) and converged the IEEE 14 load flow in 3 iterations, with no page errors |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
 ## Not verified
