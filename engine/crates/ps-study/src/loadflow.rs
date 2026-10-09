@@ -602,7 +602,22 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
                 mismatch: l.mismatch * sb,
             })
             .collect(),
-        message: sol.message.clone(),
+        message: match sol.worst.first() {
+            Some(&(b, p, q)) if !sol.converged => {
+                let name = calc.topo.buses[b]
+                    .nodes
+                    .first()
+                    .map_or_else(|| bus_ids[b].clone(), |&n| model.name_of(Class::Node, n as usize).to_string());
+                format!(
+                    "{} The largest mismatch is at {name}: {:.1} MW and {:.1} Mvar, at {:.3} p.u.",
+                    sol.message,
+                    p * sb,
+                    q * sb,
+                    sol.vm[b]
+                )
+            }
+            _ => sol.message.clone(),
+        },
         buses,
         branches,
         gens,

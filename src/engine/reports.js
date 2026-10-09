@@ -16,12 +16,14 @@
  * @typedef {{ id: string, sections: number, start: number, max: number }} SectionResult
  * @typedef {{ id: string, stations: [string, string], p1: number, q1: number, p2: number, q2: number, losses: number }} HvdcResult
  * @typedef {{ control: 'slack' | 'reactiveLimits' | 'phaseShifters' | 'taps' | 'shunts', changes: number }} ControlResult
+ * @typedef {{ id: string, p: number, q: number, vm: number }} MismatchResult
  * @typedef {{
  *   converged: boolean, iterations: number, mismatch: number, log: Array<{ iteration: number, mismatch: number }>,
  *   message: string, buses: BusResult[], branches: BranchResult[], gens: UnitResult[], grids: UnitResult[],
  *   svcs: UnitResult[], loads: UnitResult[], shunts: UnitResult[], deenergized: string[], warnings: string[],
  *   totals: { generation: number, load: number, losses: number, generationQ: number, loadQ: number },
  *   hvdc: HvdcResult[], taps: TapResult[], sections: SectionResult[], distributed: number, controls: ControlResult[],
+ *   worst: MismatchResult[],
  *   state: { vm: Float64Array, va: Float64Array }, busIds: string[], timing: EngineTiming,
  * }} LoadFlowResult
  * @typedef {'3ph' | '2ph' | '1ph'} FaultType
