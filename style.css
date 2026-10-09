@@ -637,6 +637,7 @@ table.grid td.muted { color: var(--text-3); }
 }
 @media (max-width: 760px) {
   .mobile-only { display: inline-flex; }
+  .center { grid-template-rows: minmax(0, 1fr) 5px min(var(--dock-h), 34vh); }
   .workspace { grid-template-columns: 0 0 minmax(0, 1fr) 0 0 !important; position: relative; }
   .splitter-v { display: none; }
   .panel-left, .panel-right { position: absolute; top: 0; bottom: 0; width: min(320px, 86vw); z-index: 20; box-shadow: var(--shadow-2); visibility: visible !important; }

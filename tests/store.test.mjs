@@ -29,10 +29,11 @@ test('invalid values are refused and leave no trace', () => {
 
 test('edits with the same coalescing key become one undo step', () => {
   const s = new DocumentStore(riverside());
-  for (let x = 0; x < 5; x++) s.transact('Move', tx => tx.set('B3', 'x', -480 + x * 20), { coalesce: 'drag' });
+  const x0 = /** @type {number} */ (s.get('B3')?.x);
+  for (let k = 1; k <= 5; k++) s.transact('Move', tx => tx.set('B3', 'x', x0 + k * 20), { coalesce: 'drag' });
   assert.equal(s.past.length, 1);
   s.undo();
-  assert.equal(s.get('B3')?.x, -480);
+  assert.equal(s.get('B3')?.x, x0);
 });
 
 test('changes report whether the network or only the drawing changed', () => {

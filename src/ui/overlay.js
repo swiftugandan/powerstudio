@@ -74,6 +74,7 @@ export function buildOverlay(kind, result, doc, P, opt) {
     const maxC = Math.max(1e-9, ...r.contributions.map(c => Math.max(c.iFrom, c.iTo)));
     for (const c of r.contributions) {
       const i = Math.max(c.iFrom, c.iTo);
+      if (i < 0.005) continue; // branches the fault current does not reach
       elements.set(c.id, { mid: `${fixed(i, 2)} kA`, color: colour ? mix(P.muted, P.res.high, Math.min(1, i / maxC)) : undefined });
     }
     if (colour) legend = { kind: 'ramp', title: r.location ? 'Fault current share' : 'Initial short-circuit current', stops: [P.res.ok, P.res.high], from: 'low', to: 'high' };

@@ -14,9 +14,9 @@
    "vmin": 0.95,
    "vmax": 1.1,
    "zone": "110 kV",
-   "x": -120,
+   "x": 0,
    "y": -380,
-   "len": 260,
+   "len": 240,
    "orient": "h"
   },
   {
@@ -27,9 +27,9 @@
    "vmin": 0.97,
    "vmax": 1.05,
    "zone": "20 kV",
-   "x": -120,
-   "y": -120,
-   "len": 420,
+   "x": 0,
+   "y": -140,
+   "len": 480,
    "orient": "h"
   },
   {
@@ -40,7 +40,7 @@
    "vmin": 0.95,
    "vmax": 1.05,
    "zone": "20 kV",
-   "x": -480,
+   "x": -360,
    "y": 120,
    "len": 160,
    "orient": "h"
@@ -53,8 +53,8 @@
    "vmin": 0.95,
    "vmax": 1.05,
    "zone": "20 kV",
-   "x": -480,
-   "y": 360,
+   "x": -360,
+   "y": 380,
    "len": 160,
    "orient": "h"
   },
@@ -66,7 +66,7 @@
    "vmin": 0.95,
    "vmax": 1.05,
    "zone": "20 kV",
-   "x": 240,
+   "x": 400,
    "y": 120,
    "len": 180,
    "orient": "h"
@@ -79,9 +79,9 @@
    "vmin": 0.95,
    "vmax": 1.05,
    "zone": "Generation",
-   "x": 520,
+   "x": 680,
    "y": 120,
-   "len": 100,
+   "len": 120,
    "orient": "h"
   },
   {
@@ -92,8 +92,8 @@
    "vmin": 0.95,
    "vmax": 1.05,
    "zone": "20 kV",
-   "x": 240,
-   "y": 360,
+   "x": 400,
+   "y": 380,
    "len": 160,
    "orient": "h"
   },
@@ -105,9 +105,9 @@
    "vmin": 0.9,
    "vmax": 1.1,
    "zone": "0.4 kV",
-   "x": -120,
-   "y": 360,
-   "len": 140,
+   "x": 0,
+   "y": 380,
+   "len": 160,
    "orient": "h"
   },
   {
@@ -118,9 +118,9 @@
    "vmin": 0.95,
    "vmax": 1.05,
    "zone": "20 kV",
-   "x": -120,
+   "x": 0,
    "y": 120,
-   "len": 140,
+   "len": 160,
    "orient": "h"
   },
   {
@@ -162,7 +162,7 @@
    "tapMax": 9,
    "uk0": 12,
    "ur0": 0.4,
-   "hvPos": -0.25,
+   "hvPos": -0.3,
    "lvPos": -0.15,
    "bend": 0
   },
@@ -188,7 +188,7 @@
    "tapMax": 9,
    "uk0": 12,
    "ur0": 0.4,
-   "hvPos": 0.25,
+   "hvPos": 0.3,
    "lvPos": 0.15,
    "bend": 0
   },
@@ -214,9 +214,9 @@
    "tapMax": 2,
    "uk0": 8,
    "ur0": 0.6,
-   "hvPos": 0.35,
-   "lvPos": -0.2,
-   "bend": 0
+   "hvPos": 0.5,
+   "lvPos": -0.5,
+   "bend": 60
   },
   {
    "id": "T4",
@@ -260,8 +260,8 @@
    "r0": 0.5,
    "x0": 0.33,
    "b0": 125.66,
-   "fromPos": -0.42,
-   "toPos": 0.2,
+   "fromPos": -0.45,
+   "toPos": 0.3,
    "bend": 0
   },
   {
@@ -301,7 +301,7 @@
    "x0": 0.33,
    "b0": 125.66,
    "fromPos": 0.3,
-   "toPos": -0.3,
+   "toPos": -0.35,
    "bend": 0
   },
   {
@@ -321,7 +321,7 @@
    "x0": 0.33,
    "b0": 125.66,
    "fromPos": 0.3,
-   "toPos": 0.05,
+   "toPos": 0,
    "bend": 0
   },
   {
@@ -340,7 +340,7 @@
    "r0": 0.46,
    "x0": 1.25,
    "b0": 1.5,
-   "fromPos": 0.42,
+   "fromPos": 0.45,
    "toPos": -0.3,
    "bend": 0
   },
@@ -396,7 +396,7 @@
    "inService": true,
    "p": 6.5,
    "q": 2.1,
-   "pos": 0.25,
+   "pos": 0.2,
    "side": "below"
   },
   {
@@ -418,7 +418,7 @@
    "inService": true,
    "p": 3.2,
    "q": 1,
-   "pos": -0.1,
+   "pos": 0.3,
    "side": "below"
   },
   {
@@ -446,25 +446,25 @@
   {
    "id": "D6",
    "cls": "load",
-   "name": "Riverside industrial estate",
+   "name": "Industrial estate",
    "bus": "B2",
    "inService": true,
    "p": 9,
    "q": 3.6,
-   "pos": -0.3,
-   "side": "below"
+   "pos": -0.42,
+   "side": "above"
   },
   {
    "id": "S1",
    "cls": "shunt",
-   "name": "20 kV capacitor bank",
+   "name": "Capacitor bank",
    "bus": "B2",
    "inService": true,
    "q": 3,
    "p": 0,
    "vn": 20,
-   "pos": 0.3,
-   "side": "below"
+   "pos": 0.42,
+   "side": "above"
   }
  ],
  "study": {

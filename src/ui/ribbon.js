@@ -25,7 +25,7 @@ export const TABS = [
     { label: 'Branches', items: [{ cmd: 'tool.line', size: 'large' }, { cmd: 'tool.trafo', size: 'large' }] },
     { label: 'Sources', items: [{ cmd: 'tool.gen', size: 'large' }, { cmd: 'tool.extgrid', size: 'large' }] },
     { label: 'Consumers', items: [{ cmd: 'tool.load', size: 'large' }, { cmd: 'tool.shunt', size: 'large' }] },
-    { label: 'Networks', items: [{ cmd: 'file.import', size: 'large' }, { stack: ['layout.arrange', 'tool.select'] }] },
+    { label: 'Networks', items: [{ cmd: 'file.import', size: 'large' }, { cmd: 'layout.arrange', size: 'large' }] },
   ] },
   { id: 'calculate', label: 'Calculate', groups: [
     { label: 'Steady state', items: [{ cmd: 'calc.loadflow', size: 'large' }, { stack: ['calc.autoLoadFlow', 'calc.qlimits', 'calc.dcStart'] }] },

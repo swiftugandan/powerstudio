@@ -498,6 +498,15 @@ export class App {
     this.tryEdit('Switch', () => this.store.transact(on ? 'Switch into service' : 'Switch out of service', tx => { for (const e of els) tx.set(/** @type {Element} */ (e).id, 'inService', on); }));
   }
 
+  /** Lays the whole diagram out again from the topology, as one undoable step. */
+  arrange() {
+    const doc = structuredClone(this.store.doc);
+    autoLayout(doc);
+    const keys = ['x', 'y', 'len', 'orient', 'fromPos', 'toPos', 'hvPos', 'lvPos', 'pos', 'side', 'bend'];
+    this.store.transact('Arrange diagram', tx => { for (const el of doc.elements) for (const k of keys) if (k in el && this.store.get(el.id)?.[k] !== el[k]) tx.set(el.id, k, el[k]); });
+    this.viewport.fit();
+  }
+
   /** @param {number} dx @param {number} dy */
   nudge(dx, dy) {
     const buses = [...this.selection].map(id => this.store.get(id)).filter(e => e?.cls === 'bus');
@@ -814,13 +823,7 @@ export class App {
       c.add({ id: `edit.nudge${key}`, label: `Move ${key.slice(5).toLowerCase()}`, group: 'Edit', keys: [key], palette: false, run: () => this.nudge(dx, dy) });
       c.add({ id: `edit.nudgeFar${key}`, label: `Move ${key.slice(5).toLowerCase()} far`, group: 'Edit', keys: [`Shift+${key}`], palette: false, run: () => this.nudge(dx * 5, dy * 5) });
     }
-    c.add({ id: 'layout.arrange', label: 'Arrange automatically', icon: 'layout', group: 'Edit', hint: 'Lay the diagram out again from the network topology', run: () => {
-      const doc = structuredClone(this.store.doc);
-      autoLayout(doc);
-      const keys = ['x', 'y', 'len', 'orient', 'fromPos', 'toPos', 'hvPos', 'lvPos', 'pos', 'side', 'bend'];
-      this.store.transact('Arrange diagram', tx => { for (const el of doc.elements) for (const k of keys) if (k in el && this.store.get(el.id)?.[k] !== el[k]) tx.set(el.id, k, el[k]); });
-      this.viewport.fit();
-    } });
+    c.add({ id: 'layout.arrange', label: 'Arrange', icon: 'layout', group: 'Edit', hint: 'Lay the diagram out again from the network topology', run: () => this.arrange() });
     // Tools
     tool('select', 'Select', 'select', 'V', 'Select and move elements');
     tool('pan', 'Pan', 'pan', 'H', 'Drag to move the view; you can also hold Space');
