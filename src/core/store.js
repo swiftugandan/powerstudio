@@ -172,7 +172,13 @@ export class Tx {
   remove(id) {
     const el = this.store.get(id);
     if (!el) return;
-    if (el.cls === 'bus') for (const other of [...this.store.doc.elements]) if (other.cls !== 'bus' && busesOf(other).includes(id)) this.remove(other.id);
+    if (el.cls === 'bus') {
+      for (const other of [...this.store.doc.elements]) if (other.cls !== 'bus' && busesOf(other).includes(id)) this.remove(other.id);
+      // Optional busbar references (a regulated busbar) fall back to their default.
+      for (const other of this.store.doc.elements) {
+        for (const f of CLASSES[other.cls].fields) if (f.type === 'bus' && f.optional !== undefined && other[f.key] === id) this.set(other.id, f.key, '');
+      }
+    }
     const index = this.store.doc.elements.indexOf(el);
     this.run({ type: 'remove', el, index });
   }

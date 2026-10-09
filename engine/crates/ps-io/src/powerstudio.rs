@@ -9,8 +9,9 @@
 
 use ps_model::study::StudyCase;
 use ps_model::{
-    Area, Class, CurrentLimit, ExternalGrid, Generator, Line, Load, MachineControl, MachineDynamics,
-    MachineShortCircuit, Model, Node, NodeKind, NodeRef, RatioTap, Shunt, Transformer2, Winding,
+    Area, Class, CurrentLimit, ExternalGrid, FlowControl, Generator, Line, Load, MachineControl, MachineDynamics,
+    MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap, Shunt, Transformer2, VoltageControl,
+    Winding,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -71,6 +72,34 @@ pub fn vector_group(group: &str) -> Option<(Winding, Winding, u8)> {
         _ => None,
     };
     Some((conn(&letters[..split])?, conn(&letters[split..])?, clock % 12))
+}
+
+/// An optional busbar reference of an element: `None` when empty (the element's own choice) and, reported, when the
+/// busbar does not exist.
+fn optional_bus(
+    e: &El,
+    key: &str,
+    node_of: &HashMap<&str, u32>,
+    id: &str,
+    issues: &mut Vec<String>,
+) -> Option<NodeRef> {
+    let b = e.text(key);
+    if b.is_empty() {
+        return None;
+    }
+    let n = node_of.get(b).map(|&n| NodeRef(n));
+    if n.is_none() {
+        issues.push(format!(
+            "{id}: regulated busbar \"{b}\" does not exist; the default is used."
+        ));
+    }
+    n
+}
+
+/// ZIP shares from the constant impedance and constant current percentages; the rest is constant power.
+fn zip(z_pct: f64, i_pct: f64) -> [f64; 3] {
+    let (z, i) = (z_pct / 100.0, i_pct / 100.0);
+    [z, i, 1.0 - z - i]
 }
 
 /// Reads a document from its JSON text.
@@ -251,6 +280,54 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                         issues.push(format!("{id}: unknown vector group \"{group}\"; Dyn11 is used."));
                         (Winding::D, Winding::Yn, 11)
                     });
+                // The tap changer: a ratio changer on the HV winding, or a phase changer that makes the LV side lag;
+                // automatic control holds a busbar voltage (ratio) or the flow into the HV winding (phase).
+                let control = e.flag("tapControl", false);
+                let phase = e.text("tapKind") == "phase";
+                let (low, high, neutral, position) = (
+                    e.int("tapMin", -9),
+                    e.int("tapMax", 9),
+                    e.int("tapNeutral", 0),
+                    e.int("tapPos", 0),
+                );
+                let ratio_control = (control && !phase).then(|| {
+                    let node = optional_bus(&e, "ctrlBus", &node_of, &id, &mut issues).unwrap_or(nodes[1]);
+                    let kv = m.nominal_kv(node);
+                    VoltageControl {
+                        enabled: true,
+                        node,
+                        target_kv: e.num("vTarget", 1.0) * kv,
+                        deadband_kv: e.num("vBand", 2.0) / 100.0 * kv,
+                    }
+                });
+                let ratio_taps = if phase {
+                    Vec::new()
+                } else {
+                    vec![RatioTap {
+                        end: 1,
+                        low,
+                        high,
+                        neutral,
+                        step_pct: e.num("tapStep", 1.25),
+                        position,
+                        control: ratio_control,
+                        table: Vec::new(),
+                    }]
+                };
+                let phase_tap = phase.then(|| PhaseTap {
+                    end: 1,
+                    low,
+                    high,
+                    neutral,
+                    step_deg: e.num("phaseStep", 1.0),
+                    position,
+                    control: control.then(|| FlowControl {
+                        enabled: true,
+                        target_mw: e.num("pTarget", 0.0),
+                        deadband_mw: e.num("pBand", 5.0),
+                    }),
+                    table: Vec::new(),
+                });
                 m.transformers2.push(Transformer2 {
                     id,
                     name,
@@ -273,17 +350,8 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     conn2,
                     r0,
                     x0,
-                    ratio_taps: vec![RatioTap {
-                        end: 1,
-                        low: e.int("tapMin", -9),
-                        high: e.int("tapMax", 9),
-                        neutral: e.int("tapNeutral", 0),
-                        step_pct: e.num("tapStep", 1.25),
-                        position: e.int("tapPos", 0),
-                        control: None,
-                        table: Vec::new(),
-                    }],
-                    phase_tap: None,
+                    ratio_taps,
+                    phase_tap,
                     limits: Vec::new(),
                 });
             }
@@ -293,6 +361,13 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     "Reference" => MachineControl::Reference,
                     _ => MachineControl::Pv,
                 };
+                let (sn, cos_phi) = (e.num("sn", 60.0), e.num("cosphi", 0.85));
+                // Zero means the rating: the rated power times the rated power factor.
+                let p_max = match e.num("pmax", 0.0) {
+                    p if p > 0.0 => p,
+                    _ => sn * cos_phi,
+                };
+                let regulated_node = optional_bus(&e, "regBus", &node_of, &id, &mut issues).filter(|&r| r != nodes[0]);
                 m.generators.push(Generator {
                     id,
                     name,
@@ -302,20 +377,20 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     p: e.num("p", 50.0),
                     q: e.num("q", 0.0),
                     v_set: e.num("vset", 1.0),
-                    regulated_node: None,
+                    regulated_node,
                     angle: e.num("angle", 0.0),
                     q_min: e.num("qmin", -30.0),
                     q_max: e.num("qmax", 40.0),
-                    p_min: 0.0,
-                    p_max: 0.0,
-                    rated_mva: e.num("sn", 60.0),
+                    p_min: e.num("pmin", 0.0),
+                    p_max,
+                    rated_mva: sn,
                     rated_kv: e.num("vn", 10.5),
-                    participation: 0.0,
+                    participation: e.num("participation", 1.0).max(0.0),
                     reference_priority: 0,
                     sc: MachineShortCircuit {
                         xdss: e.num("xdss", 0.16),
                         rs: e.num("rs", 0.0024),
-                        cos_phi: e.num("cosphi", 0.85),
+                        cos_phi,
                         earthed: false,
                     },
                     dynamics: MachineDynamics {
@@ -346,11 +421,21 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                 in_service,
                 p: e.num("p", 10.0),
                 q: e.num("q", 3.0),
-                p_zip: [0.0, 0.0, 1.0],
-                q_zip: [0.0, 0.0, 1.0],
+                p_zip: zip(e.num("pZ", 0.0), e.num("pI", 0.0)),
+                q_zip: zip(e.num("qZ", 0.0), e.num("qI", 0.0)),
             }),
             Class::Shunt => {
                 let vn = e.num("vn", 110.0);
+                let control = e.flag("vControl", false).then(|| {
+                    let node = optional_bus(&e, "ctrlBus", &node_of, &id, &mut issues).unwrap_or(nodes[0]);
+                    let kv = m.nominal_kv(node);
+                    VoltageControl {
+                        enabled: true,
+                        node,
+                        target_kv: e.num("vTarget", 1.0) * kv,
+                        deadband_kv: e.num("vBand", 2.0) / 100.0 * kv,
+                    }
+                });
                 m.shunts.push(Shunt {
                     id,
                     name,
@@ -359,9 +444,9 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     nominal_kv: vn,
                     g_per_section: e.num("p", 0.0) / (vn * vn),
                     b_per_section: e.num("q", 10.0) / (vn * vn),
-                    sections: 1,
-                    max_sections: 1,
-                    control: None,
+                    sections: u32::try_from(e.int("sections", 1)).unwrap_or(0),
+                    max_sections: u32::try_from(e.int("maxSections", 1)).unwrap_or(1).max(1),
+                    control,
                     points: Vec::new(),
                 });
             }

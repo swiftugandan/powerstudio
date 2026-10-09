@@ -30,6 +30,7 @@ export function fieldRow(f, value, commit, ctx = {}) {
   } else if (f.type === 'enum' || f.type === 'bus') {
     input = h('select', { id, class: 'input' });
     const options = f.type === 'bus' ? (ctx.buses ?? []).map(b => ({ value: b.id, label: b.name || b.id })) : (f.options ?? []).map(o => ({ value: o, label: enumLabel(f.key, o) }));
+    if (f.type === 'bus' && f.optional !== undefined) options.unshift({ value: '', label: f.optional });
     for (const o of options) input.append(h('option', { value: o.value, text: o.label }));
     input.value = String(value);
     input.addEventListener('change', () => showError(commit(input.value)));
@@ -67,5 +68,10 @@ export function enumLabel(key, v) {
   if (key === 'orient') return v === 'h' ? 'Horizontal' : 'Vertical';
   if (key === 'side') return v === 'above' ? 'Above / left' : 'Below / right';
   if (key === 'magnetising') return /** @type {Record<string, string>} */ ({ both: 'Both windings', hv: 'HV winding', lv: 'LV winding' })[v] ?? v;
+  if (key === 'tapKind') return v === 'phase' ? 'Phase shift' : 'Voltage ratio';
+  if (key === 'balance') return /** @type {Record<string, string>} */ ({
+    reference: 'Reference machine or external grid', maxP: 'Machines, by maximum power', targetP: 'Machines, by present power',
+    factor: 'Machines, by participation factor', margin: 'Machines, by remaining margin', load: 'Loads, by active power',
+  })[v] ?? v;
   return v;
 }

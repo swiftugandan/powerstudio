@@ -177,11 +177,32 @@ export class Dock {
   renderLoadFlow() {
     const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').LoadFlowResult, ms: number }} */ (app.results.loadflow);
     const pill = r.converged ? h('span', { class: 'pill ok', html: `${icon('check', 13)}Converged in ${r.iterations} iteration${r.iterations === 1 ? '' : 's'}` }) : h('span', { class: 'pill bad', html: `${icon('error', 13)}${esc(r.message)}` });
-    const summary = h('div', { class: 'summary', html: `<span>Generation <b>${fixed(r.totals.generation, 2)} MW</b></span><span>Load <b>${fixed(r.totals.load, 2)} MW</b></span><span>Losses <b>${fixed(r.totals.losses, 3)} MW</b></span><span>Mismatch <b>${r.mismatch.toExponential(1)} MVA</b></span><span>Time <b>${duration(ms)}</b></span>` });
-    const seg = this.segmented([['buses', `Busbars ${r.buses.length}`], ['branches', `Branches ${r.branches.length}`], ['units', `Machines and loads ${r.gens.length + r.grids.length + r.loads.length + r.shunts.length}`]], this.lfView, v => { this.lfView = v; });
+    const shared = r.distributed ? `<span>Shared imbalance <b>${fixed(r.distributed, 2)} MW</b></span>` : '';
+    const summary = h('div', { class: 'summary', html: `<span>Generation <b>${fixed(r.totals.generation, 2)} MW</b></span><span>Load <b>${fixed(r.totals.load, 2)} MW</b></span><span>Losses <b>${fixed(r.totals.losses, 3)} MW</b></span>${shared}<span>Mismatch <b>${r.mismatch.toExponential(1)} MVA</b></span><span>Time <b>${duration(ms)}</b></span>` });
+    const regulated = r.taps.length + r.sections.length;
+    const views = /** @type {Array<[string, string]>} */ ([['buses', `Busbars ${r.buses.length}`], ['branches', `Branches ${r.branches.length}`], ['units', `Machines and loads ${r.gens.length + r.grids.length + r.loads.length + r.shunts.length}`]]);
+    if (regulated) views.push(['controls', `Controls ${regulated}`]);
+    const view = this.lfView === 'controls' && !regulated ? 'buses' : this.lfView;
+    const seg = this.segmented(views, view, v => { this.lfView = v; });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), seg);
     let table;
-    if (this.lfView === 'buses') {
+    if (view === 'controls') {
+      /** @typedef {{ id: string, kind: string, before: number, after: number, low: number, high: number }} ControlRow */
+      const rows = /** @type {ControlRow[]} */ ([
+        ...r.taps.map(t => ({ id: t.id, kind: t.kind === 'phase' ? 'Phase shifter' : 'Tap changer', before: t.start, after: t.position, low: t.low, high: t.high })),
+        ...r.sections.map(x => ({ id: x.id, kind: 'Switched shunt', before: x.start, after: x.sections, low: 0, high: x.max })),
+      ]);
+      const note = (/** @type {ControlRow} */ c) => (c.after === c.low ? (c.kind === 'Switched shunt' ? 'All sections out' : 'At its lowest position') : c.after === c.high ? (c.kind === 'Switched shunt' ? 'All sections in' : 'At its highest position') : '');
+      table = this.table([
+        { key: 'name', label: 'Element', value: (/** @type {ControlRow} */ c) => this.nameOf(c.id) },
+        { key: 'kind', label: 'Control', value: (/** @type {ControlRow} */ c) => c.kind },
+        { key: 'before', label: 'Before', num: true, value: (/** @type {ControlRow} */ c) => c.before, text: (/** @type {ControlRow} */ c) => String(c.before) },
+        { key: 'after', label: 'After', num: true, value: (/** @type {ControlRow} */ c) => c.after, text: (/** @type {ControlRow} */ c) => String(c.after) },
+        { key: 'moved', label: 'Moved', num: true, value: (/** @type {ControlRow} */ c) => c.after - c.before, text: (/** @type {ControlRow} */ c) => (c.after === c.before ? '—' : `${c.after > c.before ? '+' : ''}${c.after - c.before}`) },
+        { key: 'range', label: 'Range', value: (/** @type {ControlRow} */ c) => `${c.low} … ${c.high}` },
+        { key: 'note', label: 'Note', value: note, cls: (/** @type {ControlRow} */ c) => (note(c) ? 'warn' : '') },
+      ], rows, 'load-flow-controls', 'lf-controls', 'name');
+    } else if (view === 'buses') {
       const busEl = (/** @type {string} */ id) => app.store.get(id);
       table = this.table([
         { key: 'name', label: 'Busbar', value: (/** @type {any} */ b) => this.nameOf(b.id) },
@@ -193,7 +214,7 @@ export class Dock {
         { key: 'p', label: 'P injected', unit: 'MW', num: true, value: (/** @type {any} */ b) => b.p, text: (/** @type {any} */ b) => fixed(b.p, 3) },
         { key: 'q', label: 'Q injected', unit: 'Mvar', num: true, value: (/** @type {any} */ b) => b.q, text: (/** @type {any} */ b) => fixed(b.q, 3) },
       ], r.buses, 'load-flow-busbars', 'lf-buses', 'name');
-    } else if (this.lfView === 'branches') {
+    } else if (view === 'branches') {
       table = this.table([
         { key: 'name', label: 'Branch', value: (/** @type {any} */ b) => this.nameOf(b.id) },
         { key: 'cls', label: 'Type', value: (/** @type {any} */ b) => CLASSES[/** @type {'line' | 'trafo'} */ (b.cls)].label },

@@ -105,9 +105,13 @@ pub struct Start {
 /// model's solution, and compares every node's voltage through the busbar that stands for it.
 pub fn editor_fidelity(model: &Model, converted: &ps_io::powerstudio_write::Converted) -> Fidelity {
     use ps_model::study::LoadFlowSettings;
+    // The controls the document expresses exactly (regulated busbars, load characteristics) are on; the discrete ones
+    // stay where they are, since the document's tap changers are even approximations of tabled ones.
     let settings = LoadFlowSettings {
         tolerance: 1e-8,
         max_iter: 50,
+        remote_voltage: true,
+        voltage_dependent_loads: true,
         ..LoadFlowSettings::plain()
     };
     // Models that carry a solution start from it; others from a DC load flow.

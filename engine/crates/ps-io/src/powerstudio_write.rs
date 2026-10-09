@@ -430,19 +430,67 @@ fn lines(d: &mut Doc) {
     }
 }
 
-/// Tap fields of a two-winding transformer with the present position as 0 (the present ratio is the rated HV
-/// voltage): its range around it and its step on winding 1, when it has an even one.
-fn taps(t: &Transformer2) -> Value {
-    match t
+/// Tap fields of a two-winding transformer with the present position as 0 (the present ratio is the rated HV voltage):
+/// its range around it, its step and its control. The document holds one tap changer on the HV winding, so a changer
+/// with a control is preferred; a table becomes the even step between its end positions (exact at the present
+/// position), and a changer on the LV winding becomes the opposite step on the HV winding.
+fn taps(d: &mut Doc, t: &Transformer2, lv: &str) -> Value {
+    let ratio = t
         .ratio_taps
         .iter()
-        .find(|r| r.end == 1 && r.table.is_empty() && r.high > r.low)
-    {
-        Some(r) => json!({
-            "tapStep": r.step_pct, "tapPos": 0, "tapNeutral": 0, "tapMin": r.low - r.position, "tapMax": r.high - r.position,
-        }),
-        None => json!({}),
+        .filter(|r| r.high > r.low)
+        .max_by_key(|r| r.control.is_some_and(|c| c.enabled));
+    let phase = t.phase_tap.as_ref().filter(|p| p.high > p.low);
+    let phase_first = phase.is_some_and(|p| p.control.is_some_and(|c| c.enabled))
+        && !ratio.is_some_and(|r| r.control.is_some_and(|c| c.enabled));
+    let sign = |end: u8| if end == 2 { -1.0 } else { 1.0 };
+    let span = |low: i32, high: i32, position: i32| json!({ "tapPos": 0, "tapNeutral": 0, "tapMin": low - position, "tapMax": high - position });
+    if let (Some(p), true) = (phase, phase_first || ratio.is_none()) {
+        let angle = |pos: i32| {
+            p.table
+                .iter()
+                .find(|x| x.position == pos)
+                .map_or(f64::from(pos - p.neutral) * p.step_deg, |x| x.angle_deg)
+        };
+        let step = (angle(p.high) - angle(p.low)) / f64::from(p.high - p.low) * sign(p.end);
+        if !p.table.is_empty() {
+            d.count("phase tap changer table(s) written as even steps (exact at the present position)");
+        }
+        let mut v = span(p.low, p.high, p.position);
+        v["tapKind"] = json!("phase");
+        v["phaseStep"] = json!(step);
+        if let Some(c) = p.control.filter(|c| c.enabled) {
+            v["tapControl"] = json!(true);
+            v["pTarget"] = json!(c.target_mw);
+            v["pBand"] = json!(c.deadband_mw.max(0.0));
+        }
+        return v;
     }
+    let Some(r) = ratio else { return json!({}) };
+    let factor = |pos: i32| {
+        r.table
+            .iter()
+            .find(|x| x.position == pos)
+            .map_or(1.0 + f64::from(pos - r.neutral) * r.step_pct / 100.0, |x| x.ratio)
+    };
+    let step = (factor(r.high) - factor(r.low)) / factor(r.position) / f64::from(r.high - r.low) * 100.0 * sign(r.end);
+    if !r.table.is_empty() {
+        d.count("tap changer table(s) written as even steps (exact at the present position)");
+    }
+    if r.end == 2 {
+        d.count("tap changer(s) on the LV winding written as the opposite step on the HV winding");
+    }
+    let mut v = span(r.low, r.high, r.position);
+    v["tapStep"] = json!(step);
+    if let Some(c) = r.control.filter(|c| c.enabled) {
+        let kv = d.m.nominal_kv(c.node);
+        let bus = d.bus(c.node).map(|b| b.0).unwrap_or_default();
+        v["tapControl"] = json!(true);
+        v["ctrlBus"] = json!(if bus == lv { String::new() } else { bus });
+        v["vTarget"] = json!(c.target_kv / kv);
+        v["vBand"] = json!(c.deadband_kv / kv * 100.0);
+    }
+    v
 }
 
 /// Any listed vector group with this clock number.
@@ -487,6 +535,7 @@ fn transformers2(d: &mut Doc) {
             continue;
         }
         let conns = Some((t.conn1, t.conn2));
+        let tap_fields = taps(d, t, &b.0);
         if d.transformer(
             &t.id,
             &t.name,
@@ -496,7 +545,7 @@ fn transformers2(d: &mut Doc) {
             t.rated_mva,
             t.in_service,
             conns,
-            taps(t),
+            tap_fields,
         )
         .is_none()
         {
@@ -559,7 +608,6 @@ fn injections(d: &mut Doc) {
         .promoted
         .into_iter()
         .collect();
-    let mut remote = 0;
     let clamp_q = |q: f64| q.clamp(-Q_LIMIT, Q_LIMIT);
     for (k, g) in m.generators.iter().enumerate() {
         if !m.alive(Class::Generator, k) {
@@ -574,9 +622,12 @@ fn injections(d: &mut Doc) {
             MachineControl::Pv => "PV",
             MachineControl::Pq => "PQ",
         };
-        if g.regulated_node.is_some_and(|r| r != g.node) {
-            remote += 1;
-        }
+        let reg_bus = g
+            .regulated_node
+            .and_then(|r| d.bus(r))
+            .map(|r| r.0)
+            .filter(|r| *r != bus.0)
+            .unwrap_or_default();
         let vset = g.v_set.clamp(0.5, 1.5);
         if vset != g.v_set && g.control != MachineControl::Pq {
             d.count("voltage set point(s) outside 0.5 to 1.5 p.u. limited to that range");
@@ -591,13 +642,10 @@ fn injections(d: &mut Doc) {
                 "qmin": clamp_q(g.q_min), "qmax": clamp_q(g.q_max), "sn": positive(g.rated_mva, d.sb),
                 "vn": positive(g.rated_kv, bus.1), "cosphi": g.sc.cos_phi.clamp(0.01, 1.0), "xdss": positive(g.sc.xdss, 0.2),
                 "rs": g.sc.rs.max(0.0), "xdt": positive(g.dynamics.xdt, 0.3), "h": positive(g.dynamics.h, 4.0),
-                "damping": g.dynamics.d.max(0.0),
+                "damping": g.dynamics.d.max(0.0), "regBus": reg_bus, "pmin": g.p_min, "pmax": g.p_max.max(0.0),
+                "participation": g.participation.max(0.0),
             }),
         );
-    }
-    if remote > 0 {
-        d.count("machine(s) regulating a remote node written as regulating their own (the load flow does so today)");
-        let _ = remote;
     }
     for (k, c) in m.svcs.iter().enumerate() {
         if !m.alive(Class::Svc, k) {
@@ -676,16 +724,15 @@ fn injections(d: &mut Doc) {
             continue;
         }
         let Some(bus) = d.bus(l.node) else { continue };
-        if l.p_zip[2] != 1.0 || l.q_zip[2] != 1.0 {
-            d.count(
-                "voltage-dependent load(s) written as constant power at 1 p.u. (as the load flow treats them today)",
-            );
-        }
+        let pct = |x: f64| x * 100.0;
         d.push(
             "load",
             &l.id,
             &l.name,
-            json!({ "bus": bus.0, "inService": l.in_service, "p": l.p, "q": l.q }),
+            json!({
+                "bus": bus.0, "inService": l.in_service, "p": l.p, "q": l.q, "pZ": pct(l.p_zip[0]), "pI": pct(l.p_zip[1]),
+                "qZ": pct(l.q_zip[0]), "qI": pct(l.q_zip[1]),
+            }),
         );
     }
     for (k, s) in m.shunts.iter().enumerate() {
@@ -693,9 +740,27 @@ fn injections(d: &mut Doc) {
             continue;
         }
         let Some(bus) = d.bus(s.node) else { continue };
-        if !s.points.is_empty() || s.max_sections > 1 {
-            d.count("switchable shunt(s) written at their present admittance");
+        // A bank of equal sections keeps them and its control; an uneven bank keeps its present admittance.
+        if s.points.is_empty() && s.g_per_section >= 0.0 && s.max_sections >= 1 {
+            let kv = if s.nominal_kv > 0.0 { s.nominal_kv } else { bus.1 };
+            let mut v = json!({
+                "bus": bus.0, "inService": s.in_service, "vn": kv, "q": s.b_per_section * kv * kv,
+                "p": s.g_per_section * kv * kv, "sections": s.sections, "maxSections": s.max_sections.max(s.sections),
+            });
+            if let Some(c) = s.control.filter(|c| c.enabled) {
+                let ckv = d.m.nominal_kv(c.node);
+                let reg = d.bus(c.node).map(|b| b.0).filter(|b| *b != bus.0).unwrap_or_default();
+                v["vControl"] = json!(true);
+                v["ctrlBus"] = json!(reg);
+                v["vTarget"] = json!(c.target_kv / ckv);
+                v["vBand"] = json!(c.deadband_kv / ckv * 100.0);
+            }
+            if s.b_per_section != 0.0 || s.g_per_section != 0.0 {
+                d.push("shunt", &s.id, &s.name, v);
+            }
+            continue;
         }
+        d.count("shunt(s) with uneven sections written at their present admittance, without their control");
         let y = shunt_admittance(s).scale(bus.1 * bus.1 / d.sb);
         d.shunt(&s.id, &s.name, &bus.0.clone(), bus.1, y, s.in_service);
     }

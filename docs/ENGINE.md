@@ -82,10 +82,35 @@ four times.
   angles. The Riverside sample, a meshed 20 kV ring with Yd5 and Dy5 transformers, needs it: pandapower's flat start
   does not converge on it in 50 iterations; with a DC start both programs converge in 3. The study case can switch to
   a flat start. A warm start (contingency cases, models that carry a solution) starts from the previous voltages.
-- **Reactive limits.** With "Respect reactive power limits" on, machines outside their range after convergence are
-  held at the violated limit and the load flow is solved again, until no machine is outside its range. A machine
-  that reaches a limit in a later round is caught too (the `ieee14-qlim` case: G2 reaches 50 Mvar only after G4 and
-  G5 are held).
+- **Voltage control.** A machine holds the voltage of the busbar its data name (its own, or a remote one with
+  "Machines regulate remote busbars" on): that busbar's voltage is fixed and the machine's own becomes an unknown.
+  Several machine busbars regulating one busbar share its reactive power in proportion to their reactive ranges, an
+  equation per extra controller. Machines on one busbar act as one, sharing its output at the same fraction of their
+  ranges.
+- **Voltage-dependent loads.** A load consumes P·(z·V² + i·V + c) with its constant impedance, current and power
+  shares (and likewise Q); the shares enter the Jacobian. Off, every load is constant power.
+- **HVDC links** run at their setpoints: the rectifier draws the setpoint from its AC network and the inverter delivers
+  it less the stations' losses (a percentage) and the line's R·P²/V². A line-commutated station also consumes
+  |P|·tan(acos pf); a voltage-source station regulates voltage or holds its reactive power within limits.
+- **Controls** act as outer loops around Newton, in OpenLoadFlow's order: slack distribution, reactive limits, phase
+  shifters, tap changers, switched shunts. A loop that changes something re-solves before the next is checked, and a
+  round repeats until nothing changes (at most 30 changes). `engine/crates/ps-lf/src/control.rs` and `discrete.rs`
+  state each rule:
+  - *Slack distribution* shares each island's imbalance among machines (by maximum power, present power,
+    participation factor or remaining margin) within their active limits and without changing their sign, or among
+    loads by their active power. What the participants cannot take stays with the reference. An island with an
+    external grid leaves it to the grid.
+  - *Reactive limits* apply per controller busbar. A busbar beyond its limit is held at it; one stays in voltage
+    control even if all are beyond; a held busbar returns to voltage control when its voltage passes the target in the
+    direction the limit was resisting, at most three times. With limits on, a machine whose reactive range is under
+    1 Mvar holds its stated reactive power. (The `ieee14-qlim` case: G2 reaches 50 Mvar only after G4 and G5 are
+    held.)
+  - *Tap changers, phase shifters and switched shunts* move whole positions. The change each needs comes from a
+    sensitivity at the converged state; the new position is the closest to that change, within three positions per
+    round for a single tap changer, one per pass when several regulate one busbar, four sections per round for a
+    shunt. The voltage target of a busbar a machine also regulates is the machine's.
+- **Diagnostics.** The report lists the final tap positions and shunt sections, the power each island's distribution
+  moved, what each control did, and in plain words every control that could not do what was asked.
 - **Results.** Voltages, branch flows and currents at both ends, losses, loading (current against the permanent
   limit for lines, apparent power against the rating for transformers), the output of every machine and grid, the
   iteration log and the time spent. A bus's active power balance goes to its reference units. Its reactive balance
@@ -93,7 +118,11 @@ four times.
   does (`pfsoln.m`): each at the same fraction k of its range, Q = Qmin + k·(Qmax − Qmin), with infinite limits
   replaced by a finite proxy and an equal split when the bus has no range at all.
 
-**Checked by** `engine/crates/ps-study/tests/loadflow.rs` (native) and `tests/loadflow.test.mjs` (WebAssembly):
+**Checked by** `engine/crates/ps-study/tests/controls.rs` against OpenLoadFlow with each control on, alone and
+together, on every solvable PSS/E case and the 2,000- and 10,000-bus ACTIVSg grids, with raised voltage targets so
+the taps and shunts move: 255 variants agree to 1e-9 p.u. and 1e-3 MW, every tap and section on the same position. A
+phase shifter's flow control is checked against its own definition. Also by
+`engine/crates/ps-study/tests/loadflow.rs` (native) and `tests/loadflow.test.mjs` (WebAssembly):
 MATPOWER case14, case30 and case118 agree with PYPOWER to |ΔU| < 1e-9 p.u. and |Δθ| < 1e-7°; the IEEE 14 and
 Riverside samples agree with pandapower in voltages, branch flows (1e-6 MW) and machine outputs, with and without
 reactive limits; power balances at every bus, computed from the reported flows.
@@ -216,15 +245,17 @@ What maps:
 | System switching devices (version 35) | Switches |
 | FACTS devices | A shunt device (a STATCOM) becomes a static var compensator holding VSET within ±SHMX |
 | Areas | Areas with their scheduled interchange |
+| Two-terminal DC lines | HVDC links `DC-<name>` between line-commutated stations `DC-<name>-R` and `-I`, at the scheduled power (MDC 1: SETVL MW; MDC 2: SETVL A at VSCHD) with the resistance RDC at VSCHD, each station at the power factor ½·(cos ANMX + cos 60°) as PowSyBl converts them |
+| VSC DC lines | HVDC links `VSC-<name>` between voltage-source stations `-1` and `-2`, at \|DCSET\| of the converter controlling AC power, losses from ALOSS, voltage control (MODE 1) at ACSET or a power factor (MODE 2) |
 
-HVDC links, series FACTS devices, induction machines, impedance correction tables and the generator step-up data in
-generator records are not modelled yet; the report counts what it left out. Tap, shunt and phase-shifter controls are
-imported but not yet solved (design phase 3); the load flow holds every position as stated.
+Multi-terminal DC lines, series FACTS devices, induction machines, impedance correction tables and the generator
+step-up data in generator records are not modelled; the report counts what it left out. Tap, shunt and phase-shifter
+controls are imported with their targets and act when the study case lets them.
 
 **Checked by** `engine/crates/ps-study/tests/psse.rs` against PowSyBl on 23 RAW files from powsybl-core's tests,
 versions 33 and 35, up to the 500-bus South Carolina synthetic grid: imported set points, admittances, impedances and
 tap changers, and the load flow at every bus and equipment terminal. Every case that can be solved agrees to 1e-10
-p.u. or better (IEEE 300 to 2e-12 p.u.); `docs/research/sources.md` lists the corrections the comparison makes to
+p.u. or better, IEEE 300 with its HVDC links to 3e-9 p.u.; `docs/research/sources.md` lists the corrections the comparison makes to
 PowSyBl's network and why.
 
 ## CGMES state variables export
@@ -253,7 +284,9 @@ bus I, divided by the ratio squared, and an admittance a record has no place for
 three-winding transformer's windings 2 and 3, a switched shunt's conductance) becomes a fixed shunt at the same bus.
 A three-winding transformer's star impedances become the pairwise ones (Z12 = Z1 + Z2), and branches with an open end
 get a bus of their own for that end. Tap ranges and controls are written for two-winding transformers; a machine with
-fixed reactive output on a voltage-controlled bus is pinned there with QT = QB = QG. Names are written in ASCII.
+fixed reactive output on a voltage-controlled bus is pinned there with QT = QB = QG. HVDC links become two-terminal
+DC records (line-commutated, rectifier first, power factor through ANMX) or VSC DC records (voltage-source, the
+converter that controls AC power first). Names are written in ASCII.
 Identifiers that came from RAW (`B12`, `B12-L1`, `L-1-2-1`) keep their numbers; other models get fresh ones. The
 export returns notes on everything it approximated: impedance that varies with tap position, the tap ranges of
 three-winding transformers, asymmetric static var compensator ranges, controls without a positive voltage band.
@@ -274,13 +307,17 @@ The app opens CGMES models, RAW files and MATPOWER cases through the engine's `i
 imports the model, validates it, and converts it into the editor's document (`ps-io/src/powerstudio_write.rs`). The
 document has seven classes, so the conversion reduces what it cannot hold: closed switches join their nodes into one
 busbar, a three-winding transformer becomes a star busbar with three two-winding transformers, a static var
-compensator becomes a machine without active power that holds its voltage, switchable shunts keep their present
-admittance. Electrical values come from the engine's per-unit form of each element, so the document reproduces what
+compensator becomes a machine without active power that holds its voltage, an HVDC station becomes the fixed
+injection its setpoint gives (a load or a machine), and a shunt with uneven sections keeps its present admittance.
+Machines keep their regulated busbars and active limits, loads their constant impedance and current shares, shunts
+with even sections their sections and voltage control, and transformers one tap changer on the HV winding with its
+control (a tabled changer as the even step between its end positions, exact at its present position). Electrical values come from the engine's per-unit form of each element, so the document reproduces what
 it holds exactly: a transformer's present ratio becomes its rated HV voltage, its phase shift a vector group or an
 additional shift, its magnetising admittance a branch at one or both windings; uneven line charging becomes shunt
 elements; an impedance with a negative part or no reactance, which uk and uR cannot express, gets a line from an
 intermediate busbar for that part. The engine then solves the model and the document, the document started from the
-model's solution, and reports the largest voltage difference with the voltages to start the editor's load flows from.
+model's solution, both with remote voltage control and voltage-dependent loads on and the discrete controls held, and
+reports the largest voltage difference with the voltages to start the editor's load flows from.
 
 **Checked by** `engine/crates/ps-study/tests/document.rs`: every reference model (MATPOWER cases up to ACTIVSg70k,
 the CGMES configurations, the PSS/E files) converts into a document whose load flow agrees with the model's to

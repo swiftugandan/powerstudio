@@ -12,7 +12,9 @@ import { CLASSES, checkValue, endsOf, isClass, makeElement } from './catalog.js'
  * @typedef {import('./catalog.js').FieldSpec} FieldSpec
  * @typedef {{ t: number, kind: 'fault' | 'clear' | 'trip' | 'loadstep', target: string, value?: number }} SimEvent
  * @typedef {{
- *   loadflow: { tolerance: number, maxIter: number, enforceQLimits: boolean, dcStart: boolean, loadScale: number },
+ *   loadflow: { tolerance: number, maxIter: number, enforceQLimits: boolean, dcStart: boolean, loadScale: number,
+ *     balance: 'reference' | 'maxP' | 'targetP' | 'factor' | 'margin' | 'load', slackTolerance: number, remoteVoltage: boolean,
+ *     voltageDependentLoads: boolean, tapControl: boolean, shuntControl: boolean, phaseControl: boolean },
  *   shortcircuit: { fault: '3ph' | '2ph' | '1ph', mode: 'max' | 'min', kappa: 'B' | 'C', lvTolerance: '6' | '10', location: string },
  *   contingency: { lines: boolean, trafos: boolean, gens: boolean, maxLoading: number },
  *   rms: { tEnd: number, dt: number, events: SimEvent[] },
@@ -33,6 +35,17 @@ export const STUDY_FIELDS = {
     { key: 'enforceQLimits', label: 'Respect reactive power limits', type: 'bool', group: 'loadflow', default: false },
     { key: 'dcStart', label: 'Start from a DC load flow', type: 'bool', group: 'loadflow', default: true, help: 'Initial angles come from a DC load flow instead of a flat start. Converges more reliably on meshed networks with phase-shifting transformers.' },
     { key: 'loadScale', label: 'Load scaling', type: 'number', group: 'loadflow', default: 100, unit: '%', min: 0, max: 1000 },
+    { key: 'balance', label: 'Share each island\'s imbalance among', type: 'enum', group: 'loadflow', default: 'reference',
+      options: ['reference', 'maxP', 'targetP', 'factor', 'margin', 'load'],
+      help: 'Machines share it within their active power limits; what they cannot take stays with the reference. An island with an external grid leaves it to the grid.' },
+    { key: 'slackTolerance', label: 'Imbalance left on the reference', type: 'number', group: 'loadflow', default: 0.001, unit: 'MW', min: 1e-9, max: 1000 },
+    { key: 'remoteVoltage', label: 'Machines regulate remote busbars', type: 'bool', group: 'loadflow', default: true,
+      help: 'A machine with a regulated busbar holds that busbar\'s voltage. Off: every machine holds its own terminal.' },
+    { key: 'voltageDependentLoads', label: 'Voltage-dependent loads', type: 'bool', group: 'loadflow', default: true,
+      help: 'Loads follow their constant impedance and constant current shares. Off: every load is constant power.' },
+    { key: 'tapControl', label: 'Tap changers regulate voltage', type: 'bool', group: 'loadflow', default: false },
+    { key: 'phaseControl', label: 'Phase shifters regulate flow', type: 'bool', group: 'loadflow', default: false },
+    { key: 'shuntControl', label: 'Switched shunts regulate voltage', type: 'bool', group: 'loadflow', default: false },
   ],
   shortcircuit: [
     { key: 'fault', label: 'Fault type', type: 'enum', group: 'shortcircuit', default: '3ph', options: ['3ph', '2ph', '1ph'] },
@@ -137,6 +150,14 @@ export function normalizeDocument(input) {
     elements.push(el);
   }
   const buses = new Set(elements.filter(e => e.cls === 'bus').map(e => e.id));
+  for (const el of elements) {
+    for (const f of CLASSES[el.cls].fields) {
+      if (f.type === 'bus' && f.optional !== undefined && el[f.key] !== '' && !buses.has(/** @type {string} */ (el[f.key]))) {
+        issues.push(`${el.id}: ${f.label.toLowerCase()} "${String(el[f.key])}" does not exist. Using ${f.optional.toLowerCase()}.`);
+        el[f.key] = '';
+      }
+    }
+  }
   doc.elements = elements.filter(el => {
     if (el.cls === 'bus') return true;
     const missing = busesOf(el).filter(b => !buses.has(b));

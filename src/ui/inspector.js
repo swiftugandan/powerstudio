@@ -106,12 +106,11 @@ export class Inspector {
     if (results) out.push(results);
     const buses = app.store.doc.elements.filter(e => e.cls === 'bus').map(b => ({ id: b.id, name: b.name || b.id }));
     for (const [group, label] of GROUPS) {
-      const fields = spec.fields.filter(f => f.group === group);
+      const fields = spec.fields.filter(f => f.group === group && (!f.when || f.when(el)));
       if (!fields.length) continue;
       const props = h('div', { class: 'props' });
       for (const f of fields) {
-        if (el.cls === 'gen' && f.key === 'angle' && el.mode !== 'Reference') continue;
-        if (el.cls === 'gen' && f.key === 'q' && el.mode !== 'PQ') continue;
+        if (f.when && !f.when(el)) continue;
         props.append(...fieldRow(f, el[f.key], v => app.tryEdit(`Edit ${f.label.toLowerCase()}`, () => app.store.transact(`Edit ${f.label.toLowerCase()}`, tx => tx.set(el.id, f.key, f.key === 'name' ? String(v).trim() : v), { coalesce: `field-${el.id}-${f.key}` })), { buses }));
       }
       out.push(this.section(group, label, [props]));
