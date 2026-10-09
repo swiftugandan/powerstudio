@@ -85,7 +85,7 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Build output | `dist/PowerStudio.html`, 539.3 KiB, sha256 `1a23924cbfbf47d64ff9b7b96db653778bdbfaa73ada2c639cdc16c02cbf0a56` |
 | Published page | The workflow's verify job fetched https://swiftugandan.github.io/powerstudio/ and got the same SHA-256 on the first attempt |
 | Independent check | `curl` of the live page from this machine after deployment returned the same SHA-256 |
-| Live page in a browser | Opened from the Pages origin in local Chromium (commit `3e2b30e…` build): it drew with WebGPU (Apple, metal-3), the IEEE 14 load flow converged in 3 iterations, and the only requests were the page itself and the worker's `blob:` URL |
+| Live page in a browser | Opened from the Pages origin in local Chromium (build `1a23924c…`): it drew with WebGPU (Apple, metal-3), the IEEE 14 load flow converged in 3 iterations, and the only requests were the page itself and the worker's `blob:` URL |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
 ## Not verified
