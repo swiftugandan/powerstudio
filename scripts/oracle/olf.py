@@ -5,7 +5,7 @@ Every parameter that departs from that is set explicitly, and each golden record
 
 * no distributed slack, no reactive limits, no tap, shunt or phase-shifter controls;
 * remote voltage control replaced by local control at the same per-unit set point, as PowerStudio holds it today;
-* every connected component solved;
+* every connected component solved, HVDC links at their setpoints;
 * generators with a zero MW target still started, every voltage target accepted;
 * a tight convergence threshold;
 * the reactive power of a bus split among its machines at the same fraction of each one's reactive range
@@ -58,6 +58,8 @@ def parameters(slack_buses, start, controls=()):
         "shunt_compensator_voltage_control_on": False,
         "phase_shifter_regulation_on": False,
         "twt_split_shunt_admittance": False,
+        # HVDC links at their active power setpoints (no imported link carries the droop AC emulation needs).
+        "hvdc_ac_emulation": False,
         "connected_component_mode": lf.ConnectedComponentMode.ALL,
         "voltage_init_mode": lf.VoltageInitMode.PREVIOUS_VALUES if start == "previous" else lf.VoltageInitMode.DC_VALUES,
     }

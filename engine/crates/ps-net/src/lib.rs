@@ -284,6 +284,12 @@ pub struct Calc {
     pub machines: Vec<u32>,
     /// Static var compensator row of each network machine after the generators.
     pub svcs: Vec<u32>,
+    /// Converter station row of each network machine after the static var compensators (voltage-source stations).
+    pub vsc: Vec<u32>,
+    /// Converter station row of each network load after the loads (line-commutated stations).
+    pub lcc: Vec<u32>,
+    /// The HVDC links in the calculation, with the injection at each end.
+    pub hvdc: Vec<HvdcFlow>,
     /// External grid row of each grid.
     pub grids: Vec<u32>,
     /// Load row of each load.
@@ -296,6 +302,17 @@ pub struct Calc {
     pub shunt_controls: Vec<u32>,
     /// What the build simplified or skipped, in plain words.
     pub warnings: Vec<String>,
+}
+
+/// An HVDC link's injections, MW and Mvar into the AC network at each station (generator convention).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HvdcFlow {
+    /// HVDC link row.
+    pub row: u32,
+    /// Converter station rows at ends 1 and 2.
+    pub stations: [u32; 2],
+    /// Active power into the AC network at each end, MW.
+    pub p: [f64; 2],
 }
 
 /// A tap changer the load flow may move.
@@ -521,6 +538,7 @@ impl Calc {
                 q: l.q * opt.load_scale / sb,
                 p_zip: l.p_zip,
                 q_zip: l.q_zip,
+                scalable: true,
             });
             loads.push(k as u32);
         }
@@ -571,6 +589,14 @@ impl Calc {
             });
             svcs.push(k as u32);
         }
+        let (vsc, lcc, hvdc) = hvdc_injections(
+            model,
+            &topo,
+            &mut net,
+            machines.len() + svcs.len(),
+            loads.len(),
+            &mut warnings,
+        );
         let tap_sources = regulating_taps(model, &topo, &mut net, &branches, &mut warnings);
         let shunt_controls = regulating_shunts(model, &topo, &mut net, &shunts, &mut warnings);
         let mut calc = Calc {
@@ -579,6 +605,9 @@ impl Calc {
             branches,
             machines,
             svcs,
+            vsc,
+            lcc,
+            hvdc,
             grids,
             loads,
             shunts,
@@ -588,6 +617,27 @@ impl Calc {
         };
         calc.start_internal_buses();
         calc
+    }
+
+    /// The element behind network machine `m`: a generator, a static var compensator or a voltage-source converter
+    /// station.
+    pub fn unit(&self, m: usize) -> (Class, usize) {
+        let (ng, ns) = (self.machines.len(), self.svcs.len());
+        if m < ng {
+            (Class::Generator, self.machines[m] as usize)
+        } else if m < ng + ns {
+            (Class::Svc, self.svcs[m - ng] as usize)
+        } else {
+            (Class::Converter, self.vsc[m - ng - ns] as usize)
+        }
+    }
+
+    /// The element behind network load `k`: a load or a line-commutated converter station.
+    pub fn load_unit(&self, k: usize) -> (Class, usize) {
+        match self.loads.get(k) {
+            Some(&row) => (Class::Load, row as usize),
+            None => (Class::Converter, self.lcc[k - self.loads.len()] as usize),
+        }
     }
 
     /// The identifier a calculation bus is reported under: its first node's, `<transformer>.star` for a three-winding
@@ -669,6 +719,112 @@ impl Calc {
             net.buses[i].va0 = va;
         }
     }
+}
+
+/// The active power an HVDC link at its setpoint puts into the AC network at stations `c1` and `c2` (its ends 1 and
+/// 2), MW: the rectifier draws the setpoint; the inverter delivers it less the rectifier's losses, the line's
+/// R·P²/V² and its own losses (PowSyBl's `HvdcUtils`).
+pub fn hvdc_powers(model: &Model, h: &ps_model::HvdcLine, c1: usize, c2: usize) -> [f64; 2] {
+    let (rect, inv) = if h.rectifier == 2 { (c2, c1) } else { (c1, c2) };
+    let loss = |c: usize| model.converters[c].loss_pct / 100.0;
+    let p_rect = h.p_set.abs();
+    let p_dc = p_rect * (1.0 - loss(rect));
+    let p_inv = (p_dc - h.r * p_dc * p_dc / (h.nominal_kv * h.nominal_kv)) * (1.0 - loss(inv));
+    [c1, c2].map(|c| if c == rect { -p_rect } else { p_inv })
+}
+
+/// The reactive power a line-commutated station consumes at active power `p`, Mvar.
+pub fn lcc_q(p: f64, power_factor: f64) -> f64 {
+    p.abs() * power_factor.clamp(1e-6, 1.0).acos().tan()
+}
+
+/// HVDC links as the injections their setpoints give (PowSyBl's `HvdcUtils`; docs/ENGINE.md): the rectifier draws
+/// the setpoint from its AC network, and the inverter delivers it less the rectifier's losses, the line's R·P²/V²
+/// and its own losses. Line-commutated stations become constant loads that also consume |P|·tan(acos pf);
+/// voltage-source stations become machines that regulate voltage or hold their reactive power. A link with a station
+/// out of service or not energised carries nothing.
+fn hvdc_injections(
+    model: &Model,
+    topo: &Topology,
+    net: &mut PuNetwork,
+    first_machine: usize,
+    first_load: usize,
+    warnings: &mut Vec<String>,
+) -> (Vec<u32>, Vec<u32>, Vec<HvdcFlow>) {
+    let sb = model.meta.base_mva;
+    let (mut vsc, mut lcc, mut flows) = (Vec::new(), Vec::new(), Vec::new());
+    let station = |id: &str| model.converters.iter().position(|c| c.id == id);
+    for (k, h) in model.hvdc_lines.iter().enumerate() {
+        if !model.alive(Class::Hvdc, k) || !h.in_service {
+            continue;
+        }
+        let (Some(c1), Some(c2)) = (station(&h.converter1), station(&h.converter2)) else {
+            continue;
+        };
+        let bus = |c: usize| {
+            (model.alive(Class::Converter, c) && model.converters[c].in_service)
+                .then(|| topo.bus_of(model.converters[c].node))
+                .flatten()
+        };
+        let (Some(b1), Some(b2)) = (bus(c1), bus(c2)) else {
+            warnings.push(format!(
+                "{} has a converter station out of service or without supply; it carries no power.",
+                model.name_of(Class::Hvdc, k)
+            ));
+            continue;
+        };
+        let powers = hvdc_powers(model, h, c1, c2);
+        for (end, (c, b)) in [(c1, b1), (c2, b2)].into_iter().enumerate() {
+            let st = &model.converters[c];
+            let p = powers[end];
+            match st.kind {
+                ps_model::ConverterKind::Lcc => {
+                    let q = lcc_q(p, st.power_factor);
+                    net.loads.push(PuLoad {
+                        id: first_load + lcc.len(),
+                        bus: b,
+                        p: -p / sb,
+                        q: q / sb,
+                        p_zip: [0.0, 0.0, 1.0],
+                        q_zip: [0.0, 0.0, 1.0],
+                        scalable: false,
+                    });
+                    lcc.push(c as u32);
+                }
+                ps_model::ConverterKind::Vsc => {
+                    let reg = st.regulated_node.and_then(|n| topo.bus_of(n)).unwrap_or(b);
+                    net.machines.push(PuMachine {
+                        id: first_machine + vsc.len(),
+                        bus: b,
+                        mode: if st.voltage_control {
+                            MachineMode::Pv
+                        } else {
+                            MachineMode::Pq
+                        },
+                        p: p / sb,
+                        q: st.q / sb,
+                        v_set: st.v_set,
+                        reg_bus: reg,
+                        angle: 0.0,
+                        q_min: st.q_min / sb,
+                        q_max: st.q_max / sb,
+                        p_min: -h.p_max / sb,
+                        p_max: h.p_max / sb,
+                        participates: false,
+                        factor: 0.0,
+                        kind: UnitKind::Converter,
+                    });
+                    vsc.push(c as u32);
+                }
+            }
+        }
+        flows.push(HvdcFlow {
+            row: k as u32,
+            stations: [c1 as u32, c2 as u32],
+            p: powers,
+        });
+    }
+    (vsc, lcc, flows)
 }
 
 /// A voltage target in per unit of its bus, with its dead band (full width; 0.1 kV when none is given), or why it

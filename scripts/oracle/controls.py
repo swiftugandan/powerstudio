@@ -109,7 +109,7 @@ def psse_variants(case):
     for name, controls in VARIANTS.items():
         with tempfile.TemporaryDirectory() as tmp:
             n = pp.network.load(str(zip_corrected(path, tmp) if "zip" in controls else path))
-        psse.corrections(n, path)
+        psse.corrections(n, path, case)
         if "stress" in name:
             rtc = n.get_ratio_tap_changers(all_attributes=True)
             two = rtc[(rtc["side"] == "") & rtc["regulating"]]

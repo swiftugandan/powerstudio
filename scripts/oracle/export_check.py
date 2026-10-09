@@ -34,9 +34,10 @@ V_TOL, ANGLE_TOL = 1e-6, 1e-4
 
 
 def cases(tmp):
-    """(name, input paths) of every case whose load flow both tools solve."""
+    """(name, input paths) of every case whose load flow both tools solve as the file stands (a case the goldens
+    solve without its HVDC links is left out)."""
     for case in psse.CASES["cases"]:
-        if case.get("loadflow", True):
+        if case.get("loadflow", True) and not case.get("without_hvdc"):
             yield case["name"], [str(psse.CACHE / psse.CASES["archives"][case["archive"]]["file"])]
     for case in cgmes.CASES["cases"]:
         if not case.get("loadflow", True) or case["start"] == "sv":
@@ -61,7 +62,7 @@ def check(name, inputs, rev, tmp):
         n = pp.network.load(str(raw))
     except pp.PyPowsyblError as e:
         return f"PowSyBl cannot read the file: {e}"
-    psse.corrections(n, raw)
+    psse.corrections(n, raw, {})  # the exported cases keep their HVDC links
     slack = n.get_extensions("slackTerminal")
     results = lf.run_ac(n, parameters=parameters(sorted(slack["bus_id"]), "dc"))
     if not all(r.status.name in ("CONVERGED", "NO_CALCULATION") for r in results):

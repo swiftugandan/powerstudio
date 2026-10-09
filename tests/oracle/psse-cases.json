@@ -1,5 +1,5 @@
 {
- "about": "PSS/E RAW cases compared with PowSyBl, from powsybl-core's tests at a pinned commit (powsybl-core is MPL 2.0; docs/research/sources.md describes the cases). scripts/fetch-reference.mjs downloads them into .cache/reference; they are not copied into the repository. 'start' is the load flow's starting point: 'dc' (DC load flow) or 'raw' (the voltages stored in the file). 'loadflow': false marks a case no load flow can solve ('why' says what is wrong with its data); only its import is compared.",
+ "about": "PSS/E RAW cases compared with PowSyBl, from powsybl-core's tests at a pinned commit (powsybl-core is MPL 2.0; docs/research/sources.md describes the cases). scripts/fetch-reference.mjs downloads them into .cache/reference; they are not copied into the repository. 'start' is the load flow's starting point: 'dc' (DC load flow) or 'raw' (the voltages stored in the file). 'loadflow': false marks a case no load flow can solve ('why' says what is wrong with its data); only its import is compared. 'without_hvdc' marks a case solved without its HVDC links, with the reason.",
  "archives": {
   "ieee14-33": {
    "file": "psse-ieee14-33.raw",
@@ -186,7 +186,8 @@
   {
    "name": "ieee14-completed-35",
    "archive": "ieee14-completed-35",
-   "start": "dc"
+   "start": "dc",
+   "without_hvdc": "Its HVDC setpoints (209 MW over VDCLINE1 in a system of about 260 MW) leave no load flow solution: neither PowSyBl nor PowerStudio converges with them. The case is solved without its links, so it still covers its STATCOMs and other equipment."
   },
   {
    "name": "ieee24-35",

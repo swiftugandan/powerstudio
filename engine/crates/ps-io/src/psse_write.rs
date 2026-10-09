@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
-use ps_model::{Class, MachineControl, Model, NodeRef, Transformer2, Transformer3};
+use ps_model::{Class, ConverterKind, MachineControl, Model, NodeRef, Transformer2, Transformer3};
 use ps_net::{TransformerOptions, TransformerPu, line_pu, shunt_admittance, transformer2_pu, transformer3_winding_pu};
 use ps_num::C64;
 use ps_topology::{Outages, Topology};
@@ -323,6 +323,9 @@ pub fn write(m: &Model, opt: &Options) -> Result<Written, String> {
     sections.insert("FIXED SHUNT", fixed);
     sections.insert("SWITCHED SHUNT", switched);
     sections.insert("FACTS CONTROL DEVICE", facts(&mut w));
+    let (lcc, vsc) = dc_lines(&mut w);
+    sections.insert("TWO-TERMINAL DC", lcc);
+    sections.insert("VOLTAGE SOURCE CONVERTER", vsc);
     sections.insert("AREA", areas(&w));
     sections.insert("BRANCH", branch);
     sections.insert("TRANSFORMER", transformer);
@@ -767,6 +770,123 @@ fn facts(w: &mut Writer) -> Vec<String> {
         ));
     }
     out
+}
+
+/// HVDC links: line-commutated ones as two-terminal DC records, voltage-source ones as VSC DC records, each the
+/// inverse of the import (psse_model.rs). A two-terminal record puts its rectifier first and gives its stations no
+/// losses; its power factor comes back from ANMX = acos(2·pf − cos 60°), which reaches 0.75 at most.
+fn dc_lines(w: &mut Writer) -> (Vec<String>, Vec<String>) {
+    let m = w.m;
+    let (mut lcc, mut vsc) = (Vec::new(), Vec::new());
+    let mut used: HashSet<String> = HashSet::new();
+    let mut name_of = |id: &str| {
+        let bare = id.strip_prefix("DC-").or_else(|| id.strip_prefix("VSC-")).unwrap_or(id);
+        let base: String = ascii(bare).chars().take(12).collect();
+        let mut name = base.clone();
+        let mut k = 1;
+        while !used.insert(name.clone()) {
+            let tag = format!("_{k}");
+            name = base.chars().take(12 - tag.len()).collect::<String>() + &tag;
+            k += 1;
+        }
+        name
+    };
+    let v35 = w.v35();
+    for (k, h) in m.hvdc_lines.iter().enumerate() {
+        if !m.alive(Class::Hvdc, k) {
+            continue;
+        }
+        let station = |id: &str| m.converters.iter().position(|c| c.id == id);
+        let (Some(c1), Some(c2)) = (station(&h.converter1), station(&h.converter2)) else {
+            continue;
+        };
+        let (s1, s2) = (&m.converters[c1], &m.converters[c2]);
+        let on = h.in_service && s1.in_service && s2.in_service;
+        let name = name_of(&h.id);
+        if s1.kind == ConverterKind::Lcc && s2.kind == ConverterKind::Lcc {
+            let (rect, inv) = if h.rectifier == 2 { (s2, s1) } else { (s1, s2) };
+            if rect.loss_pct != 0.0 || inv.loss_pct != 0.0 {
+                w.count("line-commutated station loss(es) left out (a two-terminal DC record has none)");
+            }
+            let anmx = |pf: f64| {
+                let c = 2.0 * pf - 0.5;
+                if c > 1.0 { 0.0 } else { c.max(-1.0).acos().to_degrees() }
+            };
+            for st in [rect, inv] {
+                if st.power_factor > 0.75 {
+                    w.count("converter power factor(s) above 0.75 written as 0.75 (ANMX = 0)");
+                }
+            }
+            lcc.push(format!(
+                "{},{},{},{},{},0,0,0,'I',0,20,1",
+                q(&name, 12),
+                if on { 1 } else { 0 },
+                n(h.r),
+                n(h.p_set.abs()),
+                n(h.nominal_kv)
+            ));
+            for st in [rect, inv] {
+                let nd = if v35 { "0," } else { "" };
+                lcc.push(format!(
+                    "{},1,{},{},0,0,{},1,1,1.5,0.51,0.00625,0,{nd}0,0,'1',0",
+                    w.num(st.node),
+                    n(anmx(st.power_factor)),
+                    n(anmx(st.power_factor).min(5.0)),
+                    n(w.kv(st.node))
+                ));
+            }
+        } else if s1.kind == ConverterKind::Vsc && s2.kind == ConverterKind::Vsc {
+            let p = h.p_set.abs();
+            vsc.push(format!("{},{},{},1,1,0,1,0,1,0,1", q(&name, 12), u8::from(on), n(h.r)));
+            for (end, st) in [(1u8, s1), (2u8, s2)] {
+                let rect = h.rectifier == end;
+                let lf = st.loss_pct / 100.0;
+                let aloss = if rect { p / (1.0 - lf) - p } else { lf * p };
+                let (mode, acset) = if st.voltage_control {
+                    (1, st.v_set)
+                } else if st.q == 0.0 {
+                    (2, 1.0)
+                } else if p > 0.0 {
+                    (2, st.q.signum() * p / (p * p + st.q * st.q).sqrt())
+                } else {
+                    w.count("voltage-source station reactive power(s) at zero link power left out (RAW gives it as a power factor)");
+                    (2, 1.0)
+                };
+                // Converter 1 controls AC power (DCSET positive when it inverts); converter 2 the DC voltage.
+                let (kind, dcset) = if end == 1 {
+                    (2, if h.rectifier == 2 { p } else { -p })
+                } else {
+                    (1, h.nominal_kv)
+                };
+                let remote = st.regulated_node.map_or(0, |r| w.num(r));
+                let (qmax, qmin) = if st.voltage_control {
+                    (st.q_max, st.q_min)
+                } else {
+                    (9999.0, -9999.0)
+                };
+                let tail = if v35 {
+                    format!("{remote},0,100")
+                } else {
+                    format!("{remote},100")
+                };
+                vsc.push(format!(
+                    "{},{kind},{mode},{},{},{},0,0,{},0,1,{},{},{tail}",
+                    w.num(st.node),
+                    n(dcset),
+                    n(acset),
+                    n(aloss * 1000.0),
+                    n(h.p_max),
+                    n(qmax),
+                    n(qmin)
+                ));
+            }
+        } else {
+            w.count(
+                "HVDC link(s) joining a line-commutated and a voltage-source station left out (RAW has no such record)",
+            );
+        }
+    }
+    (lcc, vsc)
 }
 
 fn areas(w: &Writer) -> Vec<String> {

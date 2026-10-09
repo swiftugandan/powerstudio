@@ -24,7 +24,7 @@ macro_rules! no_wiring {
     )*};
 }
 
-no_wiring!(Substation, VoltageLevel, Node, Area);
+no_wiring!(Substation, VoltageLevel, Node, Area, HvdcLine);
 
 macro_rules! two_ends {
     ($($ty:ty),*) => {$(
@@ -114,6 +114,19 @@ impl Wiring for Shunt {
     fn nodes_mut(&mut self) -> Vec<&mut NodeRef> {
         let mut out = vec![&mut self.node];
         out.extend(self.control.as_mut().map(|c| &mut c.node));
+        out
+    }
+}
+
+impl Wiring for Converter {
+    fn nodes(&self) -> Vec<NodeRef> {
+        let mut out = vec![self.node];
+        out.extend(self.regulated_node);
+        out
+    }
+    fn nodes_mut(&mut self) -> Vec<&mut NodeRef> {
+        let mut out = vec![&mut self.node];
+        out.extend(self.regulated_node.as_mut());
         out
     }
 }

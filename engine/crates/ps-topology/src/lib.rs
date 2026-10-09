@@ -57,6 +57,8 @@ pub fn active(model: &Model, outages: &Outages, class: Class, row: usize) -> boo
         Class::Shunt => model.shunts.get(row).map(|e| e.in_service),
         Class::Svc => model.svcs.get(row).map(|e| e.in_service),
         Class::ExternalGrid => model.external_grids.get(row).map(|e| e.in_service),
+        Class::Converter => model.converters.get(row).map(|e| e.in_service),
+        Class::Hvdc => model.hvdc_lines.get(row).map(|e| e.in_service),
         Class::Switch => model.switches.get(row).map(|e| !e.open),
         _ => Some(true),
     };

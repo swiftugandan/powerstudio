@@ -85,6 +85,26 @@ pub struct UnitResult {
     pub at_limit: Option<&'static str>,
 }
 
+/// An HVDC link's result. Powers enter the link from the AC network at each converter station.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct HvdcResult {
+    /// Link identifier.
+    pub id: String,
+    /// Station identifiers at ends 1 and 2.
+    pub stations: [String; 2],
+    /// Active power at end 1, MW.
+    pub p1: f64,
+    /// Reactive power at end 1, Mvar.
+    pub q1: f64,
+    /// Active power at end 2, MW.
+    pub p2: f64,
+    /// Reactive power at end 2, Mvar.
+    pub q2: f64,
+    /// Losses of the stations and the DC line, MW.
+    pub losses: f64,
+}
+
 /// A tap changer the load flow regulated.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -213,6 +233,8 @@ pub struct LoadFlowReport {
     pub warnings: Vec<String>,
     /// System totals.
     pub totals: Totals,
+    /// HVDC links.
+    pub hvdc: Vec<HvdcResult>,
     /// Tap changers the load flow regulated.
     pub taps: Vec<TapResult>,
     /// Switched shunts the load flow regulated.
@@ -377,18 +399,12 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
             }
         })
         .collect();
-    // Network machines are the generators, then the static var compensators.
-    let ng = calc.machines.len();
-    let unit_name = |m: usize| match m < ng {
-        true => (Class::Generator, calc.machines[m] as usize),
-        false => (Class::Svc, calc.svcs[m - ng] as usize),
-    };
     let svcs: Vec<UnitResult> = sol
         .machines
         .iter()
-        .filter(|u| u.id >= ng)
+        .filter(|u| calc.unit(u.id).0 == Class::Svc)
         .map(|u| UnitResult {
-            id: model.svcs[calc.svcs[u.id - ng] as usize].id.clone(),
+            id: model.svcs[calc.unit(u.id).1].id.clone(),
             p: 0.0,
             q: u.q * sb,
             at_limit: match u.at_limit {
@@ -401,9 +417,9 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
     let gens: Vec<UnitResult> = sol
         .machines
         .iter()
-        .filter(|u| u.id < ng)
+        .filter(|u| calc.unit(u.id).0 == Class::Generator)
         .map(|u| UnitResult {
-            id: model.generators[calc.machines[u.id] as usize].id.clone(),
+            id: model.generators[calc.unit(u.id).1].id.clone(),
             p: u.p * sb,
             q: u.q * sb,
             at_limit: match u.at_limit {
@@ -427,8 +443,9 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
         .loads
         .iter()
         .zip(&sol.loads)
+        .filter(|(l, _)| calc.load_unit(l.id).0 == Class::Load)
         .map(|(l, &(p, q))| UnitResult {
-            id: model.loads[calc.loads[l.id] as usize].id.clone(),
+            id: model.loads[calc.load_unit(l.id).1].id.clone(),
             p: p * sb,
             q: q * sb,
             at_limit: None,
@@ -461,12 +478,45 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
     for &(m, lim) in &sol.held {
         let q = sol.machines[m].q * sb;
         let word = if lim > 0 { "upper" } else { "lower" };
-        let (class, row) = unit_name(m);
+        let (class, row) = calc.unit(m);
         warnings.push(format!(
             "{} reached its {word} reactive power limit and now holds {q:.2} Mvar.",
             model.name_of(class, row)
         ));
     }
+    // Each station's draw from its AC network: a line-commutated one as the load it is, a voltage-source one as the
+    // negative of its output.
+    let station_pq = |row: u32| -> (f64, f64) {
+        let lcc = net
+            .loads
+            .iter()
+            .zip(&sol.loads)
+            .find(|(l, _)| calc.load_unit(l.id) == (Class::Converter, row as usize))
+            .map(|(_, &(p, q))| (p * sb, q * sb));
+        let vsc = || {
+            sol.machines
+                .iter()
+                .find(|u| calc.unit(u.id) == (Class::Converter, row as usize))
+                .map(|u| (-u.p * sb, -u.q * sb))
+        };
+        lcc.or_else(vsc).unwrap_or((0.0, 0.0))
+    };
+    let hvdc = calc
+        .hvdc
+        .iter()
+        .map(|h| {
+            let ((p1, q1), (p2, q2)) = (station_pq(h.stations[0]), station_pq(h.stations[1]));
+            HvdcResult {
+                id: model.hvdc_lines[h.row as usize].id.clone(),
+                stations: h.stations.map(|s| model.converters[s as usize].id.clone()),
+                p1,
+                q1,
+                p2,
+                q2,
+                losses: p1 + p2,
+            }
+        })
+        .collect();
     let taps = sol
         .net
         .taps
@@ -552,6 +602,7 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
             .collect(),
         warnings,
         totals,
+        hvdc,
         taps,
         sections,
         distributed: sol.distributed.iter().sum::<f64>() * sb,

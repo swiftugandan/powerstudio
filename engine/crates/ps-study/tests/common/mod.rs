@@ -91,5 +91,13 @@ pub fn psse_import(case: &serde_json::Value) -> ps_io::psse_model::Imported {
     let path = repo(&format!(".cache/reference/{file}"));
     let bytes = std::fs::read(&path)
         .unwrap_or_else(|e| panic!("{}: {e}. Run node scripts/fetch-reference.mjs first.", path.display()));
-    ps_io::psse_model::import(&ps_io::psse::decode(&bytes), file).unwrap_or_else(|e| panic!("{file}: {e}"))
+    let mut imported =
+        ps_io::psse_model::import(&ps_io::psse::decode(&bytes), file).unwrap_or_else(|e| panic!("{file}: {e}"));
+    // A case marked "without_hvdc" is solved without its HVDC links (psse-cases.json says why).
+    if case.get("without_hvdc").is_some() {
+        for h in &mut imported.model.hvdc_lines {
+            h.in_service = false;
+        }
+    }
+    imported
 }

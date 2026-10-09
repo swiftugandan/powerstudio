@@ -583,6 +583,75 @@ pub struct ExternalGrid {
     pub r0x0: f64,
 }
 
+/// The technology of an HVDC converter station.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ConverterKind {
+    /// Line-commutated: it always consumes reactive power, |P|·tan(acos pf).
+    #[default]
+    Lcc,
+    /// Voltage-source: it regulates voltage or holds a reactive power, within limits.
+    Vsc,
+}
+
+/// An HVDC converter station: where an HVDC link meets the AC network.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Converter {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// AC connection node.
+    pub node: NodeRef,
+    /// Switched in.
+    pub in_service: bool,
+    /// Technology.
+    pub kind: ConverterKind,
+    /// Station losses, % of the AC active power through it.
+    pub loss_pct: f64,
+    /// Power factor of a line-commutated station.
+    pub power_factor: f64,
+    /// Whether a voltage-source station regulates voltage.
+    pub voltage_control: bool,
+    /// Voltage setpoint, p.u. of the regulated node's nominal voltage.
+    pub v_set: f64,
+    /// Node whose voltage is regulated; `None` for the station's own node.
+    pub regulated_node: Option<NodeRef>,
+    /// Reactive power of a voltage-source station that does not regulate voltage, Mvar (positive into the network).
+    pub q: f64,
+    /// Lower reactive power limit of a voltage-source station, Mvar.
+    pub q_min: f64,
+    /// Upper reactive power limit of a voltage-source station, Mvar.
+    pub q_max: f64,
+}
+
+/// An HVDC link between two converter stations, run at an active power setpoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HvdcLine {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Switched in.
+    pub in_service: bool,
+    /// Identifier of the station at end 1.
+    pub converter1: String,
+    /// Identifier of the station at end 2.
+    pub converter2: String,
+    /// DC resistance of the line, Ω.
+    pub r: f64,
+    /// DC voltage, kV.
+    pub nominal_kv: f64,
+    /// Active power the rectifier draws from its AC network, MW.
+    pub p_set: f64,
+    /// The rectifying end: 1 or 2.
+    pub rectifier: u8,
+    /// Largest active power, MW.
+    pub p_max: f64,
+}
+
 /// A control area with an interchange target.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

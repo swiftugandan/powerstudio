@@ -222,7 +222,7 @@ fn distribute_on_machines(work: &mut Work, isl: usize, mismatch: f64, balance: B
 fn distribute_on_loads(work: &mut Work, isl: usize, mismatch: f64) -> (f64, bool) {
     let net = &work.net;
     let members: Vec<usize> = (0..net.loads.len())
-        .filter(|&k| work.island[net.loads[k].bus] == isl && net.loads[k].p != 0.0)
+        .filter(|&k| work.island[net.loads[k].bus] == isl && net.loads[k].scalable && net.loads[k].p != 0.0)
         .collect();
     let norm: f64 = members.iter().map(|&k| net.loads[k].p.abs()).sum();
     if norm <= 0.0 {

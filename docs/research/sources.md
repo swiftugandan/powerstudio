@@ -69,7 +69,7 @@ PowSyBl's conversion rules for tap changers (`TapChangerConversion`, `CgmesPhase
 (https://github.com/powsybl/powsybl-core, MPL 2.0) to match them.
 
 The PSS/E goldens (`tests/oracle/golden/psse-*.json`) were written by `scripts/oracle/psse.py` with the same
-pypowsybl and the same OpenLoadFlow settings (`scripts/oracle/olf.py`). Five corrections bring PowSyBl's network in
+pypowsybl and the same OpenLoadFlow settings (`scripts/oracle/olf.py`). Four corrections bring PowSyBl's network in
 line with the PSS/E definitions before the load flow; each is recorded in the golden's `corrected` field:
 
 - Identifiers lose their blanks: PowSyBl keeps the padding of quoted identifiers ("B1-G1 ").
@@ -79,10 +79,12 @@ line with the PSS/E definitions before the load flow; each is recorded in the go
   inductive load"; PowSyBl 1.16.1 adds it (`LoadConverter`).
 - Generators on type 2 and 3 buses whose reactive range is empty keep their voltage control. PowSyBl turns it off
   and says why in `GeneratorConverter`: "we consider < but psse accepts bus type 2 with Qmin == Qmax".
-- HVDC links and their converter stations are removed, because PowerStudio does not model HVDC yet (phase 3 drops
-  this correction). Without it, IEEE 300 differs around its link at bus 120; with it, it agrees to 2e-12 p.u.
 - A transformer keeps its stated winding ratio. PowSyBl replaces it with a tap step within 1e-5 of it
   (`TransformerConverter.TOLERANCE`), which moved IEEE 39 by 1.5e-6 p.u. before the correction.
+
+One case, the completed IEEE 14 (version 35), is solved without its HVDC links: its setpoints (209 MW over one VSC
+link in a system of about 260 MW) leave no solution, and neither PowSyBl nor PowerStudio converges with them.
+`tests/oracle/psse-cases.json` marks it (`without_hvdc`) and the oracle and the tests both take the links out.
 
 PowSyBl's PSS/E conversion rules were read in its source (`TransformerConverter`, `LineConverter`,
 `SwitchedShuntCompensatorConverter`, `FactsDeviceConverter`, `VoltageLevelConverter`, `AbstractConverter` in
@@ -107,6 +109,46 @@ The oracle removes one pandapower modelling choice so both programs describe the
 placeholder zero-sequence admittance of 1/(1000 + 1000j) p.u. at generator buses; PowerStudio models generator
 neutrals as unearthed. pandapower's transformer zero-sequence magnetising impedance is set very large
 (`mag0_percent = 1e12`) for the same reason.
+
+## Load flow controls
+
+The controls goldens (`tests/oracle/golden/controls-*.json`, written by `scripts/oracle/controls.py`) run
+OpenLoadFlow 2.3.0 (pypowsybl 1.16.1, powsybl-core 7.3.0) with one control at a time, all together, and with the
+voltage targets of regulating two-winding tap changers and shunts raised by 2 % so the discrete controls move. The
+rules PowerStudio reproduces were read in OpenLoadFlow's source (https://github.com/powsybl/powsybl-open-loadflow,
+commit a651a514, tag v2.3.0); `engine/crates/ps-lf/src/control.rs` and `discrete.rs` restate them:
+
+- the outer loops' order and the rule that a round ends at the last loop that changed something
+  (`DefaultAcOuterLoopConfig`, `AcloadFlowEngine.runOuterLoop`);
+- slack distribution from the initial targets with limits and no change of sign (`DistributedSlackOuterLoop`,
+  `ActivePowerDistribution`, `GenerationActivePowerDistributionStep`, `LoadActivePowerDistributionStep`), with the
+  participation checks of `AbstractLfGenerator.checkActivePowerControl` (maximum above 10,000 MW, target outside the
+  active limits, a range under 1e-4 MW);
+- reactive limits per controller bus, the strongest controller kept, release when the voltage passes the target, at
+  most three releases (`ReactiveLimitsOuterLoop`, `AbstractLfBus.getMinQ`), and generators with a reactive range
+  under 1 Mvar left out of voltage control when limits apply (`checkIfReactiveRangesAreLargeEnoughForVoltageControl`,
+  `PlausibleValues.MIN_REACTIVE_RANGE`);
+- shared voltage control by reactive keys, the sum of the machines' ranges or a uniform split when a range is
+  implausible (`GeneratorVoltageControl`, `Control.createReactiveKeys`, `AcEquationSystemCreator` `DISTR_Q`);
+- incremental tap changer, shunt and phase shifter control: sensitivities from the Jacobian at the converged state,
+  the closest position within three steps (several tap changers on one bus: one step each per pass), at most four
+  sections per round, a 0.05 insensitivity threshold for tap changers, direction locking after three reversals, a
+  0.1 kV dead band when none is given, and the voltage target priority machine, tap changer, shunt
+  (`IncrementalTransformerVoltageControlOuterLoop`, `IncrementalShuntVoltageControlOuterLoop`,
+  `AcIncrementalPhaseControlOuterLoop`, `PiModelArray`, `IncrementalContextData`, `VoltageControl`);
+- static var compensator limits B·V² at the solved voltage (`LfStaticVarCompensatorImpl`);
+- voltage-dependent loads as P = p0·(c0 + c1·V + c2·V²) (`AbstractLoadModelEquationTerm`).
+
+Two PowSyBl readings of PSS/E data differ from the data format and are corrected for the controls goldens: a load's
+ZIP model is built with +YQ (`LoadConverter`), so the oracle reads a copy of the file with YQ negated; and phase
+shifters' COD 3 regulation is usually dropped by PowSyBl's import (its regulating terminal is the first equipment on
+bus CONT), so phase shifter control is checked by an engine test against its own definition instead.
+
+HVDC links follow PowSyBl's setpoint model (`HvdcUtils.getConverterStationTargetP`, `getLccConverterStationLoadTargetQ`;
+`LfVscConverterStationImpl`; `LfLoadImpl` for line-commutated stations) and its PSS/E conversion
+(`TwoTerminalDcConverter`, `VscDcTransmissionLineConverter`): the rectifier draws the setpoint, the inverter delivers it
+less the stations' losses and R·P²/V²; a line-commutated station consumes |P|·tan(acos pf) with pf = ½·(cos ANMX +
+cos 60°). That power factor is PowSyBl's approximation of PSS/E's converter equations, which neither tool solves.
 
 ## Short-circuit method
 

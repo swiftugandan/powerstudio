@@ -4,7 +4,7 @@ PowSyBl (pypowsybl, with OpenLoadFlow and the settings in olf.py) is the referen
 records, by element identifier, what PowSyBl imported (set points, shunt admittances, line impedances, tap changers)
 and its load flow results (voltages at every bus and equipment terminal, flows, outputs).
 
-Five corrections bring PowSyBl's network in line with the PSS/E definitions before the load flow:
+Four corrections bring PowSyBl's network in line with the PSS/E definitions before the load flow:
 
 * Identifiers lose their blanks. PowSyBl keeps the padding of quoted RAW identifiers ("B1-G1 "); PowerStudio trims it.
 * Loads with a constant-admittance part get Q0 = QL + IQ - YQ. The PSS/E data format defines YQ as negative for an
@@ -12,8 +12,6 @@ Five corrections bring PowSyBl's network in line with the PSS/E definitions befo
 * Generators on type 2 and 3 buses whose reactive range is empty (QB = QT) keep their voltage control. PowSyBl turns it
   off ("we consider < but psse accepts bus type 2 with Qmin == Qmax", GeneratorConverter); with reactive limits
   ignored, as here, PSS/E holds the set point.
-* HVDC links and their converter stations are removed: PowerStudio does not model HVDC yet (design phase 3) and
-  leaves them out, so the comparison covers the AC network both solve. Phase 3 drops this correction.
 * Transformers keep their stated winding ratio. PowSyBl replaces it with a tap step that lies within 1e-5 of it
   (snapped_ratios below); the RAW file's WINDV is the ratio PSS/E solves with.
 
@@ -145,15 +143,18 @@ def snapped_ratios(raw):
     return out
 
 
-def corrections(n, path):
-    """Brings PowSyBl's network in line with the PSS/E definitions (see the module docstring); returns what changed."""
+def corrections(n, path, case):
+    """Brings PowSyBl's network in line with the PSS/E definitions (see the module docstring); returns what changed.
+    A case marked 'without_hvdc' (tests/oracle/psse-cases.json says why) also loses its HVDC links."""
     raw = sections(path)
-    hvdc = n.get_hvdc_lines()
-    stations = [*hvdc["converter_station1_id"], *hvdc["converter_station2_id"]]
-    for group in (list(hvdc.index), stations):  # a station goes once its line is gone
-        if group:
-            n.remove_elements(group)
-    removed = sorted([*hvdc.index, *stations])
+    removed = []
+    if case.get("without_hvdc"):
+        hvdc = n.get_hvdc_lines()
+        stations = [*hvdc["converter_station1_id"], *hvdc["converter_station2_id"]]
+        for group in (list(hvdc.index), stations):  # a station goes once its line is gone
+            if group:
+                n.remove_elements(group)
+        removed = sorted(ident(i) for i in [*hvdc.index, *stations])
     ide = {int(b[0]): int(b[3]) for b in raw["bus"]}
     loads = {ident(i): i for i in n.get_loads().index}
     q0 = {}
@@ -182,13 +183,16 @@ def corrections(n, path):
         if ide[int(f[0])] in (2, 3) and not g["voltage_regulator_on"] and g["target_v"] > 0 and g["min_q"] >= g["max_q"]:
             n.update_generators(id=by_id[gid], voltage_regulator_on=True)
             regulating.append(gid)
-    return {"q0": q0, "voltage_regulator_on": regulating, "winding_1_ratio": ratio, "removed": [ident(i) for i in removed]}
+    out = {"q0": q0, "voltage_regulator_on": regulating, "winding_1_ratio": ratio}
+    if removed:
+        out["removed"] = removed
+    return out
 
 
 def golden(case):
     path = CACHE / CASES["archives"][case["archive"]]["file"]
     n = pp.network.load(str(path))
-    corrected = corrections(n, path)
+    corrected = corrections(n, path, case)
     slack = n.get_extensions("slackTerminal")
     params = parameters(sorted(slack["bus_id"]), "previous" if case["start"] == "raw" else "dc")
 

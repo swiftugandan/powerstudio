@@ -310,7 +310,7 @@ impl RawCase {
     }
 }
 
-const MAPPED: [Section; 10] = [
+const MAPPED: [Section; 12] = [
     Section::Bus,
     Section::Load,
     Section::FixedShunt,
@@ -319,6 +319,8 @@ const MAPPED: [Section; 10] = [
     Section::SwitchingDevice,
     Section::Transformer,
     Section::Area,
+    Section::TwoTerminalDc,
+    Section::VscDc,
     Section::Facts,
     Section::SwitchedShunt,
 ];

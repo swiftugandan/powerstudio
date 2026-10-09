@@ -66,13 +66,17 @@ pub enum Class {
     Svc,
     /// [`ExternalGrid`].
     ExternalGrid,
+    /// [`Converter`].
+    Converter,
+    /// [`HvdcLine`].
+    Hvdc,
     /// [`Area`].
     Area,
 }
 
 impl Class {
     /// Every class, in table order.
-    pub const ALL: [Class; 13] = [
+    pub const ALL: [Class; 15] = [
         Class::Substation,
         Class::VoltageLevel,
         Class::Node,
@@ -85,6 +89,8 @@ impl Class {
         Class::Shunt,
         Class::Svc,
         Class::ExternalGrid,
+        Class::Converter,
+        Class::Hvdc,
         Class::Area,
     ];
 
@@ -103,6 +109,8 @@ impl Class {
             Class::Shunt => "shunt",
             Class::Svc => "static var compensator",
             Class::ExternalGrid => "external grid",
+            Class::Converter => "converter station",
+            Class::Hvdc => "HVDC link",
             Class::Area => "area",
         }
     }
@@ -163,6 +171,12 @@ pub struct Model {
     pub svcs: Vec<Svc>,
     /// External grids.
     pub external_grids: Vec<ExternalGrid>,
+    /// HVDC converter stations.
+    #[serde(default)]
+    pub converters: Vec<Converter>,
+    /// HVDC links.
+    #[serde(default)]
+    pub hvdc_lines: Vec<HvdcLine>,
     /// Control areas.
     pub areas: Vec<Area>,
     /// Deleted rows per class (sorted indices), until the next compaction.
@@ -197,6 +211,8 @@ impl Model {
             Class::Shunt => self.shunts.len(),
             Class::Svc => self.svcs.len(),
             Class::ExternalGrid => self.external_grids.len(),
+            Class::Converter => self.converters.len(),
+            Class::Hvdc => self.hvdc_lines.len(),
             Class::Area => self.areas.len(),
         }
     }
@@ -229,6 +245,8 @@ impl Model {
             Class::Shunt => &self.shunts.get(index)?.id,
             Class::Svc => &self.svcs.get(index)?.id,
             Class::ExternalGrid => &self.external_grids.get(index)?.id,
+            Class::Converter => &self.converters.get(index)?.id,
+            Class::Hvdc => &self.hvdc_lines.get(index)?.id,
             Class::Area => &self.areas.get(index)?.id,
         };
         Some(s)
@@ -249,6 +267,8 @@ impl Model {
             Class::Shunt => self.shunts.get(index).map(|e| e.name.as_str()),
             Class::Svc => self.svcs.get(index).map(|e| e.name.as_str()),
             Class::ExternalGrid => self.external_grids.get(index).map(|e| e.name.as_str()),
+            Class::Converter => self.converters.get(index).map(|e| e.name.as_str()),
+            Class::Hvdc => self.hvdc_lines.get(index).map(|e| e.name.as_str()),
             Class::Area => self.areas.get(index).map(|e| e.name.as_str()),
         };
         match name {

@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use crate::ConverterKind;
 use crate::{Class, Model};
 
 /// How serious a finding is.
@@ -228,6 +229,59 @@ impl Model {
                         "has {} sections in service but only {} installed",
                         s.sections, s.max_sections
                     ),
+                );
+            }
+        }
+        for (i, c) in self.converters.iter().enumerate() {
+            if self.alive(Class::Converter, i)
+                && c.kind == ConverterKind::Lcc
+                && !(c.power_factor > 0.0 && c.power_factor <= 1.0)
+            {
+                push(
+                    Severity::Error,
+                    Class::Converter,
+                    i,
+                    "needs a power factor above 0 and at most 1".into(),
+                );
+            }
+        }
+        let station = |id: &str| {
+            self.converters
+                .iter()
+                .enumerate()
+                .any(|(k, c)| c.id == id && self.alive(Class::Converter, k))
+        };
+        for (i, h) in self.hvdc_lines.iter().enumerate() {
+            if !self.alive(Class::Hvdc, i) {
+                continue;
+            }
+            for id in [&h.converter1, &h.converter2] {
+                if !station(id) {
+                    push(
+                        Severity::Error,
+                        Class::Hvdc,
+                        i,
+                        format!("refers to the converter station \"{id}\", which does not exist"),
+                    );
+                }
+            }
+            if h.converter1 == h.converter2 {
+                push(
+                    Severity::Error,
+                    Class::Hvdc,
+                    i,
+                    "connects a converter station to itself".into(),
+                );
+            }
+            if !positive(h.nominal_kv) {
+                push(Severity::Error, Class::Hvdc, i, "needs a DC voltage above 0 kV".into());
+            }
+            if !matches!(h.rectifier, 1 | 2) {
+                push(
+                    Severity::Error,
+                    Class::Hvdc,
+                    i,
+                    "needs its rectifier at end 1 or 2".into(),
                 );
             }
         }

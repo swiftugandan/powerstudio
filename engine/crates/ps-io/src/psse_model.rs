@@ -20,9 +20,10 @@
 use std::collections::HashMap;
 
 use ps_model::{
-    Area, CurrentLimit, ExternalGrid, FlowControl, Generator, Line, Load, MachineControl, MachineDynamics,
-    MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap, Shunt, Substation, Svc, Switch,
-    SwitchKind, TapPoint, Transformer2, Transformer3, VoltageControl, VoltageLevel, Winding, Winding3,
+    Area, Converter, ConverterKind, CurrentLimit, ExternalGrid, FlowControl, Generator, HvdcLine, Line, Load,
+    MachineControl, MachineDynamics, MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap, Shunt,
+    Substation, Svc, Switch, SwitchKind, TapPoint, Transformer2, Transformer3, VoltageControl, VoltageLevel, Winding,
+    Winding3,
 };
 
 use crate::ParseError;
@@ -152,6 +153,8 @@ pub fn to_model(raw: &RawCase, file: &str) -> Result<Imported, ParseError> {
     transformers(&mut cx, raw)?;
     areas(&mut cx, raw)?;
     facts(&mut cx, raw)?;
+    two_terminal_dc(&mut cx, raw)?;
+    vsc_dc(&mut cx, raw)?;
     let mut classes: Vec<ClassReport> = raw
         .records
         .iter()
@@ -198,15 +201,15 @@ fn mapped_as(s: Section) -> &'static str {
         Section::Transformer => "two- and three-winding transformers",
         Section::Area => "areas (interchange control off)",
         Section::Facts => "static var compensators (shunt devices; series devices not modelled)",
+        Section::TwoTerminalDc => "HVDC links with line-commutated converter stations",
+        Section::VscDc => "HVDC links with voltage-source converter stations",
         _ => "",
     }
 }
 
 fn not_used(s: Section) -> &'static str {
     match s {
-        Section::TwoTerminalDc | Section::VscDc | Section::MultiTerminalDc => {
-            "HVDC links: not yet modelled (design phase 3)"
-        }
+        Section::MultiTerminalDc => "multi-terminal HVDC: not modelled",
         Section::InductionMachine => "induction machines: not yet modelled",
         Section::ImpedanceCorrection => "impedance correction tables: transformers use their stated impedance",
         _ => "not used by the calculations",
@@ -1152,6 +1155,184 @@ fn facts(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
         cx.notes.push(format!(
             "{remote} FACTS device(s) regulate a remote bus; they hold their own terminal voltage instead."
         ));
+    }
+    Ok(())
+}
+
+/// Two-terminal DC lines: a link between two line-commutated converter stations, rectifier at end 1. As PowSyBl
+/// converts them (TwoTerminalDcConverter): the link runs at its scheduled power (MDC 1: |SETVL| MW; MDC 2: SETVL A
+/// at VSCHD kV) with the DC resistance RDC at VSCHD; MDC 0 blocks it. The stations have no losses of their own, and
+/// each consumes reactive power at the power factor ½·(cos ANMX + cos 60°), an approximation of PSS/E's converter
+/// equations (firing angle, overlap and converter transformer), which this conversion does not solve.
+fn two_terminal_dc(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
+    for r in raw.section(Section::TwoTerminalDc) {
+        let name = r.text(0, 0, "").trim().to_string();
+        let (mdc, rdc, setvl, vschd) = (r.int(0, 1, 0)?, r.num(0, 2, 0.0)?, r.num(0, 3, 0.0)?, r.num(0, 4, 0.0)?);
+        let p_set = match mdc {
+            1 => setvl.abs(),
+            2 => setvl * vschd / 1000.0,
+            _ => 0.0,
+        };
+        let id = format!("DC-{name}");
+        let mut ids = Vec::new();
+        for (line, end) in [(1, "R"), (2, "I")] {
+            let bus = r.int(line, 0, 0)?;
+            let (node, _, ide) = cx.at('D', bus, &[], &name, r)?;
+            // ANMX: the largest firing (rectifier) or extinction (inverter) angle, degrees.
+            let anmx = r.num(line, 2, 0.0)?;
+            let station = format!("{id}-{end}");
+            cx.m.converters.push(Converter {
+                id: station.clone(),
+                name: format!("{name} {}", if end == "R" { "rectifier" } else { "inverter" }),
+                node,
+                in_service: mdc != 0 && ide != 4,
+                kind: ConverterKind::Lcc,
+                loss_pct: 0.0,
+                power_factor: 0.5 * (anmx.to_radians().cos() + 60f64.to_radians().cos()),
+                ..Default::default()
+            });
+            ids.push(station);
+        }
+        cx.m.hvdc_lines.push(HvdcLine {
+            id,
+            name,
+            in_service: mdc != 0,
+            converter1: ids[0].clone(),
+            converter2: ids[1].clone(),
+            r: rdc,
+            nominal_kv: vschd,
+            p_set,
+            rectifier: 1,
+            p_max: 1.2 * p_set,
+        });
+    }
+    Ok(())
+}
+
+/// One converter of a VSC DC line record.
+#[derive(Debug, Clone, Copy)]
+struct VscRecord {
+    bus: i64,
+    /// TYPE: 1 controls the DC voltage, 2 the AC active power.
+    kind: i64,
+    /// MODE: 1 controls the AC voltage, 2 the power factor.
+    mode: i64,
+    dcset: f64,
+    acset: f64,
+    /// Constant losses, kW.
+    aloss: f64,
+    smax: f64,
+    imax: f64,
+    maxq: f64,
+    minq: f64,
+    /// REMOT (version 33) or VSREG (version 35).
+    remote: i64,
+}
+
+/// Voltage-source converter DC lines, as PowSyBl converts them (VscDcTransmissionLineConverter): the link carries
+/// |DCSET| of the first converter that controls AC power (TYPE 2); the station losses follow from ALOSS; a station in
+/// AC voltage control (MODE 1) holds ACSET at its own bus or REMOT/VSREG within MINQ…MAXQ, otherwise it holds the
+/// reactive power its power factor ACSET gives.
+fn vsc_dc(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
+    for r in raw.section(Section::VscDc) {
+        let name = r.text(0, 0, "").trim().to_string();
+        let (mdc, rdc) = (r.int(0, 1, 0)?, r.num(0, 2, 0.0)?);
+        let conv = |line: usize| -> Result<VscRecord, ParseError> {
+            Ok(VscRecord {
+                bus: r.int(line, 0, 0)?,
+                kind: r.int(line, 1, 0)?,
+                mode: r.int(line, 2, 0)?,
+                dcset: r.num(line, 3, 0.0)?,
+                acset: r.num(line, 4, 1.0)?,
+                aloss: r.num(line, 5, 0.0)?,
+                smax: r.num(line, 8, 0.0)?,
+                imax: r.num(line, 9, 0.0)?,
+                maxq: r.num(line, 11, 9999.0)?,
+                minq: r.num(line, 12, -9999.0)?,
+                remote: r.int(line, 13, 0)?,
+            })
+        };
+        let (c1, c2) = (conv(1)?, conv(2)?);
+        let p_set = if c1.kind == 2 {
+            c1.dcset.abs()
+        } else if c2.kind == 2 {
+            c2.dcset.abs()
+        } else {
+            0.0
+        };
+        // PowSyBl's rule, which reads converter 1's DCSET in both cases.
+        let rectifier = if c1.kind == 2 {
+            if c1.dcset > 0.0 { 2 } else { 1 }
+        } else if c2.kind == 2 && c1.dcset <= 0.0 {
+            2
+        } else {
+            1
+        };
+        let id = format!("VSC-{name}");
+        let mut ids = Vec::new();
+        let mut kv = [0.0; 2];
+        for (k, c) in [c1, c2].iter().enumerate() {
+            let (node, base, ide) = cx.at('V', c.bus, &[], &name, r)?;
+            kv[k] = base;
+            let rect = rectifier == k as u8 + 1;
+            let aloss = c.aloss.abs() / 1000.0;
+            let loss_pct = if rect {
+                let p_ac = p_set + aloss;
+                if p_ac > 0.0 { (1.0 - p_set / p_ac) * 100.0 } else { 0.0 }
+            } else if p_set > 0.0 {
+                (1.0 - (p_set - aloss) / p_set) * 100.0
+            } else {
+                0.0
+            };
+            let regulating = c.mode == 1;
+            let q = if !regulating && c.acset != 0.0 && c.acset.abs() <= 1.0 {
+                p_set * (1.0 - c.acset * c.acset).sqrt() / c.acset
+            } else {
+                0.0
+            };
+            let remote = c.remote;
+            let regulated_node = (remote != 0 && remote != c.bus)
+                .then(|| cx.node_of.get(&remote).map(|b| b.0))
+                .flatten();
+            let station = format!("{id}-{}", k + 1);
+            cx.m.converters.push(Converter {
+                id: station.clone(),
+                name: format!("{name} {}", k + 1),
+                node,
+                in_service: mdc != 0 && ide != 4,
+                kind: ConverterKind::Vsc,
+                loss_pct,
+                voltage_control: regulating,
+                v_set: if regulating && c.acset.is_finite() && c.acset > 0.0 {
+                    c.acset
+                } else {
+                    1.0
+                },
+                regulated_node,
+                q,
+                q_min: if regulating { c.minq } else { 0.0 },
+                q_max: if regulating { c.maxq } else { 0.0 },
+                ..Default::default()
+            });
+            ids.push(station);
+        }
+        let p_max = [c1, c2]
+            .iter()
+            .zip(kv)
+            .map(|(c, v)| c.smax.max(c.imax * v / 1000.0))
+            .fold(0.0, f64::max);
+        cx.m.hvdc_lines.push(HvdcLine {
+            id,
+            name,
+            in_service: mdc != 0,
+            converter1: ids[0].clone(),
+            converter2: ids[1].clone(),
+            r: rdc,
+            nominal_kv: kv[0].max(kv[1]),
+            p_set,
+            rectifier,
+            p_max: if p_max > 0.0 { p_max } else { 1.2 * p_set },
+        });
     }
     Ok(())
 }

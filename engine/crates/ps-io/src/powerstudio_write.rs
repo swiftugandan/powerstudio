@@ -619,6 +619,43 @@ fn injections(d: &mut Doc) {
         );
         d.count("static var compensator(s) written as machines without active power");
     }
+    // HVDC links run at their setpoints, so each station is a fixed injection: a line-commutated one a load, a
+    // voltage-source one a machine without short-circuit contribution.
+    for (k, h) in m.hvdc_lines.iter().enumerate() {
+        if !m.alive(Class::Hvdc, k) {
+            continue;
+        }
+        let station = |id: &str| m.converters.iter().position(|c| c.id == id);
+        let (Some(c1), Some(c2)) = (station(&h.converter1), station(&h.converter2)) else {
+            continue;
+        };
+        let on = h.in_service && m.converters[c1].in_service && m.converters[c2].in_service;
+        let powers = ps_net::hvdc_powers(m, h, c1, c2);
+        for (c, p) in [(c1, powers[0]), (c2, powers[1])] {
+            let st = &m.converters[c];
+            let Some(bus) = d.bus(st.node) else { continue };
+            let _ = match st.kind {
+                ps_model::ConverterKind::Lcc => d.push(
+                    "load",
+                    &st.id,
+                    &st.name,
+                    json!({ "bus": bus.0, "inService": on, "p": -p, "q": ps_net::lcc_q(p, st.power_factor) }),
+                ),
+                ps_model::ConverterKind::Vsc => d.push(
+                    "gen",
+                    &st.id,
+                    &st.name,
+                    json!({
+                        "bus": bus.0, "inService": on, "mode": if st.voltage_control { "PV" } else { "PQ" }, "p": p,
+                        "q": st.q, "vset": st.v_set.clamp(0.5, 1.5), "angle": 0, "qmin": clamp_q(st.q_min),
+                        "qmax": clamp_q(st.q_max), "sn": d.sb, "vn": bus.1, "cosphi": 0.85, "xdss": 1e6, "rs": 0,
+                        "xdt": 1e6, "h": 0.01, "damping": 0,
+                    }),
+                ),
+            };
+        }
+        d.count("HVDC link(s) written as the fixed injections of their converter stations");
+    }
     for (k, x) in m.external_grids.iter().enumerate() {
         if !m.alive(Class::ExternalGrid, k) {
             continue;

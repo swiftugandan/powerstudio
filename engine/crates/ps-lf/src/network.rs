@@ -134,6 +134,8 @@ pub struct PuLoad {
     pub p_zip: [f64; 3],
     /// Constant impedance, current and power shares of `q`.
     pub q_zip: [f64; 3],
+    /// Whether a load-based slack distribution may change it (HVDC stations held as loads may not).
+    pub scalable: bool,
 }
 
 impl PuLoad {

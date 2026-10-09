@@ -160,6 +160,8 @@ classes! {
     Shunt => shunts: Shunt,
     Svc => svcs: Svc,
     ExternalGrid => external_grids: ExternalGrid,
+    Converter => converters: Converter,
+    Hvdc => hvdc_lines: HvdcLine,
     Area => areas: Area,
 }
 

@@ -288,7 +288,7 @@ pub fn simulate(
     // Sources: machines with inertia, then grids without.
     let mut src: Vec<Source> = Vec::new();
     // Static var compensators (the network machines after the generators) are held at their load-flow output below.
-    for u in lf.machines.iter().filter(|u| u.id < calc.machines.len()) {
+    for u in lf.machines.iter().filter(|u| calc.unit(u.id).0 == Class::Generator) {
         let row = calc.machines[u.id] as usize;
         let g = &model.generators[row];
         let bus = net.machines[u.id].bus;
@@ -336,7 +336,10 @@ pub fn simulate(
         .map(|l| {
             let v2 = v0[l.bus].norm_sqr();
             (
-                model.loads[calc.loads[l.id] as usize].id.clone(),
+                model
+                    .id_of(calc.load_unit(l.id).0, calc.load_unit(l.id).1)
+                    .unwrap_or("")
+                    .to_string(),
                 LoadY {
                     bus: l.bus,
                     y: C64::new(l.p / v2, -l.q / v2),
@@ -345,9 +348,13 @@ pub fn simulate(
             )
         })
         .collect();
-    for u in lf.machines.iter().filter(|u| u.id >= calc.machines.len()) {
+    // Static var compensators and voltage-source converter stations are held at their load-flow output.
+    for u in lf.machines.iter().filter(|u| calc.unit(u.id).0 != Class::Generator) {
         let bus = net.machines[u.id].bus;
-        let id = model.svcs[calc.svcs[u.id - calc.machines.len()] as usize].id.clone();
+        let id = model
+            .id_of(calc.unit(u.id).0, calc.unit(u.id).1)
+            .unwrap_or("")
+            .to_string();
         loads.push((
             id,
             LoadY {
