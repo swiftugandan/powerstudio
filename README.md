@@ -119,8 +119,8 @@ assumptions; on its 132 kV side nothing is earthed, so its earth-fault currents 
 design. Riverside is invented.
 
 **Verified environments.** The browser tests ran in Playwright's Chromium 156 on macOS (WebGPU on an Apple Metal
-adapter, and the Canvas 2D fallback in the headless shell) and on GitHub's Ubuntu runners; see
-[docs/TEST-REPORT.md](docs/TEST-REPORT.md) for which backend each environment actually used. Firefox and Safari were
+adapter, and the Canvas 2D fallback in the headless shell) and on GitHub's Ubuntu runners, where Chromium's WebGPU
+does not work, so only Canvas 2D ran there; see [docs/TEST-REPORT.md](docs/TEST-REPORT.md). Firefox and Safari were
 not tested. Touch and pinch input are implemented but were not tried on a real phone. Keyboard operation and ARIA
 roles are in place, but the app has not been audited with a screen reader.
 
