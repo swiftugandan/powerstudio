@@ -35,6 +35,12 @@ jobs:
         run: npm run check
       - name: Engine format and lints
         run: npm run lint:engine
+      - uses: actions/cache@v4
+        with:
+          path: .cache/reference
+          key: reference-${{ hashFiles('tests/oracle/cgmes-cases.json') }}
+      - name: Reference models (ENTSO-E CGMES test configurations, checksums pinned)
+        run: node scripts/fetch-reference.mjs
       - name: Engine tests (native, against the oracle goldens)
         run: npm run test:engine
       - name: Unit and engine tests (the WebAssembly build, native and WebAssembly compared)

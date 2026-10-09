@@ -293,7 +293,9 @@ pub fn solve(net: &PuNetwork, opt: &Options) -> Solution {
         seed[g.bus] = g.angle;
     }
     let mut va: Vec<f64> = if opt.warm_start {
-        net.buses.iter().map(|b| b.va0).collect()
+        // A stored solution may be referenced to another angle; shift each island so its reference sits at its own
+        // angle before Newton starts.
+        aligned_start(net, &seed)
     } else {
         nominal_angles(net, &seed)
     };
@@ -575,4 +577,42 @@ fn dispatch(
         }
     }
     (machines, grids)
+}
+
+/// Starting angles of a warm start, shifted island by island so each reference bus starts at its set angle.
+fn aligned_start(net: &PuNetwork, seed: &[f64]) -> Vec<f64> {
+    let n = net.buses.len();
+    let mut va: Vec<f64> = net.buses.iter().map(|b| b.va0).collect();
+    let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for br in &net.branches {
+        adj[br.f].push(br.t);
+        adj[br.t].push(br.f);
+    }
+    let roots = net.grids.iter().map(|g| g.bus).chain(
+        net.machines
+            .iter()
+            .filter(|g| g.mode == MachineMode::Reference)
+            .map(|g| g.bus),
+    );
+    let mut offset = vec![None; n];
+    for r in roots {
+        if offset[r].is_some() {
+            continue;
+        }
+        let shift = seed[r] - va[r];
+        let mut stack = vec![r];
+        offset[r] = Some(shift);
+        while let Some(i) = stack.pop() {
+            for &k in &adj[i] {
+                if offset[k].is_none() {
+                    offset[k] = Some(shift);
+                    stack.push(k);
+                }
+            }
+        }
+    }
+    for (a, o) in va.iter_mut().zip(offset) {
+        *a += o.unwrap_or(0.0);
+    }
+    va
 }

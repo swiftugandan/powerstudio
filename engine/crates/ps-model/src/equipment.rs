@@ -17,6 +17,8 @@ pub enum NodeKind {
     BusbarSection,
     /// An internal connectivity node of a node-breaker model (between switches).
     Connectivity,
+    /// A boundary point where one operator's model meets another's (CGMES boundary nodes).
+    Boundary,
 }
 
 /// A substation: a group of voltage levels at one site.
@@ -132,14 +134,21 @@ pub struct Line {
     pub node2: NodeRef,
     /// Switched in.
     pub in_service: bool,
+    /// Ends disconnected from their node while the line stays in service (it then charges from the other end).
+    #[serde(default)]
+    pub open: [bool; 2],
     /// Series resistance, Ω.
     pub r: f64,
     /// Series reactance, Ω.
     pub x: f64,
-    /// Total shunt conductance, S.
-    pub g: f64,
-    /// Total shunt susceptance, S.
-    pub b: f64,
+    /// Shunt conductance at end 1, S (half the total for a symmetrical π model).
+    pub g1: f64,
+    /// Shunt susceptance at end 1, S.
+    pub b1: f64,
+    /// Shunt conductance at end 2, S.
+    pub g2: f64,
+    /// Shunt susceptance at end 2, S.
+    pub b2: f64,
     /// Zero-sequence resistance, Ω.
     pub r0: f64,
     /// Zero-sequence reactance, Ω.
@@ -183,8 +192,29 @@ pub struct VoltageControl {
     pub deadband_kv: f64,
 }
 
-/// A ratio tap changer on one winding.
+/// One position of a tabular tap changer. Ratio and angle replace the stepped values; the corrections change the
+/// transformer's series impedance and magnetising admittance at that position.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TapPoint {
+    /// Tap position.
+    pub position: i32,
+    /// Voltage of the tap winding at this position over its rated voltage (1 at rated).
+    pub ratio: f64,
+    /// Phase shift, degrees, in the tap changer's own sense (see [`PhaseTap`]).
+    pub angle_deg: f64,
+    /// Change of the series resistance, %.
+    pub r_pct: f64,
+    /// Change of the series reactance, %.
+    pub x_pct: f64,
+    /// Change of the magnetising conductance, %.
+    pub g_pct: f64,
+    /// Change of the magnetising susceptance, %.
+    pub b_pct: f64,
+}
+
+/// A ratio tap changer on one winding.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RatioTap {
     /// Winding the tap changer sits on (1, 2 or 3).
@@ -201,6 +231,9 @@ pub struct RatioTap {
     pub position: i32,
     /// Automatic control, if fitted.
     pub control: Option<VoltageControl>,
+    /// Ratio and impedance changes per position; when present they replace `step_pct`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub table: Vec<TapPoint>,
 }
 
 /// Active power control by a phase-shifting transformer.
@@ -215,10 +248,14 @@ pub struct FlowControl {
     pub deadband_mw: f64,
 }
 
-/// A phase tap changer (symmetrical, constant angle per step).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+/// A phase tap changer. Without a table it shifts by a constant angle per step; with one (how importers store
+/// symmetrical, asymmetrical and tabular phase shifters) each position has its own angle and ratio. A positive angle
+/// makes the other winding lag the tap changer's winding.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PhaseTap {
+    /// Winding the tap changer sits on (1 or 2).
+    pub end: u8,
     /// Lowest position.
     pub low: i32,
     /// Highest position.
@@ -231,6 +268,9 @@ pub struct PhaseTap {
     pub position: i32,
     /// Automatic control, if fitted.
     pub control: Option<FlowControl>,
+    /// Angle, ratio and impedance changes per position; when present they replace `step_deg`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub table: Vec<TapPoint>,
 }
 
 /// A two-winding transformer. Series impedance and magnetising admittance are referred to winding 1.
@@ -247,6 +287,9 @@ pub struct Transformer2 {
     pub node2: NodeRef,
     /// Switched in.
     pub in_service: bool,
+    /// Windings disconnected from their node while the transformer stays in service.
+    #[serde(default)]
+    pub open: [bool; 2],
     /// Rated voltage of winding 1, kV.
     pub rated_kv1: f64,
     /// Rated voltage of winding 2, kV.
@@ -300,14 +343,23 @@ pub struct Winding3 {
     pub r: f64,
     /// Star-equivalent reactance referred to this winding, Ω.
     pub x: f64,
+    /// Magnetising conductance of this winding, S at its rated voltage.
+    #[serde(default)]
+    pub g: f64,
+    /// Magnetising susceptance of this winding, S at its rated voltage.
+    #[serde(default)]
+    pub b: f64,
     /// Clock number of this winding relative to winding 1.
     pub clock: u8,
     /// Connection.
     pub conn: Winding,
+    /// Disconnected from its node while the transformer stays in service.
+    #[serde(default)]
+    pub open: bool,
 }
 
-/// A three-winding transformer as a star of three windings. Magnetising admittance sits at the star point, referred
-/// to winding 1.
+/// A three-winding transformer as a star of three windings. Each winding carries its own share of the star impedance
+/// and of the magnetising admittance (at the winding's network side, as CGMES gives it per end).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Transformer3 {
@@ -319,10 +371,6 @@ pub struct Transformer3 {
     pub windings: [Winding3; 3],
     /// Switched in.
     pub in_service: bool,
-    /// Magnetising conductance, S, referred to winding 1.
-    pub g: f64,
-    /// Magnetising susceptance, S, referred to winding 1.
-    pub b: f64,
     /// Ratio tap changer (on any winding), if fitted.
     pub ratio_tap: Option<RatioTap>,
     /// Current limits.
@@ -406,6 +454,10 @@ pub struct Generator {
     pub rated_kv: f64,
     /// Share of a distributed slack (0 for none).
     pub participation: f64,
+    /// Preference as reference machine of its island: 1 is the first choice, higher numbers later ones, 0 never by
+    /// priority (CGMES `referencePriority`).
+    #[serde(default)]
+    pub reference_priority: u32,
     /// Short-circuit data.
     pub sc: MachineShortCircuit,
     /// Classical dynamic data.
@@ -458,6 +510,10 @@ pub struct Shunt {
     pub max_sections: u32,
     /// Automatic voltage control, if fitted.
     pub control: Option<VoltageControl>,
+    /// Admittance of each section in turn (G, B in S at the nominal voltage) for a non-linear bank; when present it
+    /// replaces the per-section values.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub points: Vec<(f64, f64)>,
 }
 
 /// A static var compensator.
@@ -480,6 +536,12 @@ pub struct Svc {
     pub b_max: f64,
     /// Voltage setpoint, p.u.
     pub v_set: f64,
+    /// Whether it regulates voltage; otherwise it holds `q`.
+    #[serde(default)]
+    pub regulating: bool,
+    /// Reactive power output when not regulating, Mvar (positive: capacitive, into the network).
+    #[serde(default)]
+    pub q: f64,
 }
 
 /// An external grid: the equivalent of the network beyond the model.

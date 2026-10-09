@@ -119,7 +119,7 @@ impl Model {
             if t.r == 0.0 && t.x == 0.0 {
                 push(Severity::Error, Class::Transformer2, i, "has zero impedance".into());
             }
-            if let Some(tap) = t.ratio_tap
+            if let Some(tap) = &t.ratio_tap
                 && !(tap.low <= tap.position && tap.position <= tap.high)
             {
                 push(
@@ -127,6 +127,36 @@ impl Model {
                     Class::Transformer2,
                     i,
                     format!("tap position {} is outside {}…{}", tap.position, tap.low, tap.high),
+                );
+            }
+        }
+        for (i, t) in self.transformers2.iter().enumerate() {
+            if !self.alive(Class::Transformer2, i) {
+                continue;
+            }
+            let missing = |table: &[crate::TapPoint], position: i32| {
+                !table.is_empty() && !table.iter().any(|p| p.position == position)
+            };
+            if t.ratio_tap
+                .as_ref()
+                .is_some_and(|tap| missing(&tap.table, tap.position))
+            {
+                push(
+                    Severity::Error,
+                    Class::Transformer2,
+                    i,
+                    "the ratio tap position is not in its table".into(),
+                );
+            }
+            if t.phase_tap
+                .as_ref()
+                .is_some_and(|tap| missing(&tap.table, tap.position))
+            {
+                push(
+                    Severity::Error,
+                    Class::Transformer2,
+                    i,
+                    "the phase tap position is not in its table".into(),
                 );
             }
         }
@@ -162,6 +192,18 @@ impl Model {
             }
         }
         for (i, s) in self.shunts.iter().enumerate() {
+            if self.alive(Class::Shunt, i) && !s.points.is_empty() && s.sections as usize > s.points.len() {
+                push(
+                    Severity::Error,
+                    Class::Shunt,
+                    i,
+                    format!(
+                        "has {} sections in service but only {} defined",
+                        s.sections,
+                        s.points.len()
+                    ),
+                );
+            }
             if self.alive(Class::Shunt, i) && s.sections > s.max_sections {
                 push(
                     Severity::Error,

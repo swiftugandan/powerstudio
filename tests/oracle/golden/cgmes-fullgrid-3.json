@@ -1,0 +1,482 @@
+{
+ "case": "fullgrid-3",
+ "data": "ENTSO-E CGMES test configuration, read from the archive (not redistributed)",
+ "imported": {
+  "dangling": {
+   "07c65f92-fd67-4967-be59-735ff275e40e": {
+    "b": 8.2938e-05,
+    "g": 3.08e-05,
+    "p0": -34.365225,
+    "paired": false,
+    "q0": 0.425626,
+    "r": 2.2,
+    "x": 68.2
+   },
+   "4520f8f3-0b52-4a34-b916-d199dc1dae95": {
+    "b": 0.000149854,
+    "g": 6e-05,
+    "p0": -43.816625,
+    "paired": false,
+    "q0": 79.193778,
+    "r": 1.05,
+    "x": 12.0
+   },
+   "abb15d78-cccb-4d2a-8e8d-a4b45a5a35a8": {
+    "b": 2.1677e-05,
+    "g": 5.75e-05,
+    "p0": -33.805006,
+    "paired": false,
+    "q0": 1.489867,
+    "r": 4.6,
+    "x": 69.0
+   },
+   "ad96b7fb-3130-4782-a33b-09979e30c025": {
+    "b": 6.59734e-05,
+    "g": 4.2e-05,
+    "p0": -83.037005,
+    "paired": false,
+    "q0": -48.603743,
+    "r": 0.42,
+    "x": 6.3
+   },
+   "cf2205b6-12e4-4d1c-9e8e-6bfdfca787bb": {
+    "b": 2.51956e-05,
+    "g": 4e-05,
+    "p0": -40.687227,
+    "paired": false,
+    "q0": 84.876604,
+    "r": 0.24,
+    "x": 2.0
+   }
+  },
+  "generators": {
+   "05b42ccb-5843-40d7-9b68-5cd6b0a8be2e": {
+    "regulating": true,
+    "target_p": 118.0,
+    "target_q": 18.720301,
+    "target_v": 21.987
+   },
+   "62a4d7b2-acca-4726-8d47-a85afbcf0642": {
+    "regulating": true,
+    "target_p": 90.0,
+    "target_q": 100.256,
+    "target_v": 115.5
+   },
+   "7056bbcf-1ad4-4bc9-beec-ac9f247b01d9": {
+    "regulating": true,
+    "target_p": 118.0,
+    "target_q": 18.720301,
+    "target_v": 21.987
+   },
+   "8f549574-513c-412d-969d-ab882ce25e4c": {
+    "regulating": true,
+    "target_p": 118.0,
+    "target_q": 18.720301,
+    "target_v": 21.987
+   },
+   "9444340e-9295-4e3b-a4c1-f55dce24ca8e": {
+    "regulating": true,
+    "target_p": 75.0,
+    "target_q": -0.0,
+    "target_v": 21.987
+   },
+   "99ff08b9-87c1-4017-b15f-a5b68e49d750": {
+    "regulating": true,
+    "target_p": 118.0,
+    "target_q": 18.720301,
+    "target_v": 21.987
+   },
+   "ed9f5001-2b84-49a5-9b00-2c9b0591eb06": {
+    "regulating": true,
+    "target_p": 19.99,
+    "target_q": 19.99,
+    "target_v": 225.5
+   },
+   "fbd2fea4-2d71-4e31-8399-25ebd6c9c205": {
+    "regulating": true,
+    "target_p": 75.0,
+    "target_q": -0.0,
+    "target_v": 21.987
+   }
+  },
+  "lines": {
+   "09ad7fd9-f141-4939-8faa-c6c71e920200": {
+    "b1": 0.0,
+    "b2": 0.0,
+    "g1": 0.0,
+    "g2": 0.0,
+    "r": 0.1,
+    "x": 0.3
+   },
+   "2939d1e5-abf0-4494-bc07-6d6b88de49a4": {
+    "b1": 0.0,
+    "b2": 0.0,
+    "g1": 0.0,
+    "g2": 0.0,
+    "r": 0.1,
+    "x": 0.3
+   },
+   "61146890-aa23-41df-8048-d4441c24fda7": {
+    "b1": 1.000595e-05,
+    "b2": 1.000595e-05,
+    "g1": 6e-05,
+    "g2": 6e-05,
+    "r": 5.203,
+    "x": 71.0
+   },
+   "620f7d77-6a26-47d4-933e-1e2a5881befb": {
+    "b1": 5e-07,
+    "b2": 5e-07,
+    "g1": 5e-07,
+    "g2": 5e-07,
+    "r": 0.1,
+    "x": 0.2
+   },
+   "76f4cbaf-b956-48b8-9e07-c17641982167": {
+    "b1": 5e-07,
+    "b2": 5e-07,
+    "g1": 5e-07,
+    "g2": 5e-07,
+    "r": 0.1,
+    "x": 0.2
+   },
+   "968715b5-f03c-4202-8d66-0304be724ddf": {
+    "b1": 0.0,
+    "b2": 0.0,
+    "g1": 0.0,
+    "g2": 0.0,
+    "r": 0.99,
+    "x": 0.99
+   },
+   "bc4a546e-839a-45e1-9008-509fdedec38a": {
+    "b1": 0.0,
+    "b2": 0.0,
+    "g1": 0.0,
+    "g2": 0.0,
+    "r": 0.99,
+    "x": 0.99
+   },
+   "d64195f6-4d3d-4052-b91d-6b197995efd4": {
+    "b1": 2.120575e-05,
+    "b2": 2.120575e-05,
+    "g1": 3.375e-05,
+    "g2": 3.375e-05,
+    "r": 1.935,
+    "x": 34.2
+   }
+  },
+  "loads": {
+   "12e5b86c-e552-4607-bb42-402a0eb4fffd": {
+    "p0": 55.0,
+    "q0": 0.99
+   },
+   "1ffdd306-f4cb-4779-bd95-562a23d140d5": {
+    "p0": 0.01,
+    "q0": 0.01
+   },
+   "35600e6d-42d9-4450-91ac-9d39aceb9a5a": {
+    "p0": 200.0,
+    "q0": 50.0
+   },
+   "434f39be-964a-40dd-bf41-6e0aaf85bf4d": {
+    "p0": 0.0,
+    "q0": 0.0
+   },
+   "9ec9e1bb-295b-4347-8ddc-d384119681f8": {
+    "p0": 0.0,
+    "q0": 0.0
+   },
+   "af1d683b-e581-4b1a-8e80-2b854283f636": {
+    "p0": 200.0,
+    "q0": 90.0
+   },
+   "d39f53ad-fd81-4496-b688-7fbf3ca8379f": {
+    "p0": 9.99,
+    "q0": 0.99
+   },
+   "ee2a2f31-0edd-4c72-82f0-ab084130622f": {
+    "p0": 1.0,
+    "q0": 0.0
+   },
+   "fb139144-102f-486d-9d47-c78f7ad784fa": {
+    "p0": -9.99,
+    "q0": -0.99
+   }
+  },
+  "phase_taps": {
+   "43f1888c-c495-4efc-acee-2123ba99fbb8": {
+    "side": "",
+    "tap": 6
+   },
+   "5614f030-c1c8-435c-8d5b-580721dce0a0": {
+    "side": "",
+    "tap": 6
+   },
+   "79419546-a3bd-4964-a49a-6d39b1c9cdc5": {
+    "side": "",
+    "tap": 14
+   },
+   "ba8cca63-a7fb-4067-93f1-f475d960c559": {
+    "side": "",
+    "tap": 6
+   }
+  },
+  "ratio_taps": {
+   "02b779e0-0262-47ca-aeee-434bc91f79d9": {
+    "side": "",
+    "tap": 0
+   },
+   "11265a88-de02-470f-bc4b-da2196ce9302": {
+    "side": "TWO",
+    "tap": 0
+   },
+   "13ba1c07-0087-443e-87a7-6f5327d62216": {
+    "side": "",
+    "tap": 0
+   },
+   "3d2f09f5-f2d2-4810-92ed-1b26e066a1d6": {
+    "side": "",
+    "tap": 0
+   },
+   "592f3d0c-bd64-4bb5-b779-d873d8895d6d": {
+    "side": "",
+    "tap": 0
+   },
+   "aac86575-36d8-455d-abe8-34edb60b6e04": {
+    "side": "",
+    "tap": 0
+   },
+   "e40166e1-f954-4c0c-b343-bd8049d0f799": {
+    "side": "",
+    "tap": 0
+   }
+  },
+  "shunts": {
+   "0062fda9-1883-48b8-975b-47828a371ccd": {
+    "b": 0.024793,
+    "g": 0.0,
+    "sections": 1
+   },
+   "469cab52-b961-4910-bf44-4109580732b6": {
+    "b": 0.002479,
+    "g": 0.0,
+    "sections": 1
+   },
+   "68972669-2a90-462c-9f58-dd44fdd5c841": {
+    "b": 0.000346,
+    "g": 7e-06,
+    "sections": 1
+   },
+   "867d778a-e83f-4a98-ab9b-60d00d411d73": {
+    "b": 0.99,
+    "g": 0.99,
+    "sections": 1
+   },
+   "a7565e09-33eb-4dfc-8837-6a19f877ec29": {
+    "b": 0.000826,
+    "g": 0.0,
+    "sections": 1
+   },
+   "b694a34d-faa4-46c8-9de4-a64c8a8029c9": {
+    "b": 0.99,
+    "g": 0.99,
+    "sections": 1
+   }
+  },
+  "svcs": {
+   "e2bdd541-97c0-4781-b40d-713a7bbe2777": {
+    "b_max": 1.0101010101010102,
+    "b_min": -1.0101010101010102,
+    "mode": "VOLTAGE",
+    "regulating": true,
+    "target_q": null,
+    "target_v": 225.5
+   }
+  },
+  "switches": {
+   "0544c491-290e-4887-a677-c6cf51c7c62e": false,
+   "0b0fc078-f889-46d2-bb63-35ee6c65bc0f": false,
+   "0d76d781-5117-4e1c-af35-ca8849474b39": false,
+   "184b6377-ff16-48a0-8cb3-620a10c58e56": false,
+   "230dfc70-363f-43d7-8307-613a5b21c555": false,
+   "335c1895-a4a3-46d1-b13c-687bc4cec343": false,
+   "3beceba6-2ea4-4c7d-802b-b117f638dda3": false,
+   "450dc36a-3fea-40ec-be02-524dfe307d26": false,
+   "4dd46d53-9579-47d4-951a-cdddac52dd0d": false,
+   "4f2fea1d-b4c1-40ea-b3eb-958b7b1d7576": false,
+   "53caabd1-d997-43ff-9871-dd2b370498b9": false,
+   "578a730a-b763-4a3e-baae-9d0d0dd03524": false,
+   "707aeec2-cd18-4c05-9e90-b5cf171f0d81": false,
+   "7fbf6b98-27b4-4330-8d2d-00ff2575286e": false,
+   "8b8f89f1-b226-4e40-9414-7517f1868fe7": false,
+   "8eb05bae-8d2f-44dd-b206-b3477b84d9ec": true,
+   "abf36e01-6c4e-4a65-b9cb-b7b3b62c021b": false,
+   "b3936a6c-cdab-44d8-93d8-2f2013805d05": false,
+   "be12d211-8d63-401a-a9c5-bafc8bd9baeb": false,
+   "c05ab5b3-82eb-4c9d-9851-93f6cd30e32f": false,
+   "c3504bc4-212c-4b8d-99b9-3042d3551f00": false,
+   "d11c0694-da10-4635-8afb-ebd4f0682f70": false,
+   "d4f41742-192f-4b1a-8735-e0cf000a478e": false,
+   "dd100e03-e942-43c2-932b-d2e01bb9bd07": false,
+   "e718f6c3-1859-4858-951d-ceff95c2fb1d": false,
+   "ff13a516-6228-43f1-8513-e21ebcbe6a0d": false
+  },
+  "transformers2": {
+   "02b779e0-0262-47ca-aeee-434bc91f79d9": {
+    "alpha": 0.0,
+    "b": -0.00917006295066167,
+    "b_at_current_tap": -0.00917006295066167,
+    "g": 0.0019138280377471303,
+    "g_at_current_tap": 0.0019138280377471303,
+    "r": 0.0009481464576284766,
+    "r_at_current_tap": 0.0009481464576284766,
+    "rated_s": 250.0,
+    "rated_u1": 110.34375,
+    "rated_u2": 10.5,
+    "rho": 0.0951571792693288,
+    "x": 0.052911509061024486,
+    "x_at_current_tap": 0.052911509061024486
+   },
+   "13ba1c07-0087-443e-87a7-6f5327d62216": {
+    "alpha": 0.0,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.06481481481481483,
+    "r_at_current_tap": 0.06481481481481483,
+    "rated_s": 158.0,
+    "rated_u1": 225.0,
+    "rated_u2": 125.0,
+    "rho": 0.5555555555555556,
+    "x": 13.053797530864198,
+    "x_at_current_tap": 13.053797530864198
+   },
+   "3d2f09f5-f2d2-4810-92ed-1b26e066a1d6": {
+    "alpha": 0.0,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.03703703703703704,
+    "r_at_current_tap": 0.03703703703703704,
+    "rated_s": 158.0,
+    "rated_u1": 225.0,
+    "rated_u2": 125.0,
+    "rho": 0.5555555555555556,
+    "x": 13.053797530864198,
+    "x_at_current_tap": 13.053797530864198
+   },
+   "43f1888c-c495-4efc-acee-2123ba99fbb8": {
+    "alpha": -0.7161879186471423,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.2268910886426593,
+    "r_at_current_tap": 0.2268910886426593,
+    "rated_s": 650.0,
+    "rated_u1": 380.0,
+    "rated_u2": 110.0,
+    "rho": 0.2894736842105263,
+    "x": 1.2166117617728531,
+    "x_at_current_tap": 1.2243206827533681
+   },
+   "5614f030-c1c8-435c-8d5b-580721dce0a0": {
+    "alpha": -1.99,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.2268910886426593,
+    "r_at_current_tap": 0.2268910886426593,
+    "rated_s": 650.0,
+    "rated_u1": 380.0,
+    "rated_u2": 110.0,
+    "rho": 0.2894736842105263,
+    "x": 1.2166117617728531,
+    "x_at_current_tap": 1.21913515493914
+   },
+   "592f3d0c-bd64-4bb5-b779-d873d8895d6d": {
+    "alpha": 0.0,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.09400247111111111,
+    "r_at_current_tap": 0.09400247111111111,
+    "rated_s": 157.7,
+    "rated_u1": 225.0,
+    "rated_u2": 123.9,
+    "rho": 0.5506666666666666,
+    "x": 12.284717485662222,
+    "x_at_current_tap": 12.284717485662222
+   },
+   "79419546-a3bd-4964-a49a-6d39b1c9cdc5": {
+    "alpha": -0.7161599454704085,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.2268910886426593,
+    "r_at_current_tap": 0.2268910886426593,
+    "rated_s": 650.0,
+    "rated_u1": 380.0,
+    "rated_u2": 110.0,
+    "rho": 0.28945107172881307,
+    "x": 1.2166117617728531,
+    "x_at_current_tap": 1.2166117617728531
+   },
+   "aac86575-36d8-455d-abe8-34edb60b6e04": {
+    "alpha": 0.0,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.12129351111111111,
+    "r_at_current_tap": 0.12129351111111111,
+    "rated_s": 157.7,
+    "rated_u1": 225.0,
+    "rated_u2": 123.9,
+    "rho": 0.5506666666666666,
+    "x": 12.284717485662222,
+    "x_at_current_tap": 12.284717485662222
+   },
+   "ba8cca63-a7fb-4067-93f1-f475d960c559": {
+    "alpha": -0.99,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.2268910886426593,
+    "r_at_current_tap": 0.2289331084404432,
+    "rated_s": 650.0,
+    "rated_u1": 380.0,
+    "rated_u2": 110.0,
+    "rho": 0.2923976608187135,
+    "x": 1.2166117617728531,
+    "x_at_current_tap": 1.2275612676288086
+   },
+   "e40166e1-f954-4c0c-b343-bd8049d0f799": {
+    "alpha": 0.0,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 0.2057,
+    "r_at_current_tap": 0.207757,
+    "rated_s": 650.0,
+    "rated_u1": 220.0,
+    "rated_u2": 110.0,
+    "rho": 0.5,
+    "x": 2.78472075,
+    "x_at_current_tap": 2.8125679574999998
+   }
+  }
+ },
+ "removed": [],
+ "slack": [
+  "62a4d7b2-acca-4726-8d47-a85afbcf0642"
+ ],
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': '0204058a-8b7e-4a89-82e9-0960280b47ef_0'})"
+}

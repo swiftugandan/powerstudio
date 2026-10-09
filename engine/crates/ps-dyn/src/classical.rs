@@ -287,7 +287,8 @@ pub fn simulate(
 
     // Sources: machines with inertia, then grids without.
     let mut src: Vec<Source> = Vec::new();
-    for u in &lf.machines {
+    // Static var compensators (the network machines after the generators) are held at their load-flow output below.
+    for u in lf.machines.iter().filter(|u| u.id < calc.machines.len()) {
         let row = calc.machines[u.id] as usize;
         let g = &model.generators[row];
         let bus = net.machines[u.id].bus;
@@ -327,8 +328,9 @@ pub fn simulate(
     if !src.iter().any(|s| !s.grid) {
         return Err("The network has no synchronous machine to simulate.".into());
     }
-    // Loads become constant admittances at their initial voltage: y = (P − jQ)/|V|².
-    let loads = net
+    // Loads become constant admittances at their initial voltage: y = (P − jQ)/|V|². Static var compensators become
+    // the susceptance that gives their load-flow output.
+    let mut loads: Vec<(String, LoadY)> = net
         .loads
         .iter()
         .map(|l| {
@@ -343,6 +345,18 @@ pub fn simulate(
             )
         })
         .collect();
+    for u in lf.machines.iter().filter(|u| u.id >= calc.machines.len()) {
+        let bus = net.machines[u.id].bus;
+        let id = model.svcs[calc.svcs[u.id - calc.machines.len()] as usize].id.clone();
+        loads.push((
+            id,
+            LoadY {
+                bus,
+                y: C64::new(0.0, u.q / v0[bus].norm_sqr()),
+                scale: 1.0,
+            },
+        ));
+    }
     let mut nw = Network {
         model,
         calc,

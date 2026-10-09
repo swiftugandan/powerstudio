@@ -59,7 +59,7 @@ one_end!(Load, Svc, ExternalGrid);
 impl Wiring for Transformer2 {
     fn nodes(&self) -> Vec<NodeRef> {
         let mut out = vec![self.node1, self.node2];
-        out.extend(self.ratio_tap.and_then(|t| t.control).map(|c| c.node));
+        out.extend(self.ratio_tap.as_ref().and_then(|t| t.control).map(|c| c.node));
         out
     }
     fn nodes_mut(&mut self) -> Vec<&mut NodeRef> {
@@ -77,7 +77,7 @@ impl Wiring for Transformer2 {
 impl Wiring for Transformer3 {
     fn nodes(&self) -> Vec<NodeRef> {
         let mut out: Vec<NodeRef> = self.windings.iter().map(|w| w.node).collect();
-        out.extend(self.ratio_tap.and_then(|t| t.control).map(|c| c.node));
+        out.extend(self.ratio_tap.as_ref().and_then(|t| t.control).map(|c| c.node));
         out
     }
     fn nodes_mut(&mut self) -> Vec<&mut NodeRef> {

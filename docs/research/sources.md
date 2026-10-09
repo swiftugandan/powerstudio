@@ -18,6 +18,19 @@ Data Format files of the University of Washington Power Systems Test Case Archiv
 `src/samples/ieee14.js` reproduces the per-unit data of case14; its nominal voltages, line lengths, ratings,
 transformer sizes and machine data are assumptions, stated as such in the sample's description.
 
+The CGMES test configurations are the ENTSO-E CGMES Conformity Assessment Scheme packages, downloaded by
+`scripts/fetch-reference.mjs` and checked against the SHA-256 values pinned in `tests/oracle/cgmes-cases.json`:
+
+- CGMES 3.0 test configurations v3.0.3 (MicroGrid, MiniGrid, SmallGrid, FullGrid, Svedala, PST, PowerFlow, RealGrid),
+  https://www.entsoe.eu/Documents/CIM_documents/Grid_Model_CIM/CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3.zip,
+  © ENTSO-E, licensed CC BY-NC-SA 4.0.
+- CGMES 2.4.15 test configurations v4.0.3 (MicroGrid base case, BE, NL and assembled),
+  https://www.entsoe.eu/Documents/CIM_documents/Grid_Model_CIM/CGMES_v2.4.15_TestConfigurations_v4.0.3.zip,
+  © ENTSO-E; the package states no licence.
+
+Neither package is redistributed with this MIT-licensed repository; the tests read the files from the downloaded
+archives. The goldens in `tests/oracle/golden/cgmes-*.json` hold results computed from them.
+
 ## Reference solvers
 
 The goldens in `tests/oracle/golden/` were written by `scripts/oracle/oracle.py` on 2026-10-09 with the packages
@@ -28,6 +41,18 @@ pinned in `scripts/oracle/requirements.txt`:
 - pandapower 3.5.6 solves the exported sample networks: load flow (`runpp`, pi transformer model, DC start,
   tolerance 1e-9 MVA, with and without reactive limits) and short circuit (`calc_sc`, IEC 60909, maximum and
   minimum, three-phase, line-to-line and line-to-earth, peak current method C, Ith with Tk = 1 s).
+
+The CGMES goldens (`tests/oracle/golden/cgmes-*.json`) were written by `scripts/oracle/cgmes.py` with pypowsybl
+1.16.1, the Python packaging of PowSyBl with its CGMES import and OpenLoadFlow. Each golden records the OpenLoadFlow
+parameters it used. The script sets every control off (distributed slack, reactive limits, tap, shunt and
+phase-shifter controls, remote voltage control), starts every generator and accepts every voltage target, chooses
+the slack by PowerStudio's rule, and removes equipment whose SSH `Equipment.inService` is false, which PowSyBl's
+CGMES import does not read. Two PowSyBl conventions differ from PowerStudio's and are bridged in the comparison
+test (`engine/crates/ps-study/tests/cgmes.rs`), not in the engine: a line to a boundary point carries its whole
+shunt admittance at the network end, and OpenLoadFlow reports a slack machine's active power as its target.
+PowSyBl's conversion rules for tap changers (`TapChangerConversion`, `CgmesPhaseTapChangerBuilder`,
+`InterpretedT2xModel`) and dangling and tie lines (`TieLineUtil`) were read in the powsybl-core source
+(https://github.com/powsybl/powsybl-core, MPL 2.0) to match them.
 
 The oracle removes one pandapower modelling choice so both programs describe the same network: pandapower adds a
 placeholder zero-sequence admittance of 1/(1000 + 1000j) p.u. at generator buses; PowerStudio models generator

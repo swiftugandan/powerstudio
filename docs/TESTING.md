@@ -6,7 +6,8 @@
 npm ci
 npm run check          # strict type checking (tsc --checkJs), page and worker configs
 npm run lint:engine    # rustfmt and Clippy on the engine, warnings denied
-npm run test:engine    # the engine's tests, native: oracle goldens, model, topology, sparse solvers
+node scripts/fetch-reference.mjs  # once: the ENTSO-E CGMES archives the engine tests read (checksums pinned)
+npm run test:engine    # the engine's tests, native: oracle goldens, CGMES against PowSyBl, model, topology, solvers
 npm test               # builds the WebAssembly engine, then the Node test runner (see below)
 npm run test:browser   # Playwright against dist/PowerStudio.html over HTTP (builds first)
 ```
@@ -47,6 +48,13 @@ sample:
 node scripts/export-oracle-inputs.mjs           # samples → tests/oracle/inputs/*.json
 uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python -r scripts/oracle/requirements.txt
 .venv/bin/python scripts/oracle/oracle.py       # → tests/oracle/golden/*.json
+```
+
+The CGMES goldens come from PowSyBl through pypowsybl (same environment):
+
+```sh
+.venv/bin/python scripts/oracle/cgmes.py            # every case in tests/oracle/cgmes-cases.json
+.venv/bin/python scripts/oracle/cgmes.py minigrid-3 # one case
 ```
 
 `tests/oracle.test.mjs` fails when the committed inputs no longer match the samples, so a sample cannot drift away

@@ -14,7 +14,7 @@
  * @typedef {{
  *   converged: boolean, iterations: number, mismatch: number, log: Array<{ iteration: number, mismatch: number }>,
  *   message: string, buses: BusResult[], branches: BranchResult[], gens: UnitResult[], grids: UnitResult[],
- *   loads: UnitResult[], shunts: UnitResult[], deenergized: string[], warnings: string[],
+ *   svcs: UnitResult[], loads: UnitResult[], shunts: UnitResult[], deenergized: string[], warnings: string[],
  *   totals: { generation: number, load: number, losses: number, generationQ: number, loadQ: number },
  *   state: { vm: Float64Array, va: Float64Array }, busIds: string[], timing: EngineTiming,
  * }} LoadFlowResult

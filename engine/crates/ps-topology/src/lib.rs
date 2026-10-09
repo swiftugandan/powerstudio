@@ -2,10 +2,11 @@
 //!
 //! 1. Nodes joined by closed switches merge into one calculation bus (a union-find over switches).
 //! 2. Every three-winding transformer in service adds a star-point bus.
-//! 3. Branches in service join buses into islands.
+//! 3. Branches in service join buses into islands through their connected ends. A branch open at one end gets a bus of
+//!    its own there, so its charging still loads the end that is connected.
 //! 4. An island is energised when it holds a source: an external grid or a reference machine. An island that has
-//!    machines but no source gets its largest machine (by rated power) as reference, with a warning. Other islands are
-//!    de-energised and left out of the calculation.
+//!    machines but no source takes the machine with the best reference priority, or else its largest machine (by
+//!    rated power, with a warning). Other islands are de-energised and left out of the calculation.
 //!
 //! The result maps both ways: node to calculation bus, and calculation bus to its nodes, so results land back on
 //! equipment. Outages for a single calculation (contingency cases) are applied through [`Outages`] without editing
@@ -69,6 +70,8 @@ pub struct CalcBus {
     pub nodes: Vec<u32>,
     /// The three-winding transformer whose star point this is, if it is one.
     pub star_of: Option<u32>,
+    /// The branch end this bus stands for when that end is open: class, row and end (1 or 2).
+    pub open_end_of: Option<(Class, u32, u8)>,
     /// Base voltage, kV: the first node's nominal voltage, or winding 1's rated voltage for a star point.
     pub base_kv: f64,
     /// Island number, counted over energised islands in bus order.
@@ -84,6 +87,8 @@ pub struct Topology {
     pub node_bus: Vec<Option<u32>>,
     /// Star-point bus of every three-winding transformer, `None` when it is out of the calculation.
     pub star_bus: Vec<Option<u32>>,
+    /// Buses standing for open branch ends, by (class, row, end).
+    pub open_end_bus: Vec<((Class, u32, u8), u32)>,
     /// Alive nodes left without supply, in node order.
     pub deenergised: Vec<u32>,
     /// Generators made reference for an island that had none.
@@ -152,21 +157,39 @@ impl Topology {
                 island.union(a.index(), b.index());
             }
         };
-        for (k, l) in model.lines.iter().enumerate() {
-            if active(model, outages, Class::Line, k) {
-                joins(l.node1, l.node2, &mut island);
+        // Branches with exactly one open end, for open-end buses once the islands are known.
+        let mut half_open: Vec<(Class, u32, u8, ps_model::NodeRef, ps_model::NodeRef)> = Vec::new();
+        let mut branch = |class: Class,
+                          k: usize,
+                          a: ps_model::NodeRef,
+                          b: ps_model::NodeRef,
+                          open: [bool; 2],
+                          island: &mut UnionFind| {
+            if !active(model, outages, class, k) || !node_ok(a) || !node_ok(b) {
+                return;
             }
+            match open {
+                [false, false] => joins(a, b, island),
+                [true, false] => half_open.push((class, k as u32, 1, b, a)),
+                [false, true] => half_open.push((class, k as u32, 2, a, b)),
+                [true, true] => {}
+            }
+        };
+        for (k, l) in model.lines.iter().enumerate() {
+            branch(Class::Line, k, l.node1, l.node2, l.open, &mut island);
         }
         for (k, t) in model.transformers2.iter().enumerate() {
-            if active(model, outages, Class::Transformer2, k) {
-                joins(t.node1, t.node2, &mut island);
-            }
+            branch(Class::Transformer2, k, t.node1, t.node2, t.open, &mut island);
         }
         let mut t3_in = vec![false; nt3];
         for (k, t) in model.transformers3.iter().enumerate() {
-            if active(model, outages, Class::Transformer3, k) && t.windings.iter().all(|w| node_ok(w.node)) {
+            let connected = t.windings.iter().filter(|w| !w.open).count();
+            if active(model, outages, Class::Transformer3, k)
+                && t.windings.iter().all(|w| node_ok(w.node))
+                && connected > 0
+            {
                 t3_in[k] = true;
-                for w in &t.windings {
+                for w in t.windings.iter().filter(|w| !w.open) {
                     island.union(nn + k, w.node.index());
                 }
             }
@@ -186,7 +209,20 @@ impl Topology {
             }
         }
         let mut warnings = Vec::new();
-        let mut best: Vec<(usize, usize)> = Vec::new(); // (island root, generator row), first largest wins
+        // Per unsourced island, the machine that becomes reference: the lowest positive reference priority, then the
+        // largest rating, then the first in model order.
+        let rank = |k: usize| {
+            let g = &model.generators[k];
+            (
+                if g.reference_priority > 0 {
+                    g.reference_priority
+                } else {
+                    u32::MAX
+                },
+                -g.rated_mva,
+            )
+        };
+        let mut best: Vec<(usize, usize)> = Vec::new(); // (island root, generator row)
         for (k, g) in model.generators.iter().enumerate() {
             if !active(model, outages, Class::Generator, k) || !node_ok(g.node) {
                 continue;
@@ -197,7 +233,7 @@ impl Topology {
             }
             match best.iter_mut().find(|(r, _)| *r == root) {
                 Some(entry) => {
-                    if g.rated_mva > model.generators[entry.1].rated_mva {
+                    if rank(k).partial_cmp(&rank(entry.1)) == Some(std::cmp::Ordering::Less) {
                         entry.1 = k;
                     }
                 }
@@ -208,10 +244,12 @@ impl Topology {
         for (root, k) in best {
             sourced.insert(root);
             promoted.push(k as u32);
-            warnings.push(format!(
-                "{} is the reference machine for its island, which has no external grid or reference machine.",
-                model.name_of(Class::Generator, k)
-            ));
+            if model.generators[k].reference_priority == 0 {
+                warnings.push(format!(
+                    "{} is the reference machine for its island, which has no external grid or reference machine.",
+                    model.name_of(Class::Generator, k)
+                ));
+            }
         }
         promoted.sort_unstable();
 
@@ -249,6 +287,7 @@ impl Topology {
                     buses.push(CalcBus {
                         nodes: Vec::new(),
                         star_of: None,
+                        open_end_of: None,
                         base_kv: model.nodes[i].nominal_kv,
                         island: island_of(iroot),
                     });
@@ -266,7 +305,22 @@ impl Topology {
                 buses.push(CalcBus {
                     nodes: Vec::new(),
                     star_of: Some(k as u32),
+                    open_end_of: None,
                     base_kv: model.transformers3[k].windings[0].rated_kv,
+                    island: island_of(root),
+                });
+            }
+        }
+        let mut open_end_bus = Vec::new();
+        for (class, row, end, connected, open) in half_open {
+            let root = island.find(connected.index());
+            if sourced.contains(&root) {
+                open_end_bus.push(((class, row, end), buses.len() as u32));
+                buses.push(CalcBus {
+                    nodes: Vec::new(),
+                    star_of: None,
+                    open_end_of: Some((class, row, end)),
+                    base_kv: model.nodes[open.index()].nominal_kv,
                     island: island_of(root),
                 });
             }
@@ -291,9 +345,22 @@ impl Topology {
             buses,
             node_bus,
             star_bus,
+            open_end_bus,
             deenergised,
             promoted,
             warnings,
+        }
+    }
+
+    /// The calculation bus of a branch end (1 or 2): its open-end bus when the end is open, otherwise its node's.
+    pub fn end_bus(&self, class: Class, row: usize, end: u8, node: ps_model::NodeRef, open: bool) -> Option<usize> {
+        if open {
+            self.open_end_bus
+                .iter()
+                .find(|(k, _)| *k == (class, row as u32, end))
+                .map(|&(_, b)| b as usize)
+        } else {
+            self.bus_of(node)
         }
     }
 

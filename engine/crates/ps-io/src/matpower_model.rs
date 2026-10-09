@@ -99,6 +99,7 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 sections: 1,
                 max_sections: 1,
                 control: None,
+                points: Vec::new(),
             });
         }
     }
@@ -143,6 +144,7 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
             rated_mva: if r[gen_col::MBASE] > 0.0 { r[gen_col::MBASE] } else { sb },
             rated_kv: kv,
             participation: 0.0,
+            reference_priority: 0,
             sc: TYPICAL_SC,
             dynamics: TYPICAL_DYNAMICS,
         });
@@ -216,10 +218,13 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 node1: NodeRef(f),
                 node2: NodeRef(t),
                 in_service,
+                open: [false; 2],
                 r: rr * zb,
                 x: xx * zb,
-                g: 0.0,
-                b: bb / zb,
+                g1: 0.0,
+                b1: bb / zb / 2.0,
+                g2: 0.0,
+                b2: bb / zb / 2.0,
                 r0: 3.0 * rr * zb,
                 x0: 3.0 * xx * zb,
                 b0: 0.6 * bb / zb,
@@ -238,6 +243,7 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 node1: NodeRef(f),
                 node2: NodeRef(t),
                 in_service,
+                open: [false; 2],
                 rated_kv1: k1,
                 rated_kv2: vt,
                 rated_mva: if rate > 0.0 { rate } else { sb },

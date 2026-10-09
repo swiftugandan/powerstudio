@@ -1,0 +1,136 @@
+{
+ "case": "powerflow-3",
+ "data": "ENTSO-E CGMES test configuration, read from the archive (not redistributed)",
+ "imported": {
+  "dangling": {},
+  "generators": {
+   "4faedd52-613c-4091-826d-1502d9626644": {
+    "regulating": true,
+    "target_p": 341.59,
+    "target_q": 107.098,
+    "target_v": 397.1
+   }
+  },
+  "lines": {
+   "7dfc7fd8-c857-4845-8e4b-ce592f9e8cc2": {
+    "b1": 0.0,
+    "b2": 0.0,
+    "g1": 0.0,
+    "g2": 0.0,
+    "r": 4.1956,
+    "x": 12.73
+   }
+  },
+  "loads": {
+   "87016153-597f-42ac-bc05-8489822f5231": {
+    "p0": 332.0,
+    "q0": 78.0
+   },
+   "aba53013-89a5-4578-a737-7de2293b2513": {
+    "p0": 0.0,
+    "q0": 0.0
+   }
+  },
+  "phase_taps": {
+   "e7f39292-b64a-4cc5-8c49-8c6b66dd3195": {
+    "side": "",
+    "tap": 15
+   }
+  },
+  "ratio_taps": {},
+  "shunts": {},
+  "svcs": {},
+  "switches": {},
+  "transformers2": {
+   "e7f39292-b64a-4cc5-8c49-8c6b66dd3195": {
+    "alpha": -3.77605,
+    "b": 0.0,
+    "b_at_current_tap": 0.0,
+    "g": 0.0,
+    "g_at_current_tap": 0.0,
+    "r": 4.1956,
+    "r_at_current_tap": 4.1774024796739395,
+    "rated_s": 6581.13,
+    "rated_u1": 380.0,
+    "rated_u2": 380.0,
+    "rho": 0.9978290000000001,
+    "x": 12.73,
+    "x_at_current_tap": 12.67478633955793
+   }
+  }
+ },
+ "loadflow": {
+  "dangling": {},
+  "generators": {
+   "4faedd52-613c-4091-826d-1502d9626644": {
+    "p": -341.59,
+    "q": -107.09839340162284,
+    "v": [
+     1.0450000000000002,
+     0.0
+    ]
+   }
+  },
+  "lines": {
+   "7dfc7fd8-c857-4845-8e4b-ce592f9e8cc2": {
+    "p1": 202.48761538525707,
+    "p2": -200.75640240199948,
+    "q1": -152.11048304254504,
+    "q2": 157.36321001290352,
+    "v1": [
+     1.0375253575929717,
+     1.1769781183492602
+    ],
+    "v2": [
+     1.0450000000000002,
+     0.0
+    ]
+   }
+  },
+  "loads": {
+   "87016153-597f-42ac-bc05-8489822f5231": {
+    "p": 332.0,
+    "q": 78.0,
+    "v": [
+     1.0375253575929717,
+     1.1769781183492602
+    ]
+   },
+   "aba53013-89a5-4578-a737-7de2293b2513": {
+    "p": 0.0,
+    "q": 0.0,
+    "v": [
+     1.0450000000000002,
+     0.0
+    ]
+   }
+  },
+  "shunts": {},
+  "svcs": {},
+  "transformers2": {
+   "e7f39292-b64a-4cc5-8c49-8c6b66dd3195": {
+    "p1": -534.4876153852744,
+    "p2": 542.3467574182566,
+    "q1": 74.1104830427459,
+    "q2": -50.26481661128068,
+    "v1": [
+     1.0375253575929717,
+     1.1769781183492602
+    ],
+    "v2": [
+     1.0450000000000002,
+     0.0
+    ]
+   }
+  },
+  "transformers3": {}
+ },
+ "removed": [],
+ "slack": [
+  "4faedd52-613c-4091-826d-1502d9626644"
+ ],
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': '1c27017b-76b0-42a5-9525-8cd5b932529c_0'})",
+ "status": [
+  "CONVERGED"
+ ]
+}

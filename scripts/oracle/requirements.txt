@@ -3,3 +3,7 @@ pandapower==3.5.6
 pypower==5.1.21
 numpy==2.4.6
 scipy==1.18.1
+pypowsybl==1.16.1
+pandas==2.3.3
+# Dynamics reference for design phase 5.
+andes==2.0.0

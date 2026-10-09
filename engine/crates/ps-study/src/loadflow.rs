@@ -155,6 +155,8 @@ pub struct LoadFlowReport {
     pub gens: Vec<UnitResult>,
     /// External grids.
     pub grids: Vec<UnitResult>,
+    /// Static var compensators.
+    pub svcs: Vec<UnitResult>,
     /// Loads.
     pub loads: Vec<UnitResult>,
     /// Shunts.
@@ -300,9 +302,31 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution) -> LoadFlowReport
             }
         })
         .collect();
+    // Network machines are the generators, then the static var compensators.
+    let ng = calc.machines.len();
+    let unit_name = |m: usize| match m < ng {
+        true => (Class::Generator, calc.machines[m] as usize),
+        false => (Class::Svc, calc.svcs[m - ng] as usize),
+    };
+    let svcs: Vec<UnitResult> = sol
+        .machines
+        .iter()
+        .filter(|u| u.id >= ng)
+        .map(|u| UnitResult {
+            id: model.svcs[calc.svcs[u.id - ng] as usize].id.clone(),
+            p: 0.0,
+            q: u.q * sb,
+            at_limit: match u.at_limit {
+                1 => Some("max"),
+                -1 => Some("min"),
+                _ => None,
+            },
+        })
+        .collect();
     let gens: Vec<UnitResult> = sol
         .machines
         .iter()
+        .filter(|u| u.id < ng)
         .map(|u| UnitResult {
             id: model.generators[calc.machines[u.id] as usize].id.clone(),
             p: u.p * sb,
@@ -350,22 +374,23 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution) -> LoadFlowReport
         .collect();
     let mut warnings = calc.warnings.clone();
     for &(m, lim) in &sol.held {
-        let g = &model.generators[calc.machines[m] as usize];
+        let pm = &net.machines[m];
         let (word, q) = if lim > 0 {
-            ("upper", g.q_max)
+            ("upper", pm.q_max * sb)
         } else {
-            ("lower", g.q_min)
+            ("lower", pm.q_min * sb)
         };
+        let (class, row) = unit_name(m);
         warnings.push(format!(
             "{} reached its {word} reactive power limit and now holds {q:.2} Mvar.",
-            model.name_of(Class::Generator, calc.machines[m] as usize)
+            model.name_of(class, row)
         ));
     }
     let totals = Totals {
         generation: gens.iter().chain(&grids).map(|u| u.p).sum(),
         load: loads.iter().map(|u| u.p).sum(),
         losses,
-        generation_q: gens.iter().chain(&grids).map(|u| u.q).sum(),
+        generation_q: gens.iter().chain(&grids).chain(&svcs).map(|u| u.q).sum(),
         load_q: loads.iter().map(|u| u.q).sum(),
     };
     LoadFlowReport {
@@ -385,6 +410,7 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution) -> LoadFlowReport
         branches,
         gens,
         grids,
+        svcs,
         loads,
         shunts,
         deenergized: calc

@@ -1,0 +1,29 @@
+{
+  "about": "CGMES configurations compared with PowSyBl. The archives are downloaded by scripts/fetch-reference.mjs and read in place; they are not redistributed (the v3.0.3 package is CC BY-NC-SA 4.0, ENTSO-E; the 2.4.15 package states no licence). 'start' is the load flow's starting point: 'dc' (DC load flow) or 'sv' (the voltages stored in the files). 'loadflow': false marks a configuration PowSyBl does not solve with every control off; only its import is compared.",
+  "archives": {
+    "cgmes-3.0.3": {
+      "file": "cgmes-tc-3.0.3.zip",
+      "url": "https://www.entsoe.eu/Documents/CIM_documents/Grid_Model_CIM/CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3.zip",
+      "sha256": "03c917c1a05508988c5a44961dfb6dab1b1039b8f86dfdb2f7637f3784b7ed9e"
+    },
+    "cgmes-2.4.15": {
+      "file": "cgmes-tc-2.4.15-v4.0.3.zip",
+      "url": "https://www.entsoe.eu/Documents/CIM_documents/Grid_Model_CIM/CGMES_v2.4.15_TestConfigurations_v4.0.3.zip",
+      "sha256": "2b4dc13c60449e3f09d176d33f146a58a8b2589e60faed5b0b579f74495b28d0"
+    }
+  },
+  "cases": [
+    { "name": "microgrid-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/MicroGrid/MicroGid-BaseCase/MicroGrid-BaseCase-Merged/"], "start": "dc" },
+    { "name": "minigrid-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/MiniGrid/MiniGrid-Merged/"], "start": "sv" },
+    { "name": "smallgrid-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/SmallGrid/SmallGrid-Merged/"], "start": "dc" },
+    { "name": "svedala-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/Svedala/Svedala-Merged/"], "start": "dc" },
+    { "name": "pst-linear-1-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/PST/PST_PhaseTapChangerLinear_Type1/"], "start": "dc" },
+    { "name": "pst-linear-2-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/PST/PST_PhaseTapChangerLinear_Type2/"], "start": "dc" },
+    { "name": "pst-table-3-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/PST/PST_PhaseTapChangerTable_Type3/"], "start": "dc" },
+    { "name": "powerflow-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/PowerFlow/PowerFlow/"], "start": "dc" },
+    { "name": "fullgrid-3", "archive": "cgmes-3.0.3", "entries": ["CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/FullGrid/FullGrid-Merged/"], "start": "dc", "loadflow": false },
+    { "name": "microgrid-be-2", "archive": "cgmes-2.4.15", "entries": ["MicroGrid/BaseCase_BC/CGMES_v2.4.15_MicroGridTestConfiguration_BC_BE_v2.zip", "MicroGrid/BaseCase_BC/CGMES_v2.4.15_MicroGridTestConfiguration_BD_v2.zip"], "start": "dc" },
+    { "name": "microgrid-nl-2", "archive": "cgmes-2.4.15", "entries": ["MicroGrid/BaseCase_BC/CGMES_v2.4.15_MicroGridTestConfiguration_BC_NL_v2.zip", "MicroGrid/BaseCase_BC/CGMES_v2.4.15_MicroGridTestConfiguration_BD_v2.zip"], "start": "dc" },
+    { "name": "microgrid-assembled-2", "archive": "cgmes-2.4.15", "entries": ["MicroGrid/BaseCase_BC/CGMES_v2.4.15_MicroGridTestConfiguration_BC_Assembled_v2.zip", "MicroGrid/BaseCase_BC/CGMES_v2.4.15_MicroGridTestConfiguration_BD_v2.zip"], "start": "dc" }
+  ]
+}

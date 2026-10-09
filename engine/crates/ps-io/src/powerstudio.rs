@@ -209,10 +209,13 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     node1: nodes[0],
                     node2: nodes[1],
                     in_service,
+                    open: [false; 2],
                     r: e.num("r1", 0.12) * len / par,
                     x: e.num("x1", 0.39) * len / par,
-                    g: 0.0,
-                    b: e.num("b1", 2.9) * 1e-6 * len * par,
+                    g1: 0.0,
+                    b1: e.num("b1", 2.9) * 1e-6 * len * par / 2.0,
+                    g2: 0.0,
+                    b2: e.num("b1", 2.9) * 1e-6 * len * par / 2.0,
                     r0: e.num("r0", 0.36) * len / par,
                     x0: e.num("x0", 1.17) * len / par,
                     b0: e.num("b0", 1.8) * 1e-6 * len * par,
@@ -247,6 +250,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     node1: nodes[0],
                     node2: nodes[1],
                     in_service,
+                    open: [false; 2],
                     rated_kv1: vh,
                     rated_kv2: vl,
                     rated_mva: sn,
@@ -270,6 +274,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                         step_pct: e.num("tapStep", 1.25),
                         position: e.int("tapPos", 0),
                         control: None,
+                        table: Vec::new(),
                     }),
                     phase_tap: None,
                     limits: Vec::new(),
@@ -299,6 +304,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     rated_mva: e.num("sn", 60.0),
                     rated_kv: e.num("vn", 10.5),
                     participation: 0.0,
+                    reference_priority: 0,
                     sc: MachineShortCircuit {
                         xdss: e.num("xdss", 0.16),
                         rs: e.num("rs", 0.0024),
@@ -349,6 +355,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     sections: 1,
                     max_sections: 1,
                     control: None,
+                    points: Vec::new(),
                 });
             }
             _ => {}

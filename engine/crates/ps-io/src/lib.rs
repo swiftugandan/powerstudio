@@ -3,9 +3,13 @@
 //! Each format module reads its files into a faithful in-memory image of the format (keeping its own conventions and
 //! units). Conversion into the engine's canonical model happens in a separate step that reports every approximation.
 
+pub mod cgmes;
+pub mod files;
 pub mod matpower;
 pub mod matpower_model;
 pub mod powerstudio;
+pub mod rdf;
+pub mod zip;
 
 /// A problem found while reading a file, located well enough for the user to find it.
 #[derive(Debug, Clone, PartialEq)]

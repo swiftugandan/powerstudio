@@ -1,0 +1,321 @@
+{
+ "case": "microgrid-nl-2",
+ "data": "ENTSO-E CGMES test configuration, read from the archive (not redistributed)",
+ "imported": {
+  "dangling": {
+   "7f43f508-2496-4b64-9146-0a40406cbe49": {
+    "b": 0.0001413717,
+    "g": 3e-05,
+    "p0": 46.816625,
+    "paired": false,
+    "q0": -79.193778,
+    "r": 1.02,
+    "x": 12.0
+   },
+   "8fdc7abd-3746-481a-a65e-3df56acd8b13": {
+    "b": 8.98495e-05,
+    "g": 2.42e-05,
+    "p0": 27.365225,
+    "paired": false,
+    "q0": -0.425626,
+    "r": 2.2,
+    "x": 66.0
+   },
+   "a279a3dc-550b-426c-af3a-61b7be508dcc": {
+    "b": 2.02319e-05,
+    "g": 2.3e-05,
+    "p0": 26.805006,
+    "paired": false,
+    "q0": -1.489867,
+    "r": 5.06,
+    "x": 69.0
+   },
+   "dad02278-bd25-476f-8f58-dbe44be72586": {
+    "b": 2.51327e-05,
+    "g": 4e-05,
+    "p0": 43.687227,
+    "paired": false,
+    "q0": -84.876604,
+    "r": 2.32,
+    "x": 20.24
+   },
+   "e8acf6b6-99cb-45ad-b8dc-16c7866a4ddc": {
+    "b": 6.48739e-05,
+    "g": 3.5e-05,
+    "p0": 90.037005,
+    "paired": false,
+    "q0": -148.603743,
+    "r": 0.42,
+    "x": 6.3
+   }
+  },
+  "generators": {
+   "1dc9afba-23b5-41a0-8540-b479ed8baf4b": {
+    "regulating": true,
+    "target_p": 150.0,
+    "target_q": 83.296,
+    "target_v": 16.01775
+   },
+   "2844585c-0d35-488d-a449-685bcd57afbf": {
+    "regulating": true,
+    "target_p": 140.0,
+    "target_q": 77.743,
+    "target_v": 16.01775
+   },
+   "9c3b8f97-7972-477d-9dc8-87365cc0ad0e": {
+    "regulating": true,
+    "target_p": 600.492701,
+    "target_q": 386.922556,
+    "target_v": 16.0335
+   }
+  },
+  "lines": {},
+  "loads": {
+   "25ab1b5b-6803-47e2-805a-ab7b2072e034": {
+    "p0": 10.0,
+    "q0": 10.0
+   },
+   "69add5b4-70bd-4360-8a93-286256c0d38b": {
+    "p0": 90.0,
+    "q0": 280.0
+   },
+   "b1e03a8f-6a11-4454-af58-4a4a680e857f": {
+    "p0": 486.0,
+    "q0": 230.0
+   }
+  },
+  "phase_taps": {},
+  "ratio_taps": {
+   "2184f365-8cd5-4b5d-8a28-9d68603bb6a4": {
+    "side": "",
+    "tap": 17
+   },
+   "80016742-31b3-432a-b00a-300667a1e572": {
+    "side": "",
+    "tap": 5
+   },
+   "e8a7eaec-51d6-4571-b3d9-c36d52073c33": {
+    "side": "",
+    "tap": -2
+   }
+  },
+  "shunts": {
+   "fbfed7e3-3dec-4829-a286-029e73535685": {
+    "b": 0.000313,
+    "g": 0.0,
+    "sections": 1
+   }
+  },
+  "svcs": {},
+  "switches": {
+   "5f5d40ae-d52d-4631-9285-b3ceefff784c": false
+  },
+  "transformers2": {
+   "2184f365-8cd5-4b5d-8a28-9d68603bb6a4": {
+    "alpha": 0.0,
+    "b": -0.027710349931972786,
+    "b_at_current_tap": -0.027710349931972786,
+    "g": 0.003547489523809523,
+    "g_at_current_tap": 0.003547489523809523,
+    "r": 0.0003543757321797521,
+    "r_at_current_tap": 0.0003543757321797521,
+    "rated_s": 1260.0,
+    "rated_u1": 220.0,
+    "rated_u2": 15.75,
+    "rho": 0.0715909090909091,
+    "x": 0.0275602203990186,
+    "x_at_current_tap": 0.0275602203990186
+   },
+   "80016742-31b3-432a-b00a-300667a1e572": {
+    "alpha": 0.0,
+    "b": -0.027710349931972786,
+    "b_at_current_tap": -0.027710349931972786,
+    "g": 0.003547489523809523,
+    "g_at_current_tap": 0.003547489523809523,
+    "r": 0.00033468961518595046,
+    "r_at_current_tap": 0.00033468961518595046,
+    "rated_s": 1260.0,
+    "rated_u1": 220.0,
+    "rated_u2": 15.75,
+    "rho": 0.06942148760330578,
+    "x": 0.027560466411415293,
+    "x_at_current_tap": 0.027560466411415293
+   },
+   "e8a7eaec-51d6-4571-b3d9-c36d52073c33": {
+    "alpha": 0.0,
+    "b": -1.4692561983471074e-05,
+    "b_at_current_tap": -1.4692561983471074e-05,
+    "g": 1.8595041322314046e-06,
+    "g_at_current_tap": 1.8595041322314046e-06,
+    "r": 0.4083750000000001,
+    "r_at_current_tap": 0.4083750000000001,
+    "rated_s": 320.0,
+    "rated_u1": 400.0,
+    "rated_u2": 220.0,
+    "rho": 0.5589430894308944,
+    "x": 8.460149390000002,
+    "x_at_current_tap": 8.460149390000002
+   }
+  }
+ },
+ "loadflow": {
+  "dangling": {
+   "7f43f508-2496-4b64-9146-0a40406cbe49": {
+    "p": 51.8736873199818,
+    "q": -102.18126403305578,
+    "v": [
+     1.0212205022097445,
+     -6.343017673591651
+    ]
+   },
+   "8fdc7abd-3746-481a-a65e-3df56acd8b13": {
+    "p": 28.623658125171115,
+    "q": -3.9983697709710198,
+    "v": [
+     1.0230164091375586,
+     -3.4768852119513527
+    ]
+   },
+   "a279a3dc-550b-426c-af3a-61b7be508dcc": {
+    "p": 28.042226853494768,
+    "q": -1.5303125542863332,
+    "v": [
+     1.0230164091375586,
+     -3.4768852119513527
+    ]
+   },
+   "dad02278-bd25-476f-8f58-dbe44be72586": {
+    "p": 50.48603803766264,
+    "q": -87.98584376867495,
+    "v": [
+     1.0212205022097445,
+     -6.343017673591651
+    ]
+   },
+   "e8acf6b6-99cb-45ad-b8dc-16c7866a4ddc": {
+    "p": 95.95237880465316,
+    "q": -158.30103461271477,
+    "v": [
+     1.0212205022097445,
+     -6.343017673591651
+    ]
+   }
+  },
+  "generators": {
+   "1dc9afba-23b5-41a0-8540-b479ed8baf4b": {
+    "p": -150.0,
+    "q": 27.144257337352794,
+    "v": [
+     1.017,
+     -1.6979810512793745
+    ]
+   },
+   "2844585c-0d35-488d-a449-685bcd57afbf": {
+    "p": -140.0,
+    "q": 27.144257337352794,
+    "v": [
+     1.017,
+     -1.6979810512793745
+    ]
+   },
+   "9c3b8f97-7972-477d-9dc8-87365cc0ad0e": {
+    "p": -600.492701,
+    "q": -248.0836720870129,
+    "v": [
+     1.018,
+     0.0
+    ]
+   }
+  },
+  "lines": {},
+  "loads": {
+   "25ab1b5b-6803-47e2-805a-ab7b2072e034": {
+    "p": 10.0,
+    "q": 10.0,
+    "v": [
+     1.0212205022097445,
+     -6.343017673591651
+    ]
+   },
+   "69add5b4-70bd-4360-8a93-286256c0d38b": {
+    "p": 90.0,
+    "q": 280.0,
+    "v": [
+     1.0212205022097445,
+     -6.343017673591651
+    ]
+   },
+   "b1e03a8f-6a11-4454-af58-4a4a680e857f": {
+    "p": 486.0,
+    "q": 230.0,
+    "v": [
+     1.0230164091375586,
+     -3.4768852119513527
+    ]
+   }
+  },
+  "shunts": {
+   "fbfed7e3-3dec-4829-a286-029e73535685": {
+    "q": -52.22799701180683,
+    "v": [
+     1.0212205022097445,
+     -6.343017673591651
+    ]
+   }
+  },
+  "svcs": {},
+  "transformers2": {
+   "2184f365-8cd5-4b5d-8a28-9d68603bb6a4": {
+    "p1": -288.9587949915541,
+    "p2": 289.9999999999802,
+    "q1": 70.83297652118438,
+    "q2": -54.28851467470559,
+    "v1": [
+     1.0230164091375586,
+     -3.4768852119513527
+    ],
+    "v2": [
+     1.017,
+     -1.6979810512793745
+    ]
+   },
+   "80016742-31b3-432a-b00a-300667a1e572": {
+    "p1": -552.908370388497,
+    "p2": 554.2544495650892,
+    "q1": -201.78659990327407,
+    "q2": 248.0836720870129,
+    "v1": [
+     1.0230164091375586,
+     -3.4768852119513527
+    ],
+    "v2": [
+     1.018,
+     0.0
+    ]
+   },
+   "e8a7eaec-51d6-4571-b3d9-c36d52073c33": {
+    "p1": -298.3121041614862,
+    "p2": 299.2012804014559,
+    "q1": 110.69613942439977,
+    "q2": -93.51769429254165,
+    "v1": [
+     1.0212205022097445,
+     -6.343017673591651
+    ],
+    "v2": [
+     1.0230164091375586,
+     -3.4768852119513527
+    ]
+   }
+  },
+  "transformers3": {}
+ },
+ "removed": [],
+ "slack": [
+  "9c3b8f97-7972-477d-9dc8-87365cc0ad0e"
+ ],
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': '8d8a82ba-b5b0-4e94-861a-192af055f2b8_0'})",
+ "status": [
+  "CONVERGED"
+ ]
+}

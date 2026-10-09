@@ -4,6 +4,8 @@
 //! ps study <kind> <document.json> [--options <json>]   run a study on a PowerStudio document, print the report
 //! ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]   load flow of a MATPOWER case, print a summary
 //! ps bench <case.m> [--repeat <n>] [--warm]                 time the load flow of a MATPOWER case
+//! ps inspect <file|folder|archive>... [--props]              list the CIM classes in CGMES files
+//! ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] import CGMES, print the import report (and a load flow)
 //! ```
 //!
 //! `kind` is one of `loadflow`, `shortcircuit`, `contingency`, `contingency_plan`, `contingency_chunk` or `rms`;
@@ -14,7 +16,7 @@ use std::process::ExitCode;
 use ps_study::{LoadFlowRun, Silent, api};
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]";
+const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -119,6 +121,78 @@ fn run(args: &[String]) -> Result<String, String> {
                 json!({ "size": size, "converged": r.converged, "iterations": r.iterations, "timing_best": r.timing })
                     .to_string(),
             )
+        }
+        Some("cgmes") => {
+            let paths: Vec<String> = args[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect();
+            let t0 = ps_num::clock::now_ms();
+            let files = ps_io::files::read_paths(&paths).map_err(|e| e.to_string())?;
+            let imp = ps_io::cgmes::import(&files).map_err(|e| e.to_string())?;
+            let import_ms = ps_num::clock::now_ms() - t0;
+            let m = &imp.model;
+            let size = json!({
+                "nodes": m.nodes.len(), "switches": m.switches.len(), "lines": m.lines.len(), "transformers2": m.transformers2.len(),
+                "transformers3": m.transformers3.len(), "generators": m.generators.len(), "loads": m.loads.len(),
+                "shunts": m.shunts.len(), "svcs": m.svcs.len(), "import_ms": import_ms,
+            });
+            let mut out = json!({ "size": size, "report": imp.report, "issues": m.validate() });
+            if flag(args, "--model") {
+                out["model"] = serde_json::to_value(m).map_err(|e| e.to_string())?;
+            }
+            if flag(args, "--lf") {
+                let warm = flag(args, "--warm");
+                let start: Option<Vec<Option<(f64, f64)>>> = warm.then(|| {
+                    m.nodes
+                        .iter()
+                        .map(|n| (n.v0 > 0.0).then(|| (n.v0, n.angle0.to_radians())))
+                        .collect()
+                });
+                let settings = ps_model::study::LoadFlowSettings {
+                    tolerance: 1e-6,
+                    ..Default::default()
+                };
+                let r = ps_study::loadflow::run(
+                    m,
+                    &LoadFlowRun {
+                        settings,
+                        start,
+                        ..Default::default()
+                    },
+                );
+                out["loadflow"] = serde_json::to_value(&r).map_err(|e| e.to_string())?;
+            }
+            Ok(out.to_string())
+        }
+        Some("inspect") => {
+            let paths: Vec<String> = args[1..].iter().filter(|a| !a.starts_with("--")).cloned().collect();
+            let t0 = ps_num::clock::now_ms();
+            let files = ps_io::files::read_paths(&paths).map_err(|e| e.to_string())?;
+            let mut graph = ps_io::rdf::Graph::new();
+            let mut bytes = 0;
+            for f in files.iter().filter(|f| f.name.to_ascii_lowercase().ends_with(".xml")) {
+                graph.read(&f.name, &f.data).map_err(|e| e.to_string())?;
+                bytes += f.data.len();
+            }
+            let ms = ps_num::clock::now_ms() - t0;
+            let mut classes = serde_json::Map::new();
+            for (class, count) in graph.class_counts() {
+                let mut entry = json!({ "count": count });
+                if flag(args, "--props") {
+                    let mut props: Vec<String> = graph
+                        .of_class(&class)
+                        .flat_map(|o| o.props.iter().map(|(p, _)| graph.name(*p).to_string()))
+                        .collect();
+                    props.sort();
+                    props.dedup();
+                    entry["props"] = json!(props);
+                }
+                classes.insert(class, entry);
+            }
+            let headers: Vec<Value> = graph
+                .headers
+                .iter()
+                .map(|h| json!({ "file": h.file, "profiles": h.profiles }))
+                .collect();
+            Ok(json!({ "files": headers, "bytes": bytes, "objects": graph.objects.len(), "read_ms": ms, "classes": classes }).to_string())
         }
         _ => Err(USAGE.into()),
     }

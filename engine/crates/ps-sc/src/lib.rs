@@ -161,14 +161,21 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
             if !on(Class::Line, k) {
                 continue;
             }
-            let (z, ysh) = line_pu(l, vbase[a], sb, seq);
+            let p = line_pu(l, vbase[a], vbase[b], sb, seq);
             // Line capacitances are neglected in the positive sequence (IEC 60909-0, 6.4) and kept in the zero sequence.
-            let ysh = if seq == Seq::Zero {
-                C64::new(0.0, ysh.im * freq_scale)
-            } else {
-                C64::ZERO
+            let keep = |y: C64| {
+                if seq == Seq::Zero {
+                    C64::new(0.0, y.im * freq_scale)
+                } else {
+                    C64::ZERO
+                }
             };
-            stamp(&mut e, a, b, two_port(sx(z), ysh.scale(0.5), ysh.scale(0.5), 1.0, 0.0));
+            stamp(
+                &mut e,
+                a,
+                b,
+                two_port(sx(p.z), keep(p.y_from), keep(p.y_to), p.ratio, 0.0),
+            );
         }
         for (k, t) in model.transformers2.iter().enumerate() {
             let (Some(a), Some(b)) = (calc.topo.bus_of(t.node1), calc.topo.bus_of(t.node2)) else {
@@ -372,13 +379,8 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
                 if !on(Class::Line, r) {
                     continue;
                 }
-                let p = two_port(
-                    line_pu(l, vbase[a], sb, Seq::Positive).0,
-                    C64::ZERO,
-                    C64::ZERO,
-                    1.0,
-                    0.0,
-                );
+                let lp = line_pu(l, vbase[a], vbase[b], sb, Seq::Positive);
+                let p = two_port(lp.z, C64::ZERO, C64::ZERO, lp.ratio, 0.0);
                 contributions.push(contribution(&l.id, p, dv[a], dv[b], ka(a), ka(b)));
             }
             for (r, t) in model.transformers2.iter().enumerate() {
