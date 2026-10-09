@@ -31,6 +31,14 @@ const webgpuRequired = process.env.PS_WEBGPU !== 'optional';
 
 test('draws the diagram with the backend it reports, and that backend is the expected one', async ({ page }, info) => {
   await open(page);
+  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio.frames > 0);
+  // The frame as the active renderer produced it (for WebGPU, read back from the GPU) shows the network:
+  // 132 kV busbars are blue and 33 kV ones green in the light theme.
+  const url = await page.evaluate(() => /** @type {any} */ (window).powerstudio.snapshot());
+  const frame = decodePNG(Buffer.from(url.split(',')[1], 'base64'));
+  expect(share(frame, [31, 92, 192])).toBeGreaterThan(0.0008);
+  expect(share(frame, [23, 128, 74])).toBeGreaterThan(0.0008);
+  // The facts after drawing: a device that failed on the way has been replaced by Canvas 2D by now.
   const facts = await page.evaluate(() => ({ backend: /** @type {any} */ (window).powerstudio.backend, reason: /** @type {any} */ (window).powerstudio.fallbackReason }));
   info.annotations.push({ type: 'backend', description: `${facts.backend}${facts.reason ? ` (${facts.reason})` : ''}` });
   const badge = page.locator('.vp-badge');
@@ -42,14 +50,8 @@ test('draws the diagram with the backend it reports, and that backend is the exp
     expect(facts.backend).toBe('canvas2d');
     expect(facts.reason).toContain('WebGPU');
   }
-  // The frame as the active renderer produced it (for WebGPU, read back from the GPU) shows the network:
-  // 132 kV busbars are blue and 33 kV ones green in the light theme.
-  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio.frames > 0);
-  const url = await page.evaluate(() => /** @type {any} */ (window).powerstudio.snapshot());
-  const frame = decodePNG(Buffer.from(url.split(',')[1], 'base64'));
-  expect(share(frame, [31, 92, 192])).toBeGreaterThan(0.0008);
-  expect(share(frame, [23, 128, 74])).toBeGreaterThan(0.0008);
-  // And the same frame reached the screen.
+  // And the same picture reached the screen.
+  await page.waitForTimeout(100);
   const img = decodePNG(await page.locator('#viewport').screenshot());
   expect(share(img, [31, 92, 192])).toBeGreaterThan(0.0008);
   expect(share(img, [23, 128, 74])).toBeGreaterThan(0.0008);

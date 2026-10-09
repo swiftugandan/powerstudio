@@ -91,6 +91,7 @@ export class Viewport {
 
   /** The GPU device was lost: continue on Canvas 2D on a fresh canvas. @param {string} reason */
   async recover(reason) {
+    if (this.renderer?.backend !== 'webgpu') return;
     this.app.log('warn', `The WebGPU device was lost (${reason}). Drawing continues with Canvas 2D.`);
     this.renderer?.destroy();
     this.host.querySelector('canvas')?.remove();
@@ -230,7 +231,15 @@ export class Viewport {
     const r = this.renderer;
     if (!r) return '';
     if (this.sceneDirty) this.render();
-    const frame = await r.snapshot(this.camera, this.app.palette, this.dpr);
+    let frame;
+    try {
+      frame = await r.snapshot(this.camera, this.app.palette, this.dpr);
+    } catch (error) {
+      if (r.backend !== 'webgpu') throw error;
+      // A GPU that fails a read-back is gone, whether or not the device-lost event has arrived yet.
+      await this.recover(error instanceof Error ? error.message : String(error));
+      return this.snapshotPNG();
+    }
     const canvas = document.createElement('canvas');
     canvas.width = frame.width; canvas.height = frame.height;
     /** @type {CanvasRenderingContext2D} */ (canvas.getContext('2d')).putImageData(new ImageData(new Uint8ClampedArray(frame.rgba), frame.width, frame.height), 0, 0);
