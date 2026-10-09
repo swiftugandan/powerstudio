@@ -520,6 +520,12 @@ WebAssembly. Evidence:
 - **Parallel contingency analysis.** Outages split into contiguous chunks across up to eight workers; the engine
   merges them so the report equals a sequential run, which a test checks for 2, 3 and 7 chunks.
 
+The warm-start bar of section 2 (0.5 s at 70,000 buses) is still missed: 686 ms, now through the canonical model
+rather than the phase 0 shortcut. Ordering and symbolic factorisation alone take 77 ms of it and are repeated on
+every solve; re-using them across solves of an unchanged topology is the first lever, and the bar moves to phase 3.
+In a Web Worker in Chromium 156 (`scripts/browser-bench.mjs`) the figures are the same within 1 %: ACTIVSg25k in
+295 ms, ACTIVSg70k in 692 ms, and the 70,000-bus case fits a worker with 332 MB of engine memory.
+
 What phase 1 leaves for later: the app still sends its document with each request (the engine re-uses its import
 when the document is unchanged); moving the workspace onto the model, with snapshots sent once and operations after,
 belongs to phase 4, where the editor itself changes. The model's operations, validation and snapshots are built and

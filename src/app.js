@@ -317,7 +317,8 @@ export class App {
   maybeAutoLoadFlow() {
     if (!this.prefs.autoLoadFlow || !this.results.loadflow || this.running) return;
     clearTimeout(this.autoTimer);
-    this.autoTimer = window.setTimeout(() => this.calc('loadflow', { auto: true }), 250);
+    // A calculation the user starts within the delay must not be replaced by this one.
+    this.autoTimer = window.setTimeout(() => { if (!this.running) this.calc('loadflow', { auto: true }); }, 250);
   }
 
   /** Runs an edit and reports a refusal instead of throwing. @param {string} label @param {() => void} fn @returns {string} error message or '' */

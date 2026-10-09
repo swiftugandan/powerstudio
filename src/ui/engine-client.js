@@ -36,6 +36,8 @@ export class EngineClient {
     this.inThread = false;
     this.seq = 0;
     this.active = 0;
+    /** Identifies the current run; cancelling or starting a run moves it on, and older runs stop at their next step. */
+    this.token = 0;
   }
 
   get busy() { return this.active > 0; }
@@ -103,25 +105,35 @@ export class EngineClient {
    */
   async run(kind, doc, options = {}, onProgress) {
     if (this.busy) this.cancel();
+    const token = ++this.token;
     this.active++;
     const t0 = performance.now();
     try {
       const module = await engineModule();
+      this.check(token);
       const { bytes } = kind === 'contingency'
-        ? await this.contingency(module, doc, onProgress)
+        ? await this.contingency(token, module, doc, onProgress)
         : await this.exec(0, module, kind, doc, options, onProgress);
+      this.check(token);
       return { result: adapt(kind, jsonPayload(bytes)), ms: performance.now() - t0 };
     } finally {
       this.active--;
     }
   }
 
+  /** Stops a run that has been cancelled or superseded. @param {number} token */
+  check(token) {
+    if (token !== this.token) throw new CancelledError();
+  }
+
   /**
    * Contingency analysis across the pool.
-   * @param {WebAssembly.Module} module @param {import('../core/document.js').PowerDocument} doc @param {OnProgress} [onProgress]
+   * @param {number} token @param {WebAssembly.Module} module @param {import('../core/document.js').PowerDocument} doc
+   * @param {OnProgress} [onProgress]
    */
-  async contingency(module, doc, onProgress) {
+  async contingency(token, module, doc, onProgress) {
     const plan = jsonPayload((await this.exec(0, module, 'contingency_plan', doc, {})).bytes);
+    this.check(token);
     const count = /** @type {number} */ (plan.count);
     const parts = this.inThread || count < PARALLEL_FROM ? 1 : Math.min(this.poolSize, Math.ceil(count / MIN_CHUNK));
     if (parts <= 1) return this.exec(0, module, 'contingency', doc, {}, onProgress);
@@ -129,11 +141,14 @@ export class EngineClient {
     const done = new Array(parts).fill(0);
     const chunks = await Promise.all(Array.from({ length: parts }, (_, k) => this.exec(k, module, 'contingency_chunk', doc, { from: k * size, to: (k + 1) * size },
       d => { done[k] = d; onProgress?.(done.reduce((a, b) => a + b, 0), count); })));
+    this.check(token);
     return this.exec(0, module, 'contingency_merge', null, chunks.map(c => jsonPayload(c.bytes)));
   }
 
-  /** Stops the running calculation by restarting the workers. */
+  /** Stops the running calculation by restarting the busy workers. A run on the main thread cannot be interrupted;
+   * its result is discarded. */
   cancel() {
+    this.token++;
     for (const [k, s] of this.slots.entries()) {
       if (!s?.pending) continue;
       s.worker.terminate();

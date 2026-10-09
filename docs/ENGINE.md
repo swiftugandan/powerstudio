@@ -190,18 +190,19 @@ operations.
 
 ## Numerical methods and scale
 
-All matrices are sparse. Measured on an Apple M5 Pro (Node 26 for WebAssembly), for a full AC load flow from a
-MATPOWER file through the model, topology and per-unit network to a mismatch of 1 VA, best of three:
+All matrices are sparse. Measured on an Apple M5 Pro for a full AC load flow from a MATPOWER file through the model,
+topology and per-unit network to a mismatch of 1 VA, best of three; WebAssembly in a Web Worker in Chromium 156 and
+under Node 26:
 
-| Case | Buses | Native | WebAssembly | Engine memory |
-| --- | --- | --- | --- | --- |
-| ACTIVSg2000 | 2,000 | 22 ms | 23 ms | 7 MB |
-| ACTIVSg10k | 10,000 | 81 ms | 85 ms | 27 MB |
-| PEGASE 13659 | 13,659 | 93 ms | 100 ms | 40 MB |
-| ACTIVSg25k | 25,000 | 285 ms | 297 ms | 69 MB |
-| ACTIVSg70k, warm start | 70,000 | 500 ms | 686 ms | 332 MB |
+| Case | Buses | Native | Chromium worker | Node | Engine memory |
+| --- | --- | --- | --- | --- | --- |
+| ACTIVSg2000 | 2,000 | 22 ms | 23 ms | 23 ms | 7 MB |
+| ACTIVSg10k | 10,000 | 81 ms | 86 ms | 85 ms | 27 MB |
+| PEGASE 13659 | 13,659 | 93 ms | | 100 ms | 40 MB |
+| ACTIVSg25k | 25,000 | 285 ms | 295 ms | 297 ms | 68 MB |
+| ACTIVSg70k, warm start | 70,000 | 500 ms | 692 ms | 686 ms | 332 MB |
 
-`node scripts/wasm-bench.mjs src/engine/powerstudio-engine.wasm <case.m>` and `engine/target/release/ps bench
-<case.m>` reproduce them. ACTIVSg70k does not converge from a flat or DC start in PowerStudio or in PYPOWER; both
+`node scripts/browser-bench.mjs <case.m>`, `node scripts/wasm-bench.mjs src/engine/powerstudio-engine.wasm <case.m>`
+and `engine/target/release/ps bench <case.m>` reproduce them. ACTIVSg70k does not converge from a flat or DC start in PowerStudio or in PYPOWER; both
 converge from the voltages stored in the case. The short-circuit calculation solves once per faulted bus, which
 suits networks up to a few thousand buses; national-scale short circuit is phase 6 of the design.
