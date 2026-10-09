@@ -28,6 +28,7 @@ for (const [label, opts] of sets) {
   let row;
   try {
     const browser = await chromium.launch(/** @type {any} */ (opts));
+    setTimeout(() => { console.log(`| ${label} | timed out | | | | |`); process.exit(1); }, 60000).unref();
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
     /** @type {string[]} */
     const errors = [];
@@ -37,9 +38,9 @@ for (const [label, opts] of sets) {
     await page.waitForTimeout(1500);
     const f = await page.evaluate(() => ({ b: /** @type {any} */ (window).powerstudio.backend, d: /** @type {any} */ (window).powerstudio.backendDetail, r: /** @type {any} */ (window).powerstudio.fallbackReason }));
     const img = decodePNG(await page.locator('#viewport').screenshot());
-    const dataUrl = await page.evaluate(() => /** @type {any} */ (window).powerstudio.snapshot());
-    const frame = decodePNG(Buffer.from(dataUrl.split(',')[1], 'base64'));
-    row = [label, f.b, f.d || f.r || '', share(img, [31, 92, 192]).toFixed(4), share(frame, [31, 92, 192]).toFixed(4), errors.length ? errors.join('; ').slice(0, 120) : ''];
+    const dataUrl = await page.evaluate(() => /** @type {any} */ (window).powerstudio.snapshot().catch((/** @type {Error} */ e) => `error:${e.message}`));
+    const frame = dataUrl.startsWith('data:') ? decodePNG(Buffer.from(dataUrl.split(',')[1], 'base64')) : null;
+    row = [label, f.b, f.d || f.r || '', share(img, [31, 92, 192]).toFixed(4), frame ? share(frame, [31, 92, 192]).toFixed(4) : dataUrl, errors.length ? errors.join('; ').slice(0, 120) : ''];
     await browser.close();
   } catch (error) {
     row = [label, 'launch failed', String(error).split('\n')[0].slice(0, 120), '', '', ''];

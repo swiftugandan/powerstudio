@@ -292,7 +292,11 @@ export class WebGPURenderer {
     const encoder = device.createCommandEncoder();
     encoder.copyTextureToBuffer({ texture: target }, { buffer, bytesPerRow }, [w, h]);
     device.queue.submit([encoder.finish()]);
-    await buffer.mapAsync(GPUMapMode.READ);
+    // A device that stops responding must not hang the caller.
+    let timer = 0;
+    try {
+      await Promise.race([buffer.mapAsync(GPUMapMode.READ), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('The GPU did not return the frame within 5 s.')), 5000); })]);
+    } finally { clearTimeout(timer); }
     const src = new Uint8Array(buffer.getMappedRange()), rgba = new Uint8ClampedArray(w * h * 4);
     const bgra = this.format.startsWith('bgra');
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
