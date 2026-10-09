@@ -5,7 +5,7 @@ import { eventKey, isTyping } from './keys.js';
 
 /**
  * @typedef {{ id: string, label: string, icon?: string, keys?: string[], group: string, hint?: string,
- *   run: () => unknown, enabled?: () => boolean, pressed?: () => boolean, palette?: boolean, global?: boolean }} Command
+ *   run: () => unknown, enabled?: () => boolean, pressed?: () => boolean, palette?: boolean, global?: boolean, keywords?: string }} Command
  */
 
 export class Commands {

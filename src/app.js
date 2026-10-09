@@ -835,10 +835,10 @@ export class App {
     tool('load', 'Load', 'load', 'D', 'Constant power load');
     tool('shunt', 'Shunt', 'shunt', 'C', 'Capacitor bank or reactor');
     // Calculate
-    c.add({ id: 'calc.loadflow', label: 'Load flow', icon: 'loadflow', keys: ['Alt+L', 'Mod+Enter'], global: true, group: 'Calculate', hint: 'Run a Newton-Raphson load flow', enabled: idle, run: () => this.calc('loadflow') });
-    c.add({ id: 'calc.shortcircuit', label: 'Short circuit', icon: 'shortcircuit', keys: ['Alt+S'], global: true, group: 'Calculate', hint: 'IEC 60909-style short-circuit currents', enabled: idle, run: () => this.calc('shortcircuit') });
-    c.add({ id: 'calc.contingency', label: 'Contingency', icon: 'contingency', keys: ['Alt+N'], global: true, group: 'Calculate', hint: 'N-1 analysis: every branch out in turn', enabled: idle, run: () => this.calc('contingency') });
-    c.add({ id: 'calc.rms', label: 'Simulation', icon: 'rms', keys: ['Alt+R'], global: true, group: 'Calculate', hint: 'Stability simulation with the study case events', enabled: idle, run: () => this.calc('rms') });
+    c.add({ id: 'calc.loadflow', keywords: 'power flow newton raphson voltages', label: 'Load flow', icon: 'loadflow', keys: ['Alt+L', 'Mod+Enter'], global: true, group: 'Calculate', hint: 'Run a Newton-Raphson load flow', enabled: idle, run: () => this.calc('loadflow') });
+    c.add({ id: 'calc.shortcircuit', keywords: 'fault iec 60909 kurzschluss ikss', label: 'Short circuit', icon: 'shortcircuit', keys: ['Alt+S'], global: true, group: 'Calculate', hint: 'IEC 60909-style short-circuit currents', enabled: idle, run: () => this.calc('shortcircuit') });
+    c.add({ id: 'calc.contingency', keywords: 'n-1 outage security', label: 'Contingency', icon: 'contingency', keys: ['Alt+N'], global: true, group: 'Calculate', hint: 'N-1 analysis: every branch out in turn', enabled: idle, run: () => this.calc('contingency') });
+    c.add({ id: 'calc.rms', keywords: 'stability transient dynamic rotor angle rms', label: 'Simulation', icon: 'rms', keys: ['Alt+R'], global: true, group: 'Calculate', hint: 'Stability simulation with the study case events', enabled: idle, run: () => this.calc('rms') });
     c.add({ id: 'calc.cancel', label: 'Cancel calculation', icon: 'stop', keys: ['Mod+.'], global: true, group: 'Calculate', enabled: () => !!this.running, run: () => this.engine.cancel() });
     c.add({ id: 'calc.autoLoadFlow', label: 'Recalculate on edit', icon: 'loadflow', group: 'Calculate', hint: 'Run the load flow again after each change once it has been run', pressed: () => this.prefs.autoLoadFlow, run: () => { this.prefs.autoLoadFlow = !this.prefs.autoLoadFlow; this.savePrefs(); } });
     const studyToggle = (/** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ ic, /** @type {string} */ section, /** @type {string} */ key, /** @type {unknown} */ value, /** @type {unknown} */ other) =>
@@ -853,7 +853,7 @@ export class App {
     studyToggle('sc.min', 'Minimum currents', 'minus', 'shortcircuit', 'mode', 'min', undefined);
     c.add({ id: 'sc.allBuses', label: 'Every busbar', icon: 'bus', group: 'Study case', hint: 'Fault every busbar in turn instead of one location', pressed: () => !this.store.doc.study.shortcircuit.location,
       run: () => { const busSel = [...this.selection].find(id => this.store.get(id)?.cls === 'bus'); this.store.transact('Fault location', tx => tx.setStudy('shortcircuit', 'location', this.store.doc.study.shortcircuit.location ? '' : busSel ?? '')); } });
-    c.add({ id: 'sc.atSelection', label: 'Short circuit at selected busbar', icon: 'shortcircuit', group: 'Calculate', enabled: () => [...this.selection].some(id => this.store.get(id)?.cls === 'bus'),
+    c.add({ id: 'sc.atSelection', keywords: 'fault here', label: 'Short circuit at selected busbar', icon: 'shortcircuit', group: 'Calculate', enabled: () => [...this.selection].some(id => this.store.get(id)?.cls === 'bus'),
       run: () => { const id = [...this.selection].find(x => this.store.get(x)?.cls === 'bus'); if (id) this.faultAt(id); } });
     c.add({ id: 'rms.events', label: 'Events', icon: 'settings', group: 'Study case', hint: 'Edit the disturbance sequence of the simulation', run: () => openStudyDialog(this, 'rms') });
     c.add({ id: 'study.settings', label: 'Study case', icon: 'settings', keys: ['Mod+,'], global: true, group: 'Study case', hint: 'Settings of every calculation', run: () => openStudyDialog(this) });

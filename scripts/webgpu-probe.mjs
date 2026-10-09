@@ -15,6 +15,12 @@ const sets = [
   ['chromium, swiftshader + Vulkan, no surface', { channel: 'chromium', args: ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader', '--enable-features=Vulkan', '--disable-vulkan-surface'] }],
   ['chromium, angle swiftshader + unsafe-swiftshader', { channel: 'chromium', args: ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }],
   ['chromium, angle vulkan + swiftshader adapter', { channel: 'chromium', args: ['--enable-unsafe-webgpu', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface', '--use-webgpu-adapter=swiftshader'] }],
+  ...(process.env.DISPLAY ? [
+    ['headed, unsafe-webgpu', { channel: 'chromium', headless: false, args: ['--enable-unsafe-webgpu'] }],
+    ['headed, swiftshader + Vulkan', { channel: 'chromium', headless: false, args: ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader', '--enable-features=Vulkan'] }],
+    ['headed, angle swiftshader', { channel: 'chromium', headless: false, args: ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader'] }],
+    ['headed, angle vulkan, no surface', { channel: 'chromium', headless: false, args: ['--enable-unsafe-webgpu', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface', '--use-webgpu-adapter=swiftshader'] }],
+  ] : []),
 ];
 console.log('| Flags | Backend | Detail or reason | Blue pixel share | Console errors |');
 console.log('| --- | --- | --- | --- | --- |');

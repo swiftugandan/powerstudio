@@ -21,4 +21,4 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node build.mjs
       - name: Probe Chromium WebGPU flag sets
-        run: node scripts/webgpu-probe.mjs | tee -a "$GITHUB_STEP_SUMMARY"
+        run: xvfb-run -a node scripts/webgpu-probe.mjs | tee -a "$GITHUB_STEP_SUMMARY"

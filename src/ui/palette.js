@@ -50,7 +50,9 @@ export function openPalette(app) {
     for (const c of app.commands.all.values()) {
       if (c.palette === false) continue;
       const label = `${c.group}: ${c.label}`;
-      const m = fuzzy(q, label);
+      let m = fuzzy(q, label);
+      // Second chance: whole words of the hint and keywords, ranked below label matches.
+      if (m.score < 0 && q.length >= 3 && `${c.hint ?? ''} ${c.keywords ?? ''}`.toLowerCase().includes(q)) m = { score: 0.5, hits: [] };
       if (m.score < 0) continue;
       found.push({ label, icon: c.icon ?? 'plus', hint: c.keys?.[0] ? kbd(c.keys[0]) : '', group: 'Commands', run: () => app.commands.run(c.id), enabled: c.enabled?.() ?? true, score: m.score, hits: m.hits });
     }
