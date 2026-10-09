@@ -12,6 +12,7 @@ import { snap } from '../core/layout.js';
 import { h } from './dom.js';
 import { icon } from './icons.js';
 import { kbd } from './keys.js';
+import { minOf, maxOf } from '../core/extent.js';
 
 /**
  * @typedef {import('../core/catalog.js').Element} Element
@@ -209,14 +210,15 @@ export class Viewport {
       if (el.cls === 'bus') { const g = bar(el); pts.push({ x: g.x0, y: g.y0 }, { x: g.x1, y: g.y1 }); }
       else if (el.cls === 'line' || el.cls === 'trafo') {
         const k = branchKeys(el), a = this.app.store.get(/** @type {string} */ (el[k.a])), b = this.app.store.get(/** @type {string} */ (el[k.b]));
-        if (a && b) pts.push(...route(el, a, b));
+        if (a && b) for (const p of route(el, a, b)) pts.push(p);
       } else {
         const b = this.app.store.get(/** @type {string} */ (el.bus));
         if (b) pts.push({ x: /** @type {number} */ (b.x), y: /** @type {number} */ (b.y) + (el.side === 'above' ? -70 : 70) });
       }
     }
     if (!pts.length) return;
-    const box = { x0: Math.min(...pts.map(p => p.x)), y0: Math.min(...pts.map(p => p.y)), x1: Math.max(...pts.map(p => p.x)), y1: Math.max(...pts.map(p => p.y)) };
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const box = { x0: minOf(xs), y0: minOf(ys), x1: maxOf(xs), y1: maxOf(ys) };
     const c = this.camera, tl = c.toScreen(box.x0, box.y0), br = c.toScreen(box.x1, box.y1);
     const inside = tl.x > 40 && tl.y > 40 && br.x < c.width - 40 && br.y < c.height - 40;
     if (inside) return;

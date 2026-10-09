@@ -383,6 +383,7 @@ kbd {
 .input.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
 .tree { list-style: none; margin: 0; padding: 4px 0 12px; font-size: 12.5px; }
 .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree-spacer { list-style: none; }
 .tree-row {
   display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px 0 calc(8px + var(--depth, 0) * 14px);
   cursor: default; white-space: nowrap; color: var(--text); user-select: none;
@@ -445,7 +446,8 @@ kbd {
 .dock-tab .count.bad { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
 .dock-spacer { flex: 1; }
 .dock-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.dock-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+.dock-head { position: sticky; top: 0; z-index: 2; flex: none; }
+.dock-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2); flex-wrap: wrap; }
 .dock-toolbar .summary { display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-2); font-size: 12px; }
 .dock-toolbar .summary b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .dock-toolbar .grow { flex: 1; }
@@ -471,6 +473,9 @@ table.grid th {
   border-bottom: 1px solid var(--border); white-space: nowrap; user-select: none; cursor: pointer;
 }
 table.grid th.num, table.grid td.num { text-align: right; }
+table.grid.fixed { table-layout: fixed; }
+table.grid.fixed td { overflow: hidden; text-overflow: ellipsis; }
+table.grid tr.grid-spacer td { height: auto; padding: 0; border: 0; }
 table.grid th .unit { color: var(--text-3); font-weight: 450; margin-left: 3px; }
 table.grid th[aria-sort] .arrow { color: var(--accent-text); margin-left: 3px; }
 table.grid td { height: 26px; padding: 0 10px; border-bottom: 1px solid var(--border); white-space: nowrap; font-variant-numeric: tabular-nums; }

@@ -295,6 +295,7 @@ export class App {
       toast('ok', `${doc.elements.length.toLocaleString('en-GB')} elements. The import notes are in the Output panel.`, { title: `Imported ${label}` });
     } catch (error) {
       this.setStatusMessage('');
+      console.error(error instanceof Error ? error.stack : error);
       const msg = error instanceof Error ? error.message : String(error);
       this.log('error', `Import of “${label}” failed: ${msg}`);
       toast('error', msg, { title: 'Import failed' });

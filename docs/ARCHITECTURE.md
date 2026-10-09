@@ -38,7 +38,9 @@ every opened or imported file passes. `store.js` is the only way to change a doc
 operation with the value it replaced, so undo and redo are exact, and edits that share a coalescing key (a drag,
 typing in one field) merge into one step. `layout.js` draws a diagram for networks that arrive without one: an exact
 force-directed layout up to 400 busbars, and above that a cell-grid variant whose busbars are packed into rows, so
-2,000 busbars lay out in about 0.3 s and 10,000 in about 2 s.
+2,000 busbars lay out in about 0.2 s, 10,000 and 25,000 in about 0.9 s, and 70,000 in about 3 s (the repulsion uses a
+counting-sorted grid of typed arrays, and above 20,000 busbars fewer iterations, since the force pass then only orders
+the packed rows).
 
 **Engine (`engine/`).** A Cargo workspace; `docs/ENGINE.md` describes what it computes.
 
@@ -87,6 +89,10 @@ preferences, and defines every command. Ribbon buttons, palette entries, context
 commands by id through `commands.js`, so each action and its enabled and pressed state are defined once. A store
 change marks results stale (each result records the network revision it was computed for), re-renders the model tree
 and inspector, rebuilds the diagram, re-runs the load flow when "Recalculate on edit" is on, and schedules an autosave.
+The model tree (`tree.js`, above 2,000 rows) and the result tables (`table.js`, above 500 rows) are virtual: they
+keep every row's description, sort with one shared collator, and put only the rows in view into the page, so a
+70,000-busbar network opens in about a second and its tables scroll freely. Code that takes the extent of large
+arrays uses `core/extent.js`, because spreading them into `Math.min` overflows the call stack.
 
 **Workers (`src/worker/`, `src/ui/engine-client.js`).** Each worker holds one engine instance, created from the
 compiled module the page sends it, so the module is compiled once however many workers start. The engine client

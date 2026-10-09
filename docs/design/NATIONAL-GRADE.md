@@ -537,7 +537,9 @@ tested but not yet used by the app. ACTIVSg70k still needs a warm start (phase 3
 ### Phase 2 progress (2026-10-09)
 
 The import half of the exit criterion is met. Every comparison runs on the engine's own import, with the OpenLoadFlow
-settings and the corrections to PowSyBl's networks recorded in each golden (docs/research/sources.md cites them):
+settings and the corrections to PowSyBl's networks recorded in each golden (docs/research/sources.md cites them).
+They run with every control off (scripts/oracle/olf.py): the fidelity bar of section 2 asks for agreement with the
+same controls enabled, and that is phase 3's first validation target.
 
 | Source | Cases | Worst agreement with PowSyBl |
 | --- | --- | --- |

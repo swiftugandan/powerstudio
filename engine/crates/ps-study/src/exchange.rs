@@ -136,10 +136,12 @@ pub fn editor_fidelity(model: &Model, converted: &ps_io::powerstudio_write::Conv
     let Ok(doc) = ps_io::powerstudio::from_value(&converted.doc) else {
         return out;
     };
+    // Whether the editor's default start (a DC load flow) reaches a solution: a probe, capped at ten iterations, since
+    // Newton converges in a handful from a good start and a diverging case would otherwise run its full limit.
     let editor = crate::loadflow::run(
         &doc.model,
         &crate::LoadFlowRun {
-            settings,
+            settings: LoadFlowSettings { max_iter: 10, ..settings },
             ..Default::default()
         },
     );

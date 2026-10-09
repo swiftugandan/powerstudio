@@ -68,7 +68,7 @@ export class DocumentStore {
     if (!tx.ops.length) return;
     const now = Date.now(), last = this.past[this.past.length - 1];
     if (opt.coalesce && last && last.coalesce === opt.coalesce && now - last.time < COALESCE_MS) {
-      last.ops.push(...tx.ops);
+      for (const op of tx.ops) last.ops.push(op);
       last.time = now;
     } else {
       this.past.push({ label, ops: tx.ops, coalesce: opt.coalesce ?? '', time: now });

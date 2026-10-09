@@ -57,7 +57,9 @@ export function autoLayout(doc) {
   layers.forEach((members, l) => members.forEach((i, k) => { x[i] = k - (members.length - 1) / 2; y[i] = l; }));
 
   // Fruchterman–Reingold with ideal edge length 1 and linear cooling.
-  const area = Math.max(n, 1), k = Math.sqrt(area / n), iterations = n > LARGE ? 300 : Math.min(600, 150 + 4 * n);
+  // Large networks use the force layout only to order the rows they are packed into, so fewer iterations do.
+  const area = Math.max(n, 1), k = Math.sqrt(area / n);
+  const iterations = n > 20000 ? 120 : n > LARGE ? 300 : Math.min(600, 150 + 4 * n);
   const dx = new Float64Array(n), dy = new Float64Array(n);
   let temp = Math.sqrt(n) / 2;
   /** @param {number} i @param {number} j */
@@ -75,11 +77,18 @@ export function autoLayout(doc) {
     if (n <= LARGE) {
       for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) repel(i, j);
     } else {
-      const cells = cellsOf(x, y, reach, reach);
+      const g = grid(x, y, reach);
       for (let i = 0; i < n; i++) {
-        neighbours(cells, x[i], y[i], reach, reach, j => {
-          if (j > i && Math.abs(x[i] - x[j]) < reach && Math.abs(y[i] - y[j]) < reach) repel(i, j);
-        });
+        const cx = g.col[i], cy = g.row[i];
+        for (let a = Math.max(0, cx - 1); a <= Math.min(g.cols - 1, cx + 1); a++) {
+          for (let b = Math.max(0, cy - 1); b <= Math.min(g.rows - 1, cy + 1); b++) {
+            const c = a + b * g.cols;
+            for (let p = g.start[c]; p < g.start[c + 1]; p++) {
+              const j = g.order[p];
+              if (j > i && Math.abs(x[i] - x[j]) < reach && Math.abs(y[i] - y[j]) < reach) repel(i, j);
+            }
+          }
+        }
       }
     }
     for (const [a, b] of edges) {
@@ -110,34 +119,29 @@ export function autoLayout(doc) {
   arrangeConnections(doc);
 }
 
-/** A cell's key: its column and row packed into one number. @param {number} cx @param {number} cy */
-const cellKey = (cx, cy) => (cx + 1048576) * 2097152 + (cy + 1048576);
-
 /**
- * Points bucketed into cells of `w` × `h`.
- * @param {ArrayLike<number>} x @param {ArrayLike<number>} y @param {number} w @param {number} h
- * @returns {Map<number, number[]>}
+ * Points sorted into square cells of side `size` (counting sort into typed arrays): cell `c` holds
+ * `order[start[c]]` to `order[start[c + 1] - 1]`. The cells grow when the points are spread so far that there would be
+ * more than four cells per point.
+ * @param {Float64Array} x @param {Float64Array} y @param {number} size
  */
-function cellsOf(x, y, w, h) {
-  /** @type {Map<number, number[]>} */
-  const cells = new Map();
-  for (let i = 0; i < x.length; i++) push(cells, cellKey(Math.floor(x[i] / w), Math.floor(y[i] / h)), i);
-  return cells;
-}
-
-/**
- * Calls `visit` for every point in the cell of (px, py) and the eight around it.
- * @param {Map<number, number[]>} cells @param {number} px @param {number} py @param {number} w @param {number} h
- * @param {(j: number) => void} visit
- */
-function neighbours(cells, px, py, w, h, visit) {
-  const cx = Math.floor(px / w), cy = Math.floor(py / h);
-  for (let a = cx - 1; a <= cx + 1; a++) {
-    for (let b = cy - 1; b <= cy + 1; b++) {
-      const list = cells.get(cellKey(a, b));
-      if (list) for (const j of list) visit(j);
-    }
+function grid(x, y, size) {
+  const n = x.length;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < n; i++) { x0 = Math.min(x0, x[i]); x1 = Math.max(x1, x[i]); y0 = Math.min(y0, y[i]); y1 = Math.max(y1, y[i]); }
+  let side = size;
+  while (((x1 - x0) / side + 1) * ((y1 - y0) / side + 1) > 4 * n + 16) side *= 2;
+  const cols = Math.floor((x1 - x0) / side) + 1, rows = Math.floor((y1 - y0) / side) + 1;
+  const col = new Int32Array(n), row = new Int32Array(n), start = new Int32Array(cols * rows + 1), order = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    col[i] = Math.floor((x[i] - x0) / side);
+    row[i] = Math.floor((y[i] - y0) / side);
+    start[col[i] + row[i] * cols + 1]++;
   }
+  for (let c = 0; c < cols * rows; c++) start[c + 1] += start[c];
+  const fill = start.slice(0, cols * rows);
+  for (let i = 0; i < n; i++) order[fill[col[i] + row[i] * cols]++] = i;
+  return { cols, rows, col, row, start, order };
 }
 
 /** @param {number} v */

@@ -7,6 +7,7 @@ import { fieldRow } from './fields.js';
 import { fixed } from './format.js';
 import { CLASSES, CLASS_ORDER } from '../core/catalog.js';
 import { CLASS_ICON } from './tree.js';
+import { minOf, maxOf } from '../core/extent.js';
 
 /** @typedef {import('../core/catalog.js').Element} Element @typedef {import('../core/catalog.js').FieldGroup} FieldGroup */
 
@@ -175,9 +176,9 @@ export class Inspector {
       /** @type {import('../engine/reports.js').RmsResult} */
       const r = R.rms.result;
       const m = r.machines.find(x => x.id === el.id);
-      if (m) rows.push(['Rotor angle range', `${fixed(Math.min(...m.delta), 1)}° … ${fixed(Math.max(...m.delta), 1)}°`], ['Speed range', `${fixed(Math.min(...m.speed), 3)} … ${fixed(Math.max(...m.speed), 3)} Hz`]);
+      if (m) rows.push(['Rotor angle range', `${fixed(minOf(m.delta), 1)}° … ${fixed(maxOf(m.delta), 1)}°`], ['Speed range', `${fixed(minOf(m.speed), 3)} … ${fixed(maxOf(m.speed), 3)} Hz`]);
       const k = r.busIds.indexOf(el.id);
-      if (k >= 0) rows.push(['Lowest voltage', `${fixed(Math.min(...r.voltages[k]), 3)} p.u.`], ['Final voltage', `${fixed(r.voltages[k][r.voltages[k].length - 1], 3)} p.u.`]);
+      if (k >= 0) rows.push(['Lowest voltage', `${fixed(minOf(r.voltages[k]), 3)} p.u.`], ['Final voltage', `${fixed(r.voltages[k][r.voltages[k].length - 1], 3)} p.u.`]);
     }
     if (!rows.length) return null;
     const props = h('div', { class: 'props' });

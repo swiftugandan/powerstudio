@@ -8,6 +8,7 @@ import { Plot, seriesColor } from './plot.js';
 import { CLASSES } from '../core/catalog.js';
 import { effectiveTheme } from './theme.js';
 import { enumLabel } from './fields.js';
+import { minOf, maxOf } from '../core/extent.js';
 
 /** @typedef {{ time: number, level: 'info' | 'ok' | 'warn' | 'error', text: string, detail?: string }} LogEntry
  * @typedef {'output' | 'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} DockTab */
@@ -39,6 +40,10 @@ export class Dock {
     this.current = null;
     this.tabs = h('div', { class: 'dock-tabs', role: 'tablist', 'aria-label': 'Results' });
     this.body = h('div', { class: 'dock-body', role: 'tabpanel' });
+    // Table headers stick below the result's toolbars, whose height changes as they wrap.
+    this.headSize = new ResizeObserver(entries => {
+      for (const e of entries) this.body.style.setProperty('--sticky-top', `${/** @type {HTMLElement} */ (e.target).offsetHeight}px`);
+    });
     host.append(this.tabs, this.body);
     this.tabs.addEventListener('click', e => {
       const b = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest('[data-tab]'));
@@ -140,6 +145,14 @@ export class Dock {
     else { app.setSelection([id]); app.viewport.reveal([id]); }
   }
 
+  /** Shows a result: its toolbars in one header that stays in view, then its content. @param {Array<HTMLElement | null>} toolbars @param {HTMLElement} content */
+  mount(toolbars, content) {
+    const head = h('div', { class: 'dock-head' }, ...toolbars.filter(t => t !== null));
+    this.headSize.disconnect();
+    this.body.replaceChildren(head, content);
+    this.headSize.observe(head);
+  }
+
   /** A toolbar with a summary and an optional segmented switch. @param {HTMLElement[]} parts */
   toolbar(...parts) { return h('div', { class: 'dock-toolbar' }, ...parts); }
 
@@ -153,7 +166,7 @@ export class Dock {
   /** @param {any[]} columns @param {any[]} rows @param {string} name @param {string} sortKey @param {string} def @param {1 | -1} [dir] */
   table(columns, rows, name, sortKey, def, dir = 1) {
     this.current = { columns, rows, name };
-    return dataTable({ columns, rows, id: r => r.id, selected: this.app.selection, sort: this.sortFor(sortKey, def, dir), onSort: this.onSort(sortKey), onRow: (id, e) => this.pick(id, e), stickyTop: 37 });
+    return dataTable({ columns, rows, id: r => r.id, selected: this.app.selection, sort: this.sortFor(sortKey, def, dir), onSort: this.onSort(sortKey), onRow: (id, e) => this.pick(id, e), scroller: this.body });
   }
 
   /** @param {string} id */
@@ -207,7 +220,7 @@ export class Dock {
       ], rows, 'load-flow-units', 'lf-units', 'kind');
     }
     const notes = [...r.warnings, ...(r.deenergized.length ? [`De-energised: ${r.deenergized.map(id => this.nameOf(id)).join(', ')}`] : [])];
-    this.body.replaceChildren(bar, ...(notes.length ? [h('div', { class: 'dock-toolbar', html: notes.map(n => `<span class="pill warn">${icon('warning', 13)}${esc(n)}</span>`).join('') })] : []), table);
+    this.mount([bar, notes.length ? h('div', { class: 'dock-toolbar', html: notes.map(n => `<span class="pill warn">${icon('warning', 13)}${esc(n)}</span>`).join('') }) : null], table);
   }
 
   renderShortCircuit() {
@@ -243,7 +256,7 @@ export class Dock {
       ], r.contributions, 'short-circuit-contributions', 'sc-contrib', 'iFrom', -1);
     }
     const notes = r.warnings.map(w => `<span class="pill warn">${icon('warning', 13)}${esc(w)}</span>`).join('');
-    this.body.replaceChildren(bar, ...(notes ? [h('div', { class: 'dock-toolbar', html: notes })] : []), r.buses.length ? table : h('div', { class: 'dock-empty', text: 'No busbar could be faulted. See the warnings above.' }));
+    this.mount([bar, notes ? h('div', { class: 'dock-toolbar', html: notes }) : null], r.buses.length ? table : h('div', { class: 'dock-empty', text: 'No busbar could be faulted. See the warnings above.' }));
   }
 
   renderContingency() {
@@ -265,7 +278,7 @@ export class Dock {
       { key: 'lost', label: 'Lost busbars', value: (/** @type {any} */ c) => c.lostBuses.map((/** @type {string} */ b) => this.nameOf(b)).join(', ') },
       { key: 'viol', label: 'Violations', value: (/** @type {any} */ c) => describe(c), title: (/** @type {any} */ c) => describe(c) },
     ], r.cases, 'contingency', 'n1', 'state', 1);
-    this.body.replaceChildren(bar, table);
+    this.mount([bar], table);
   }
 
   renderRms() {
@@ -280,7 +293,7 @@ export class Dock {
     const plotHost = h('div', { class: 'plot' });
     const side = h('div', { class: 'plot-side' });
     wrap.append(plotHost, side);
-    this.body.replaceChildren(bar, wrap);
+    this.mount([bar], wrap);
     const dark = effectiveTheme() === 'dark';
     /** @type {Array<{ id: string, name: string, data: Float32Array }>} */
     let source;
@@ -306,7 +319,7 @@ export class Dock {
       t: r.t, unit, label: /** @type {Record<string, string>} */ ({ delta: 'Rotor angle', speed: 'Speed', pe: 'Electrical power', v: 'Voltage' })[this.rmsVar], events: r.events.filter(e => e.applied).map(e => e.t), cursor: app.rmsIndex < 0 ? r.t.length - 1 : app.rmsIndex,
       series: source.map((s, i) => ({ name: s.name, color: seriesColor(i, dark), data: s.data })).filter((_, i) => !this.rmsHidden.has(source[i].id)),
     });
-    const rows = source.map(s => ({ id: s.id, name: s.name, min: Math.min(...s.data), max: Math.max(...s.data), end: s.data[s.data.length - 1] }));
+    const rows = source.map(s => ({ id: s.id, name: s.name, min: minOf(s.data), max: maxOf(s.data), end: s.data[s.data.length - 1] }));
     this.current = { name: `stability-${this.rmsVar}`, rows: [...r.t].map((t, i) => ({ t, ...Object.fromEntries(source.map(s => [s.name, s.data[i]])) })),
       columns: [{ key: 't', label: 'Time', unit: 's', value: (/** @type {any} */ x) => x.t }, ...source.map(s => ({ key: s.name, label: s.name, unit, value: (/** @type {any} */ x) => x[s.name] }))] };
     void rows;
