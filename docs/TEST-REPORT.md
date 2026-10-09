@@ -1,8 +1,41 @@
 # Test report
 
 Numbers are copied from the runs; nothing here is estimated. Re-run the commands in [TESTING.md](TESTING.md) to
-reproduce them. The first section covers the Rust engine (commit `18ac5c7`, local runs only: it has not been pushed,
-so CI has not run it). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+reproduce them. The first two sections cover the Rust engine's phases 2 and 1 (local runs only: they have not been
+pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+
+## Data exchange, phase 2 (commit `4d9926d`, 2026-10-09, local)
+
+Same environment as phase 1. Local runs only: phase 2 has not been pushed, so CI has not run it.
+
+| Suite | Result |
+| --- | --- |
+| Type checking (`npm run check`, both configs) | passed |
+| Engine format and lints (`npm run lint:engine`) | passed, no warnings |
+| Engine tests, native (`npm run test:engine`) | 53 passed, 0 failed |
+| Node tests on the WebAssembly engine (`npm test`) | 64 passed, 0 failed |
+| Browser tests (`npm run test:browser`), both projects | 30 passed, 0 failed, 16 skipped (screenshot captures) |
+| Pages build (`npm run build:pages`) | built; `dist/PowerStudio.html` 1,147,568 bytes, sha256 `84c9c56fca386631b5dc509841711c4c312edcc2dedbe2bbceae3775cdbccf33` |
+
+The engine module is 1,559,111 bytes (508,608 gzip-compressed), sha256
+`8566083a4c8e502850bef20697d50a970c2462678b6f9a25b8c1acf20c6fe237`.
+
+Agreement with PowSyBl (pypowsybl 1.16.1, OpenLoadFlow), by the engine tests in `engine/crates/ps-study/tests/`:
+
+| Comparison | Cases | Worst agreement |
+| --- | --- | --- |
+| CGMES import and load flow (`cgmes.rs`) | 12 conformity configurations (11 solved, FullGrid import only) | 1.1e-11 p.u., 2.1e-8 MW (Svedala) |
+| PSS/E RAW import and load flow (`psse.rs`) | 23 files, versions 33 and 35 (22 solved; one file's data cannot be solved by either tool) | 1.9e-12 p.u., 8.9e-9 MW (IEEE 300) |
+| Large MATPOWER cases (`matpower.rs`) | ACTIVSg 2k, 10k, 25k, 70k; PEGASE 2869, 9241, 13659 | 1.1e-10 p.u. (PEGASE 9241); ACTIVSg70k 5.4e-12 p.u. |
+| RAW export read back by PowerStudio (`roundtrip.rs`) | every reference model, versions 33 and 35 | 1.5e-14 p.u. |
+| RAW export read by PowSyBl (`scripts/oracle/export_check.py`) | 32 cases × 2 versions = 64 files | 4.2e-11 p.u. |
+| CGMES SV export read back by PowerStudio (`cgmes_sv.rs`) | 11 configurations | exact; a restart from the SV needs no iteration |
+| CGMES SV export read by PowSyBl (`scripts/oracle/sv_check.py`) | 11 configurations | every exported flow taken without difference |
+| The editor's document against the imported model (`document.rs`) | every reference model, up to ACTIVSg70k | 1.8e-12 p.u. |
+
+Imports in the app (Chromium 156, built file, Apple M5 Pro): the MicroGrid 3.0 configuration (12 files) shows its
+import dialog after 0.13 s, South Carolina 500 after 0.18 s, ACTIVSg2000 after 0.8 s and ACTIVSg10k after 2.9 s; the
+first load flow from the imported voltages took 0.03, 0.1, 0.46 and 2.2 s.
 
 ## Rust engine, phase 1 (commit `18ac5c7`, 2026-10-09, local)
 
@@ -135,11 +168,15 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Live site in a browser | Opened https://swiftugandan.github.io/powerstudio/ in local Chromium: the website showed the build-time figures (13.393 MW, 27.35 kA, 10 of 20, stays in step); its "Open PowerStudio" button opened `/app/`, which drew with WebGPU (Apple, metal-3) and converged the IEEE 14 load flow in 3 iterations, with no page errors |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
-## Not verified (as of phase 1)
+## Not verified (as of phase 2)
 
 - Firefox, Safari and Chromium on Windows; WebGPU on Linux with a real GPU.
 - Touch and pinch gestures on a real phone (the phone layout was tested at 390 × 844 in Chromium).
 - Screen readers.
 - The short-circuit method against the text of IEC 60909-0 or its TR 60909-4 examples (only against pandapower).
-- The editor with networks larger than MATPOWER case118 (the engine alone was run on cases up to 70,000 buses).
+- Editing networks larger than about 2,000 busbars: ACTIVSg10k opens and solves in the app, but its automatic
+  diagram is dense and was not used for editing.
+- Real operators' CGMES and RAW files: only the ENTSO-E conformity configurations, PowSyBl's test files and public
+  test systems were read.
+- PSS/E itself: RAW files written by PowerStudio were read by PowerStudio and by PowSyBl, not by PSS/E.
 - The engine build in CI, and its reproducibility on a second machine.

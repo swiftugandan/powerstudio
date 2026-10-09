@@ -275,8 +275,8 @@ evidence, wave by wave, not all at once.
   `--target wasm32-unknown-unknown` with SIMD128, with no other tools. The `.wasm` hash is recorded in every build
   and is to be recorded in every study record.
 - The single-file build embeds the `.wasm` gzip-compressed and decompresses it with the built-in
-  `DecompressionStream`, so the offline HTML file still works. At the end of phase 1 the module is 931 KB, 316 KB
-  compressed. The main thread compiles it once and sends the compiled module to every worker.
+  `DecompressionStream`, so the offline HTML file still works. The module was 931 KB (316 KB compressed) at the end
+  of phase 1 and is 1.56 MB (509 KB compressed) at the end of phase 2, mostly the CGMES, RAW and document code. The main thread compiles it once and sends the compiled module to every worker.
 - The Content-Security-Policy gains `'wasm-unsafe-eval'` in `script-src` (required to compile WebAssembly) and keeps
   `connect-src 'none'`.
 
