@@ -39,7 +39,7 @@ fn exported_sv_reads_back_as_the_solved_state() {
             settings: LoadFlowSettings {
                 tolerance: 1e-9,
                 max_iter: 50,
-                ..Default::default()
+                ..LoadFlowSettings::plain()
             },
             start: warm,
             ..Default::default()

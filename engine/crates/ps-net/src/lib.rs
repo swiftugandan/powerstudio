@@ -6,7 +6,10 @@
 //! transformer). Load flow, short circuit and stability all assemble their matrices from these conversions, so the
 //! per-unit system is defined once, here. docs/ENGINE.md derives each model.
 
-use ps_lf::{MachineMode, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt};
+use ps_lf::{
+    MachineMode, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt, PuShuntControl, PuTapBranch, TapAxis,
+    TapTarget, TwoPort, UnitKind,
+};
 use ps_model::{Class, Line, MachineControl, Model, Transformer2, Transformer3};
 use ps_num::{C64, DEG};
 use ps_topology::{Outages, Topology, active};
@@ -287,9 +290,29 @@ pub struct Calc {
     pub loads: Vec<u32>,
     /// Shunt row of each network shunt.
     pub shunts: Vec<u32>,
+    /// The tap changer behind each [`TapAxis::id`] of the network's tap branches.
+    pub tap_sources: Vec<TapSource>,
+    /// Shunt row of each network shunt control.
+    pub shunt_controls: Vec<u32>,
     /// What the build simplified or skipped, in plain words.
     pub warnings: Vec<String>,
 }
+
+/// A tap changer the load flow may move.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TapSource {
+    /// Class of the transformer (two- or three-winding).
+    pub class: Class,
+    /// Row of the transformer.
+    pub row: u32,
+    /// Winding the tap changer sits on (1–3).
+    pub end: u8,
+    /// Whether it is a phase tap changer.
+    pub phase: bool,
+}
+
+/// The largest table of positions built for one branch; a pair of tap changers beyond it keeps its positions.
+const MAX_TAP_TABLE: usize = 10_000;
 
 impl Calc {
     /// Builds the calculation network for the model with the given outages.
@@ -397,6 +420,16 @@ impl Calc {
                 );
             }
         }
+        let mut grid_bus = vec![false; net.buses.len()];
+        for (k, g) in model.external_grids.iter().enumerate() {
+            if let Some(b) = topo.bus_of(g.node).filter(|_| on(Class::ExternalGrid, k)) {
+                grid_bus[b] = true;
+            }
+        }
+        // The bus each machine's voltage control acts on. Every voltage-controlling machine of a bus regulates the
+        // bus the first one names; a control that cannot act (its bus is not energised, or an external grid holds
+        // it) falls back to the machine's own terminal.
+        let mut bus_reg: Vec<Option<usize>> = vec![None; net.buses.len()];
         let mut machines = Vec::new();
         for (k, g) in model.generators.iter().enumerate() {
             let Some(b) = topo.bus_of(g.node) else {
@@ -412,11 +445,31 @@ impl Calc {
                 MachineControl::Pv => MachineMode::Pv,
                 MachineControl::Pq => MachineMode::Pq,
             };
-            if g.regulated_node.is_some_and(|r| r != g.node) && mode == MachineMode::Pv {
-                warnings.push(format!(
-                    "{} regulates a remote node; this version holds its own terminal voltage instead.",
-                    model.name_of(Class::Generator, k)
-                ));
+            let mut reg = b;
+            if mode != MachineMode::Pq {
+                let wanted = g.regulated_node.map(|r| topo.bus_of(r));
+                match wanted {
+                    Some(None) => warnings.push(format!(
+                        "{} regulates a node that is not energised; it holds its own terminal voltage.",
+                        model.name_of(Class::Generator, k)
+                    )),
+                    Some(Some(r)) if r != b && grid_bus[r] => warnings.push(format!(
+                        "{} regulates a busbar an external grid holds; it holds its own terminal voltage.",
+                        model.name_of(Class::Generator, k)
+                    )),
+                    Some(Some(r)) => reg = r,
+                    None => {}
+                }
+                match bus_reg[b] {
+                    Some(first) if first != reg => {
+                        warnings.push(format!(
+                            "{} regulates another busbar than the machines it shares a busbar with; it follows them.",
+                            model.name_of(Class::Generator, k)
+                        ));
+                        reg = first;
+                    }
+                    _ => bus_reg[b] = Some(reg),
+                }
             }
             net.machines.push(PuMachine {
                 id: machines.len(),
@@ -425,9 +478,15 @@ impl Calc {
                 p: g.p / sb,
                 q: g.q / sb,
                 v_set: g.v_set,
+                reg_bus: reg,
                 angle: g.angle / DEG,
                 q_min: g.q_min / sb,
                 q_max: g.q_max / sb,
+                p_min: g.p_min / sb,
+                p_max: g.p_max / sb,
+                participates: true,
+                factor: g.participation,
+                kind: UnitKind::Generator,
             });
             machines.push(k as u32);
         }
@@ -448,7 +507,6 @@ impl Calc {
             grids.push(k as u32);
         }
         let mut loads = Vec::new();
-        let mut voltage_dependent = 0;
         for (k, l) in model.loads.iter().enumerate() {
             let Some(b) = topo.bus_of(l.node) else {
                 continue;
@@ -456,21 +514,15 @@ impl Calc {
             if !on(Class::Load, k) {
                 continue;
             }
-            if l.p_zip[2] != 1.0 || l.q_zip[2] != 1.0 {
-                voltage_dependent += 1;
-            }
             net.loads.push(PuLoad {
                 id: loads.len(),
                 bus: b,
                 p: l.p * opt.load_scale / sb,
                 q: l.q * opt.load_scale / sb,
+                p_zip: l.p_zip,
+                q_zip: l.q_zip,
             });
             loads.push(k as u32);
-        }
-        if voltage_dependent > 0 {
-            warnings.push(format!(
-                "{voltage_dependent} load(s) have voltage-dependent characteristics; this version treats every load as constant power."
-            ));
         }
         let mut shunts = Vec::new();
         for (k, s) in model.shunts.iter().enumerate() {
@@ -489,8 +541,9 @@ impl Calc {
             });
             shunts.push(k as u32);
         }
-        // Static var compensators: a regulating one holds its voltage like a machine without active power (its
-        // susceptance range sets reactive limits at 1 p.u.); otherwise it injects its present reactive power.
+        // Static var compensators: a regulating one holds its voltage like a machine without active power, within
+        // reactive limits its susceptance range sets (stated at 1 p.u.; the load flow scales them with the voltage
+        // squared); otherwise it injects its present reactive power.
         let mut svcs = Vec::new();
         for (k, c) in model.svcs.iter().enumerate() {
             let Some(b) = topo.bus_of(c.node) else { continue };
@@ -506,12 +559,20 @@ impl Calc {
                 p: 0.0,
                 q: c.q / sb,
                 v_set: c.v_set,
+                reg_bus: b,
                 angle: 0.0,
                 q_min: c.b_min * kv * kv / sb,
                 q_max: c.b_max * kv * kv / sb,
+                p_min: 0.0,
+                p_max: 0.0,
+                participates: false,
+                factor: 0.0,
+                kind: UnitKind::Svc,
             });
             svcs.push(k as u32);
         }
+        let tap_sources = regulating_taps(model, &topo, &mut net, &branches, &mut warnings);
+        let shunt_controls = regulating_shunts(model, &topo, &mut net, &shunts, &mut warnings);
         let mut calc = Calc {
             net,
             topo,
@@ -521,6 +582,8 @@ impl Calc {
             grids,
             loads,
             shunts,
+            tap_sources,
+            shunt_controls,
             warnings,
         };
         calc.start_internal_buses();
@@ -606,6 +669,353 @@ impl Calc {
             net.buses[i].va0 = va;
         }
     }
+}
+
+/// A voltage target in per unit of its bus, with its dead band (full width; 0.1 kV when none is given), or why it
+/// cannot act.
+fn voltage_target(
+    topo: &Topology,
+    net: &PuNetwork,
+    c: &ps_model::VoltageControl,
+) -> Result<(usize, f64, f64), &'static str> {
+    let bus = topo.bus_of(c.node).ok_or("regulates a node that is not energised")?;
+    let kv = net.buses[bus].base_kv;
+    let target = c.target_kv / kv;
+    // OpenLoadFlow's plausibility check: above 20 kV a target outside 0.8–1.2 p.u. is a data error.
+    if target.is_nan() || target <= 0.0 || (kv > 20.0 && !(0.8..=1.2).contains(&target)) {
+        return Err("has an implausible voltage target");
+    }
+    let band = if c.deadband_kv > 0.0 { c.deadband_kv } else { 0.1 };
+    Ok((bus, target, band / kv))
+}
+
+/// Two-port of a converted transformer.
+fn two_port_of(p: &TransformerPu) -> TwoPort {
+    let (yff, yft, ytf, ytt) = two_port(p.z, p.y_from, p.y_to, p.ratio, p.shift);
+    TwoPort {
+        yff,
+        yft,
+        ytf,
+        ytt,
+        shift: p.shift,
+        ratio: p.ratio,
+    }
+}
+
+/// Every combination of axis positions, the first axis varying slowest.
+fn combinations(counts: &[usize]) -> Vec<Vec<usize>> {
+    let mut out = vec![Vec::new()];
+    for &c in counts {
+        out = out
+            .into_iter()
+            .flat_map(|prefix| {
+                (0..c).map(move |i| {
+                    let mut v = prefix.clone();
+                    v.push(i);
+                    v
+                })
+            })
+            .collect();
+    }
+    out
+}
+
+/// The tap changers with an active control, as tap branches with the two-port at every position. Only regulating
+/// changers get tables (as OpenLoadFlow builds per-position models only for them); the others stay where they are.
+fn regulating_taps(
+    model: &Model,
+    topo: &Topology,
+    net: &mut PuNetwork,
+    branches: &[BranchSource],
+    warnings: &mut Vec<String>,
+) -> Vec<TapSource> {
+    let sb = model.meta.base_mva;
+    let mut sources = Vec::new();
+    let branch_of = |class: Class, row: usize, winding: u8| {
+        branches
+            .iter()
+            .position(|b| b.class == class && b.row as usize == row && b.winding == winding)
+    };
+    // One axis of a tap branch: which changer, its range, its present index and target.
+    struct Axis {
+        ratio: Option<usize>,
+        low: i32,
+        count: usize,
+        index: usize,
+        target: TapTarget,
+        source: TapSource,
+    }
+    let axis = |low: i32, high: i32, position: i32| {
+        let count = usize::try_from(high - low + 1).unwrap_or(0);
+        let index = usize::try_from(position - low).ok().filter(|&i| i < count);
+        (count, index)
+    };
+    for (k, tr) in model.transformers2.iter().enumerate() {
+        let Some(bi) = branch_of(Class::Transformer2, k, 0) else {
+            continue;
+        };
+        let name = model.name_of(Class::Transformer2, k);
+        let mut axes: Vec<Axis> = Vec::new();
+        for (i, tap) in tr.ratio_taps.iter().enumerate() {
+            let Some(c) = tap.control.filter(|c| c.enabled) else {
+                continue;
+            };
+            match (voltage_target(topo, net, &c), axis(tap.low, tap.high, tap.position)) {
+                (Ok((bus, target, deadband)), (count, Some(index))) if count > 1 => axes.push(Axis {
+                    ratio: Some(i),
+                    low: tap.low,
+                    count,
+                    index,
+                    target: TapTarget::Voltage { bus, target, deadband },
+                    source: TapSource {
+                        class: Class::Transformer2,
+                        row: k as u32,
+                        end: tap.end,
+                        phase: false,
+                    },
+                }),
+                (Err(why), _) => warnings.push(format!("The tap changer of {name} {why}; it keeps its position.")),
+                _ => {}
+            }
+        }
+        if let Some(tap) = &tr.phase_tap
+            && let Some(c) = tap.control.filter(|c| c.enabled)
+            && let (count, Some(index)) = axis(tap.low, tap.high, tap.position)
+            && count > 1
+        {
+            axes.push(Axis {
+                ratio: None,
+                low: tap.low,
+                count,
+                index,
+                target: TapTarget::Flow {
+                    target: c.target_mw / sb,
+                    deadband: c.deadband_mw.max(0.0) / sb,
+                },
+                source: TapSource {
+                    class: Class::Transformer2,
+                    row: k as u32,
+                    end: tap.end,
+                    phase: true,
+                },
+            });
+        }
+        if axes.is_empty() {
+            continue;
+        }
+        let counts: Vec<usize> = axes.iter().map(|a| a.count).collect();
+        if counts.iter().product::<usize>() > MAX_TAP_TABLE {
+            warnings.push(format!(
+                "{name} has too many tap combinations to regulate; it keeps its positions."
+            ));
+            continue;
+        }
+        let (vf, vt) = (
+            net.buses[net.branches[bi].f].base_kv,
+            net.buses[net.branches[bi].t].base_kv,
+        );
+        let table = combinations(&counts)
+            .into_iter()
+            .map(|idx| {
+                let mut t = tr.clone();
+                for (a, &i) in axes.iter().zip(&idx) {
+                    let position = a.low + i as i32;
+                    match a.ratio {
+                        Some(r) => t.ratio_taps[r].position = position,
+                        None => {
+                            if let Some(p) = &mut t.phase_tap {
+                                p.position = position;
+                            }
+                        }
+                    }
+                }
+                two_port_of(&transformer2_pu(&t, vf, vt, sb, TransformerOptions::default()))
+            })
+            .collect();
+        push_tap_branch(
+            net,
+            &mut sources,
+            bi,
+            axes.into_iter().map(|a| (a.low, a.count, a.index, a.target, a.source)),
+            table,
+        );
+    }
+    for (k, tr) in model.transformers3.iter().enumerate() {
+        let name = model.name_of(Class::Transformer3, k);
+        for w in 0..3usize {
+            let end = w as u8 + 1;
+            let Some(bi) = branch_of(Class::Transformer3, k, end) else {
+                continue;
+            };
+            let mut axes: Vec<Axis> = Vec::new();
+            for (i, tap) in tr.ratio_taps.iter().enumerate().filter(|(_, t)| t.end == end) {
+                let Some(c) = tap.control.filter(|c| c.enabled) else {
+                    continue;
+                };
+                match (voltage_target(topo, net, &c), axis(tap.low, tap.high, tap.position)) {
+                    (Ok((bus, target, deadband)), (count, Some(index))) if count > 1 => axes.push(Axis {
+                        ratio: Some(i),
+                        low: tap.low,
+                        count,
+                        index,
+                        target: TapTarget::Voltage { bus, target, deadband },
+                        source: TapSource {
+                            class: Class::Transformer3,
+                            row: k as u32,
+                            end,
+                            phase: false,
+                        },
+                    }),
+                    (Err(why), _) => {
+                        warnings.push(format!("The tap changer of {name} {why}; it keeps its position."));
+                    }
+                    _ => {}
+                }
+            }
+            for (i, tap) in tr.phase_taps.iter().enumerate().filter(|(_, t)| t.end == end) {
+                let Some(c) = tap.control.filter(|c| c.enabled) else {
+                    continue;
+                };
+                let (count, Some(index)) = axis(tap.low, tap.high, tap.position) else {
+                    continue;
+                };
+                if count > 1 {
+                    axes.push(Axis {
+                        // A phase changer of a winding is addressed by its index among the phase changers.
+                        ratio: None,
+                        low: tap.low,
+                        count,
+                        index,
+                        target: TapTarget::Flow {
+                            target: c.target_mw / sb,
+                            deadband: c.deadband_mw.max(0.0) / sb,
+                        },
+                        source: TapSource {
+                            class: Class::Transformer3,
+                            row: k as u32,
+                            end: i as u8 + 1,
+                            phase: true,
+                        },
+                    });
+                }
+            }
+            if axes.is_empty() {
+                continue;
+            }
+            let counts: Vec<usize> = axes.iter().map(|a| a.count).collect();
+            if counts.iter().product::<usize>() > MAX_TAP_TABLE {
+                warnings.push(format!(
+                    "{name} has too many tap combinations to regulate; it keeps its positions."
+                ));
+                continue;
+            }
+            let vk = net.buses[net.branches[bi].f].base_kv;
+            let table = combinations(&counts)
+                .into_iter()
+                .map(|idx| {
+                    let mut t = tr.clone();
+                    for (a, &j) in axes.iter().zip(&idx) {
+                        let position = a.low + j as i32;
+                        match a.ratio {
+                            Some(r) => t.ratio_taps[r].position = position,
+                            None => t.phase_taps[usize::from(a.source.end) - 1].position = position,
+                        }
+                    }
+                    let mut p = transformer3_winding_pu(&t, w, vk, sb);
+                    p.y_to = C64::ZERO;
+                    two_port_of(&p)
+                })
+                .collect();
+            push_tap_branch(
+                net,
+                &mut sources,
+                bi,
+                axes.into_iter().map(|a| {
+                    // Report the winding the changer sits on.
+                    let source = TapSource { end, ..a.source };
+                    (a.low, a.count, a.index, a.target, source)
+                }),
+                table,
+            );
+        }
+    }
+    sources
+}
+
+fn push_tap_branch(
+    net: &mut PuNetwork,
+    sources: &mut Vec<TapSource>,
+    branch: usize,
+    axes: impl Iterator<Item = (i32, usize, usize, TapTarget, TapSource)>,
+    table: Vec<TwoPort>,
+) {
+    let axes = axes
+        .map(|(low, count, index, target, source)| {
+            sources.push(source);
+            TapAxis {
+                id: sources.len() - 1,
+                low,
+                count,
+                index,
+                phase: source.phase,
+                target: Some(target),
+            }
+        })
+        .collect();
+    net.taps.push(PuTapBranch { branch, axes, table });
+}
+
+/// The shunts with an active voltage control, with their admittance at every number of sections.
+fn regulating_shunts(
+    model: &Model,
+    topo: &Topology,
+    net: &mut PuNetwork,
+    shunts: &[u32],
+    warnings: &mut Vec<String>,
+) -> Vec<u32> {
+    let sb = model.meta.base_mva;
+    let mut rows = Vec::new();
+    for (ni, &row) in shunts.iter().enumerate() {
+        let s = &model.shunts[row as usize];
+        let Some(c) = s.control.filter(|c| c.enabled) else {
+            continue;
+        };
+        let (bus, target, deadband) = match voltage_target(topo, net, &c) {
+            Ok(x) => x,
+            Err(why) => {
+                warnings.push(format!(
+                    "{} {why}; it keeps its sections.",
+                    model.name_of(Class::Shunt, row as usize)
+                ));
+                continue;
+            }
+        };
+        let kv = net.buses[net.shunts[ni].bus].base_kv;
+        let max = if s.points.is_empty() {
+            s.max_sections
+        } else {
+            s.points.len() as u32
+        };
+        let steps = (0..=max)
+            .map(|k| {
+                let mut x = s.clone();
+                x.sections = k;
+                shunt_admittance(&x).scale(kv * kv / sb)
+            })
+            .collect();
+        let index = (s.sections.min(max)) as usize;
+        net.shunt_controls.push(PuShuntControl {
+            id: rows.len(),
+            shunt: ni,
+            steps,
+            index,
+            bus,
+            target,
+            deadband,
+        });
+        rows.push(row);
+    }
+    rows
 }
 
 #[allow(clippy::too_many_arguments)]

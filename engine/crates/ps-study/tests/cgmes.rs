@@ -146,7 +146,7 @@ fn compare_loadflow(m: &Model, start: &str, golden: &Value, w: &mut Worst) {
     let settings = LoadFlowSettings {
         tolerance: 1e-9,
         max_iter: 50,
-        ..Default::default()
+        ..LoadFlowSettings::plain()
     };
     let warm = (start == "sv").then(|| {
         m.nodes

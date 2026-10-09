@@ -11,11 +11,16 @@
  *   iFrom: number, iTo: number, pLoss: number, qLoss: number, loading: number }} BranchResult
  * @typedef {{ id: string, p: number, q: number, atLimit?: 'min' | 'max' }} UnitResult
  * @typedef {{ buildMs: number, analyseMs: number, factorSolveMs: number, totalMs: number }} EngineTiming
+ * @typedef {{ id: string, cls: 'trafo' | 'trafo3', winding: number, kind: 'ratio' | 'phase', position: number, start: number,
+ *   low: number, high: number }} TapResult
+ * @typedef {{ id: string, sections: number, start: number, max: number }} SectionResult
+ * @typedef {{ control: 'slack' | 'reactiveLimits' | 'phaseShifters' | 'taps' | 'shunts', changes: number }} ControlResult
  * @typedef {{
  *   converged: boolean, iterations: number, mismatch: number, log: Array<{ iteration: number, mismatch: number }>,
  *   message: string, buses: BusResult[], branches: BranchResult[], gens: UnitResult[], grids: UnitResult[],
  *   svcs: UnitResult[], loads: UnitResult[], shunts: UnitResult[], deenergized: string[], warnings: string[],
  *   totals: { generation: number, load: number, losses: number, generationQ: number, loadQ: number },
+ *   taps: TapResult[], sections: SectionResult[], distributed: number, controls: ControlResult[],
  *   state: { vm: Float64Array, va: Float64Array }, busIds: string[], timing: EngineTiming,
  * }} LoadFlowResult
  * @typedef {'3ph' | '2ph' | '1ph'} FaultType

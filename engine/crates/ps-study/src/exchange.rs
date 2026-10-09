@@ -108,7 +108,7 @@ pub fn editor_fidelity(model: &Model, converted: &ps_io::powerstudio_write::Conv
     let settings = LoadFlowSettings {
         tolerance: 1e-8,
         max_iter: 50,
-        ..Default::default()
+        ..LoadFlowSettings::plain()
     };
     // Models that carry a solution start from it; others from a DC load flow.
     let stored = model.nodes.iter().any(|n| n.v0 > 0.0);
@@ -141,7 +141,10 @@ pub fn editor_fidelity(model: &Model, converted: &ps_io::powerstudio_write::Conv
     let editor = crate::loadflow::run(
         &doc.model,
         &crate::LoadFlowRun {
-            settings: LoadFlowSettings { max_iter: 10, ..settings },
+            settings: LoadFlowSettings {
+                max_iter: 10,
+                ..settings
+            },
             ..Default::default()
         },
     );

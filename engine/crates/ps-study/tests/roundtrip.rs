@@ -22,7 +22,7 @@ fn solve(m: &Model) -> Result<Vec<Option<(f64, f64)>>, String> {
     let settings = LoadFlowSettings {
         tolerance: 1e-8,
         max_iter: 50,
-        ..Default::default()
+        ..LoadFlowSettings::plain()
     };
     let (calc, sol, report) = loadflow::solve(
         m,

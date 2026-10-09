@@ -1,7 +1,7 @@
 //! Load flow study and its report.
 
 use ps_lf::{BusKind, Options};
-use ps_model::study::LoadFlowSettings;
+use ps_model::study::{Balance, LoadFlowSettings};
 use ps_model::{Class, Model};
 use ps_net::{BuildOptions, Calc};
 use ps_num::DEG;
@@ -83,6 +83,52 @@ pub struct UnitResult {
     /// `min` or `max` when held at a reactive limit.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub at_limit: Option<&'static str>,
+}
+
+/// A tap changer the load flow regulated.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TapResult {
+    /// Transformer identifier.
+    pub id: String,
+    /// `trafo` or `trafo3`.
+    pub cls: &'static str,
+    /// Winding the tap changer sits on.
+    pub winding: u8,
+    /// `ratio` or `phase`.
+    pub kind: &'static str,
+    /// Position after the load flow.
+    pub position: i32,
+    /// Position before it.
+    pub start: i32,
+    /// Lowest position.
+    pub low: i32,
+    /// Highest position.
+    pub high: i32,
+}
+
+/// A switched shunt the load flow regulated.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SectionResult {
+    /// Shunt identifier.
+    pub id: String,
+    /// Sections in service after the load flow.
+    pub sections: u32,
+    /// Sections before it.
+    pub start: u32,
+    /// Sections installed.
+    pub max: u32,
+}
+
+/// What one control did.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlResult {
+    /// `slack`, `reactiveLimits`, `phaseShifters`, `taps` or `shunts`.
+    pub control: &'static str,
+    /// Times it changed something.
+    pub changes: usize,
 }
 
 /// One Newton iteration.
@@ -167,6 +213,14 @@ pub struct LoadFlowReport {
     pub warnings: Vec<String>,
     /// System totals.
     pub totals: Totals,
+    /// Tap changers the load flow regulated.
+    pub taps: Vec<TapResult>,
+    /// Switched shunts the load flow regulated.
+    pub sections: Vec<SectionResult>,
+    /// Active power the slack distribution moved, MW.
+    pub distributed: f64,
+    /// What each enabled control did.
+    pub controls: Vec<ControlResult>,
     /// Voltages in bus order.
     pub state: State,
     /// Bus identifiers, in bus order.
@@ -191,15 +245,9 @@ pub fn solve(model: &Model, run: &LoadFlowRun) -> (Calc, ps_lf::Solution, LoadFl
     }
     let build_ms = ps_num::clock::now_ms() - t0;
     let sb = model.meta.base_mva;
-    let opt = Options {
-        tolerance: st.tolerance / sb,
-        max_iter: st.max_iter as usize,
-        enforce_q_limits: st.enforce_q_limits,
-        dc_start: st.dc_start,
-        warm_start: run.start.is_some(),
-    };
+    let opt = options(st, sb, run.start.is_some());
     let sol = ps_lf::solve(&calc.net, &opt);
-    let mut report = assemble(model, &calc, &sol);
+    let mut report = assemble(model, &calc, &sol, st);
     report.timing = Timing {
         build_ms,
         analyse_ms: sol.timing.analyse_ms,
@@ -209,13 +257,40 @@ pub fn solve(model: &Model, run: &LoadFlowRun) -> (Calc, ps_lf::Solution, LoadFl
     (calc, sol, report)
 }
 
+/// The solver options for study case settings on base power `sb`.
+pub fn options(st: &LoadFlowSettings, sb: f64, warm_start: bool) -> Options {
+    Options {
+        tolerance: st.tolerance / sb,
+        max_iter: st.max_iter as usize,
+        enforce_q_limits: st.enforce_q_limits,
+        dc_start: st.dc_start,
+        warm_start,
+        balance: match st.balance {
+            Balance::Reference => ps_lf::Balance::Reference,
+            Balance::MaxP => ps_lf::Balance::MaxP,
+            Balance::TargetP => ps_lf::Balance::TargetP,
+            Balance::Factor => ps_lf::Balance::Factor,
+            Balance::Margin => ps_lf::Balance::Margin,
+            Balance::Load => ps_lf::Balance::Load,
+        },
+        slack_tolerance: st.slack_tolerance / sb,
+        remote_voltage: st.remote_voltage,
+        zip_loads: st.voltage_dependent_loads,
+        tap_control: st.tap_control,
+        shunt_control: st.shunt_control,
+        phase_control: st.phase_control,
+        max_outer: 30,
+    }
+}
+
 /// Runs a load flow.
 pub fn run(model: &Model, run: &LoadFlowRun) -> LoadFlowReport {
     solve(model, run).2
 }
 
-fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution) -> LoadFlowReport {
-    let net = &calc.net;
+fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSettings) -> LoadFlowReport {
+    // The solved network carries the final taps and sections.
+    let net = &sol.net;
     let sb = net.base_mva;
     let n = net.buses.len();
     let y = ps_lf::Ybus::build(net, &[]);
@@ -351,10 +426,11 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution) -> LoadFlowReport
     let loads: Vec<UnitResult> = net
         .loads
         .iter()
-        .map(|l| UnitResult {
+        .zip(&sol.loads)
+        .map(|(l, &(p, q))| UnitResult {
             id: model.loads[calc.loads[l.id] as usize].id.clone(),
-            p: l.p * sb,
-            q: l.q * sb,
+            p: p * sb,
+            q: q * sb,
             at_limit: None,
         })
         .collect();
@@ -373,19 +449,74 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution) -> LoadFlowReport
         })
         .collect();
     let mut warnings = calc.warnings.clone();
+    if !st.remote_voltage && net.machines.iter().any(|g| g.reg_bus != g.bus) {
+        warnings.push(
+            "Remote voltage control is off: machines that regulate another busbar hold their own terminals.".into(),
+        );
+    }
+    if !st.voltage_dependent_loads && net.loads.iter().any(|l| l.p_zip[2] != 1.0 || l.q_zip[2] != 1.0) {
+        warnings.push("Voltage-dependent loads are off: every load is solved as constant power.".into());
+    }
+    warnings.extend(sol.notes.iter().cloned());
     for &(m, lim) in &sol.held {
-        let pm = &net.machines[m];
-        let (word, q) = if lim > 0 {
-            ("upper", pm.q_max * sb)
-        } else {
-            ("lower", pm.q_min * sb)
-        };
+        let q = sol.machines[m].q * sb;
+        let word = if lim > 0 { "upper" } else { "lower" };
         let (class, row) = unit_name(m);
         warnings.push(format!(
             "{} reached its {word} reactive power limit and now holds {q:.2} Mvar.",
             model.name_of(class, row)
         ));
     }
+    let taps = sol
+        .net
+        .taps
+        .iter()
+        .zip(&calc.net.taps)
+        .flat_map(|(after, before)| after.axes.iter().zip(&before.axes))
+        .map(|(a, b)| {
+            let src = calc.tap_sources[a.id];
+            let (id, cls) = match src.class {
+                Class::Transformer2 => (model.transformers2[src.row as usize].id.clone(), "trafo"),
+                _ => (model.transformers3[src.row as usize].id.clone(), "trafo3"),
+            };
+            TapResult {
+                id,
+                cls,
+                winding: src.end,
+                kind: if src.phase { "phase" } else { "ratio" },
+                position: a.low + a.index as i32,
+                start: b.low + b.index as i32,
+                low: a.low,
+                high: a.low + a.count as i32 - 1,
+            }
+        })
+        .collect();
+    let sections = sol
+        .net
+        .shunt_controls
+        .iter()
+        .zip(&calc.net.shunt_controls)
+        .map(|(a, b)| SectionResult {
+            id: model.shunts[calc.shunt_controls[a.id] as usize].id.clone(),
+            sections: a.index as u32,
+            start: b.index as u32,
+            max: (a.steps.len() - 1) as u32,
+        })
+        .collect();
+    let controls = sol
+        .controls
+        .iter()
+        .map(|c| ControlResult {
+            control: match c.control {
+                ps_lf::Control::Slack => "slack",
+                ps_lf::Control::ReactiveLimits => "reactiveLimits",
+                ps_lf::Control::PhaseShifters => "phaseShifters",
+                ps_lf::Control::Taps => "taps",
+                ps_lf::Control::Shunts => "shunts",
+            },
+            changes: c.changes,
+        })
+        .collect();
     let totals = Totals {
         generation: gens.iter().chain(&grids).map(|u| u.p).sum(),
         load: loads.iter().map(|u| u.p).sum(),
@@ -421,6 +552,10 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution) -> LoadFlowReport
             .collect(),
         warnings,
         totals,
+        taps,
+        sections,
+        distributed: sol.distributed.iter().sum::<f64>() * sb,
+        controls,
         state: State {
             vm: sol.vm.clone(),
             va: sol.va.iter().map(|a| a * DEG).collect(),

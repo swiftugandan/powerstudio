@@ -37,7 +37,7 @@ fn compare(name: &str, file: &str, start: &str, w: &mut Worst) {
     let settings = LoadFlowSettings {
         tolerance: 1e-8,
         max_iter: 50,
-        ..Default::default()
+        ..LoadFlowSettings::plain()
     };
     let (calc, sol, report) = loadflow::solve(
         &model,

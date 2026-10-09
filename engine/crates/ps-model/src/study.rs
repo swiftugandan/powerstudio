@@ -2,13 +2,32 @@
 
 use serde::{Deserialize, Serialize};
 
+/// How an island's active power imbalance is shared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Balance {
+    /// The reference machine (or external grid) takes all of it.
+    #[default]
+    Reference,
+    /// Machines in proportion to their maximum active power.
+    MaxP,
+    /// Machines in proportion to their present active power.
+    TargetP,
+    /// Machines in proportion to their participation factors.
+    Factor,
+    /// Machines in proportion to their remaining margin.
+    Margin,
+    /// Loads in proportion to their active power.
+    Load,
+}
+
 /// Load flow settings.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LoadFlowSettings {
     /// Largest acceptable power mismatch, MVA.
     pub tolerance: f64,
-    /// Newton iterations per reactive-limit round.
+    /// Newton iterations per solve.
     pub max_iter: u32,
     /// Hold machines at their reactive power limits.
     pub enforce_q_limits: bool,
@@ -16,6 +35,20 @@ pub struct LoadFlowSettings {
     pub dc_start: bool,
     /// Load scaling, % of the loads' values.
     pub load_scale: f64,
+    /// How each island's imbalance is shared.
+    pub balance: Balance,
+    /// Largest imbalance left on the reference after distribution, MW.
+    pub slack_tolerance: f64,
+    /// Machines regulate the busbar their data names (otherwise their own terminals).
+    pub remote_voltage: bool,
+    /// Loads follow their voltage characteristics (otherwise every load is constant power).
+    pub voltage_dependent_loads: bool,
+    /// Tap changers regulate voltage.
+    pub tap_control: bool,
+    /// Switched shunts regulate voltage.
+    pub shunt_control: bool,
+    /// Phase shifters regulate active power flow.
+    pub phase_control: bool,
 }
 
 impl Default for LoadFlowSettings {
@@ -26,6 +59,25 @@ impl Default for LoadFlowSettings {
             enforce_q_limits: false,
             dc_start: true,
             load_scale: 100.0,
+            balance: Balance::Reference,
+            slack_tolerance: 0.001,
+            remote_voltage: true,
+            voltage_dependent_loads: true,
+            tap_control: false,
+            shunt_control: false,
+            phase_control: false,
+        }
+    }
+}
+
+impl LoadFlowSettings {
+    /// Every control off: machines hold their own terminals, loads are constant power, nothing moves. The reference
+    /// comparisons with control-free goldens use it.
+    pub fn plain() -> Self {
+        Self {
+            remote_voltage: false,
+            voltage_dependent_loads: false,
+            ..Self::default()
         }
     }
 }

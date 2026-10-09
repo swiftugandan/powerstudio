@@ -79,7 +79,7 @@ fn imported(
         });
         let settings = ps_model::study::LoadFlowSettings {
             tolerance: 1e-6,
-            ..Default::default()
+            ..ps_model::study::LoadFlowSettings::plain()
         };
         let r = ps_study::loadflow::run(
             m,
@@ -203,7 +203,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 tolerance: tolerance.unwrap_or(1e-6),
                 enforce_q_limits: flag(args, "--qlim"),
                 dc_start: !flag(args, "--flat"),
-                ..Default::default()
+                ..ps_model::study::LoadFlowSettings::plain()
             };
             let warm = flag(args, "--warm");
             let start: Option<Vec<Option<(f64, f64)>>> = warm.then(|| {
@@ -252,7 +252,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 let settings = ps_model::study::LoadFlowSettings {
                     tolerance: 1e-8,
                     max_iter: 50,
-                    ..Default::default()
+                    ..ps_model::study::LoadFlowSettings::plain()
                 };
                 let start: Option<Vec<Option<(f64, f64)>>> = flag(args, "--warm").then(|| {
                     imp.model
@@ -328,7 +328,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 let settings = ps_model::study::LoadFlowSettings {
                     tolerance: 1e-8,
                     max_iter: 50,
-                    ..Default::default()
+                    ..ps_model::study::LoadFlowSettings::plain()
                 };
                 let (calc, sol, report) = ps_study::loadflow::solve(
                     &model,
