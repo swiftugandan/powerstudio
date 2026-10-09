@@ -6,7 +6,9 @@ Every parameter that departs from that is set explicitly, and each golden record
 * remote voltage control replaced by local control at the same per-unit set point, as PowerStudio holds it today;
 * every connected component solved;
 * generators with a zero MW target still started, every voltage target accepted;
-* a tight convergence threshold.
+* a tight convergence threshold;
+* the reactive power of a bus split among its machines at the same fraction of each one's reactive range
+  (K_EQUAL_PROPORTION, MATPOWER's rule; OpenLoadFlow's default gives each the same Mvar).
 """
 
 import math
@@ -24,6 +26,7 @@ PROVIDER = {
     "newtonRaphsonConvEpsPerEq": "1.0E-10",
     "maxNewtonRaphsonIterations": "50",
     "useLoadModel": "false",
+    "reactivePowerDispatchMode": "K_EQUAL_PROPORTION",
 }
 
 

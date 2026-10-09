@@ -484,8 +484,9 @@ fn newton(
     )
 }
 
-/// Machine and grid outputs. References and grids take their bus's balance; PV machines share the remaining reactive
-/// balance in proportion to their reactive range (MATPOWER's rule).
+/// Machine and grid outputs. References and grids take their bus's active power balance. The reactive balance of a
+/// bus goes to its external grids if it has any; otherwise its reference and PV machines share it by MATPOWER's rule
+/// (`split_reactive`).
 fn dispatch(
     net: &PuNetwork,
     y: &Ybus,
@@ -549,9 +550,9 @@ fn dispatch(
         })
         .collect();
     for b in 0..n {
-        let slack = refs[b].len() + grid_at[b].len();
-        if slack > 0 {
-            let share = 1.0 / slack as f64;
+        if !grid_at[b].is_empty() {
+            // External grids are unlimited sources: with any reference machines there, they share the bus's balance.
+            let share = 1.0 / (refs[b].len() + grid_at[b].len()) as f64;
             for &m in &refs[b] {
                 machines[m].p = p_bal[b] * share;
                 machines[m].q = q_bal[b] * share;
@@ -560,23 +561,45 @@ fn dispatch(
                 grids[k].p = p_bal[b] * share;
                 grids[k].q = q_bal[b] * share;
             }
-        } else if !pv_at[b].is_empty() {
-            let ranges: Vec<f64> = pv_at[b]
-                .iter()
-                .map(|&m| (net.machines[m].q_max - net.machines[m].q_min).max(0.0))
-                .collect();
-            let total: f64 = ranges.iter().sum();
-            for (j, &m) in pv_at[b].iter().enumerate() {
-                let share = if total > 0.0 {
-                    ranges[j] / total
-                } else {
-                    1.0 / pv_at[b].len() as f64
-                };
-                machines[m].q = q_bal[b] * share;
-            }
+            continue;
+        }
+        for &m in &refs[b] {
+            machines[m].p = p_bal[b] / refs[b].len() as f64;
+        }
+        let holders: Vec<usize> = refs[b].iter().chain(&pv_at[b]).copied().collect();
+        let limits: Vec<(f64, f64)> = holders
+            .iter()
+            .map(|&m| (net.machines[m].q_min, net.machines[m].q_max))
+            .collect();
+        for (&m, q) in holders.iter().zip(split_reactive(q_bal[b], &limits)) {
+            machines[m].q = q;
         }
     }
     (machines, grids)
+}
+
+/// Splits a bus's reactive output `q` among machines with limits `(q_min, q_max)` as MATPOWER does (`pfsoln.m`): each
+/// gets q_min + k·(q_max − q_min) with one k for the bus, so all sit at the same fraction of their range. Infinite
+/// limits are replaced by a finite proxy M (the bus's equal shares plus its finite limits, in magnitude); a bus whose
+/// machines have no range at all shares the excess over the minimum equally.
+fn split_reactive(q: f64, limits: &[(f64, f64)]) -> Vec<f64> {
+    let n = limits.len() as f64;
+    let equal = q / n;
+    let proxy: f64 = limits
+        .iter()
+        .map(|&(lo, hi)| {
+            let finite = |x: f64| if x.is_finite() { x.abs() } else { 0.0 };
+            equal.abs() + finite(lo) + finite(hi)
+        })
+        .sum();
+    let bounded = |x: f64| if x.is_infinite() { proxy.copysign(x) } else { x };
+    let limits: Vec<(f64, f64)> = limits.iter().map(|&(lo, hi)| (bounded(lo), bounded(hi))).collect();
+    let (lo_sum, hi_sum) = limits.iter().fold((0.0, 0.0), |(a, b), &(lo, hi)| (a + lo, b + hi));
+    if (hi_sum - lo_sum).abs() < 10.0 * f64::EPSILON {
+        return limits.iter().map(|&(lo, _)| lo + (q - lo_sum) / n).collect();
+    }
+    let k = (q - lo_sum) / (hi_sum - lo_sum);
+    limits.iter().map(|&(lo, hi)| lo + k * (hi - lo)).collect()
 }
 
 /// Starting angles of a warm start, shifted island by island so each reference bus starts at its set angle.

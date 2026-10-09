@@ -766,7 +766,7 @@
    },
    "B32-G1": {
     "p": -650.0,
-    "q": -1.5294334414425845,
+    "q": -1.5294334414425848,
     "v": [
      0.9831,
      3.3812630889930975
@@ -774,7 +774,7 @@
    },
    "B33-G1": {
     "p": -632.0,
-    "q": -69.6652329979926,
+    "q": -69.66523299799263,
     "v": [
      0.9972,
      4.4583263405472975
@@ -782,7 +782,7 @@
    },
    "B34-G1": {
     "p": -508.0,
-    "q": -148.78991201214887,
+    "q": -148.78991201214885,
     "v": [
      1.0123,
      3.0458639603944513
@@ -806,7 +806,7 @@
    },
    "B37-G1": {
     "p": -540.0,
-    "q": 35.34859170067739,
+    "q": 35.34859170067737,
     "v": [
      1.0278,
      3.6353237240737295
@@ -814,7 +814,7 @@
    },
    "B38-G1": {
     "p": -830.0000000000001,
-    "q": 0.473567160424345,
+    "q": 0.47356716042434854,
     "v": [
      1.0265,
      8.889228003358355
@@ -1749,7 +1749,7 @@
  "slack": [
   "B31"
  ],
- "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': 'VL6-31_1'})",
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'reactivePowerDispatchMode': 'K_EQUAL_PROPORTION', 'slackBusesIds': 'VL6-31_1'})",
  "status": [
   "CONVERGED"
  ]

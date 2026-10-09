@@ -5707,7 +5707,7 @@
   "generators": {
    "B10-G1": {
     "p": 5.0,
-    "q": -20.500566871866145,
+    "q": -20.50056687186614,
     "v": [
      1.0205,
      2.223569593044722
@@ -5731,7 +5731,7 @@
    },
    "B124-G1": {
     "p": -240.0,
-    "q": -161.82697707125584,
+    "q": -161.8269770712558,
     "v": [
      1.0233,
      14.104472216825226
@@ -5803,7 +5803,7 @@
    },
    "B153-G1": {
     "p": -216.0,
-    "q": 22.262323860470758,
+    "q": 22.26232386047076,
     "v": [
      1.0435,
      7.1814275411295085
@@ -5835,7 +5835,7 @@
    },
    "B176-G1": {
     "p": -227.99999999999997,
-    "q": -39.960719127811025,
+    "q": -39.96071912781103,
     "v": [
      1.0522,
      0.548525972994482
@@ -5867,7 +5867,7 @@
    },
    "B187-G1": {
     "p": -1200.0,
-    "q": -350.68636369022727,
+    "q": -350.6863636902272,
     "v": [
      1.065,
      -4.4443921832102875
@@ -5899,7 +5899,7 @@
    },
    "B20-G1": {
     "p": 10.0,
-    "q": -21.623200996260074,
+    "q": -21.62320099626007,
     "v": [
      1.001,
      -1.6018040842910048
@@ -5915,7 +5915,7 @@
    },
    "B220-G1": {
     "p": -100.0,
-    "q": -36.9661776357549,
+    "q": -36.966177635754896,
     "v": [
      1.008,
      -21.81693960707392
@@ -5923,7 +5923,7 @@
    },
    "B221-G1": {
     "p": -450.0,
-    "q": -168.72720808812758,
+    "q": -168.7272080881276,
     "v": [
      1.0,
      -22.580969178889738
@@ -5931,7 +5931,7 @@
    },
    "B222-G1": {
     "p": -250.0,
-    "q": -143.98034315344145,
+    "q": -143.98034315344148,
     "v": [
      1.05,
      -23.256669420024966
@@ -5939,7 +5939,7 @@
    },
    "B227-G1": {
     "p": -303.0,
-    "q": -254.3163711298915,
+    "q": -254.31637112989148,
     "v": [
      1.0,
      -27.310479606960783
@@ -5963,7 +5963,7 @@
    },
    "B236-G1": {
     "p": -600.0,
-    "q": -300.8778240115288,
+    "q": -300.87782401152873,
     "v": [
      1.0165,
      -15.488873198900691
@@ -5987,7 +5987,7 @@
    },
    "B241-G1": {
     "p": -574.784,
-    "q": 32.851741386840985,
+    "q": 32.85174138684099,
     "v": [
      1.05,
      -16.59929848218408
@@ -6043,7 +6043,7 @@
    },
    "B7011-G1": {
     "p": -234.0,
-    "q": -51.89075039771386,
+    "q": -51.89075039771387,
     "v": [
      1.0145,
      5.843895654969908
@@ -6067,7 +6067,7 @@
    },
    "B7023-G1": {
     "p": -185.0,
-    "q": -6.393139330515034,
+    "q": -6.39313933051503,
     "v": [
      1.0507,
      7.008590348015289
@@ -6083,7 +6083,7 @@
    },
    "B7039-G1": {
     "p": -500.0,
-    "q": -156.11001188734022,
+    "q": -156.11001188734025,
     "v": [
      1.05,
      2.291535951473689
@@ -6115,7 +6115,7 @@
    },
    "B7057-G1": {
     "p": -165.0,
-    "q": -89.22780614446627,
+    "q": -89.22780614446629,
     "v": [
      1.0212,
      -4.641212951686107
@@ -6163,7 +6163,7 @@
    },
    "B7166-G1": {
     "p": -553.0,
-    "q": -139.32319298979488,
+    "q": -139.3231929897949,
     "v": [
      1.0145,
      30.803399189335504
@@ -6187,7 +6187,7 @@
    },
    "B84-G1": {
     "p": -375.0,
-    "q": -133.0649498540013,
+    "q": -133.06494985400133,
     "v": [
      1.025,
      -17.276930666445736
@@ -6211,7 +6211,7 @@
    },
    "B9053-G1": {
     "p": 26.479999999999997,
-    "q": -11.163613772008766,
+    "q": -11.163613772008768,
     "v": [
      1.0,
      -17.53703388523445
@@ -6243,7 +6243,7 @@
    },
    "B92-G1": {
     "p": -290.0,
-    "q": -31.352466141525824,
+    "q": -31.352466141525838,
     "v": [
      1.052,
      -5.9265848948208
@@ -13805,7 +13805,7 @@
  "slack": [
   "B7049"
  ],
- "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': 'VL7049_0'})",
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'reactivePowerDispatchMode': 'K_EQUAL_PROPORTION', 'slackBusesIds': 'VL7049_0'})",
  "status": [
   "CONVERGED"
  ]

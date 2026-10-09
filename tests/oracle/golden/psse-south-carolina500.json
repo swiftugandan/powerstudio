@@ -7416,7 +7416,7 @@
    },
    "B144-G1": {
     "p": -602.55,
-    "q": -98.51319950469197,
+    "q": -98.51319950469195,
     "v": [
      1.04,
      18.75067184146563
@@ -7480,7 +7480,7 @@
    },
    "B197-G1": {
     "p": -293.6,
-    "q": -43.925750267065276,
+    "q": -43.92575026706527,
     "v": [
      1.04,
      -2.9364104616011244
@@ -7488,7 +7488,7 @@
    },
    "B198-G1": {
     "p": -207.29999999999998,
-    "q": -53.44170550420865,
+    "q": -53.441705504208656,
     "v": [
      1.04,
      -5.389705822451728
@@ -7504,7 +7504,7 @@
    },
    "B223-G1": {
     "p": -18.0,
-    "q": -8.955127319092128,
+    "q": -8.95512731909213,
     "v": [
      1.04,
      -3.576492891884285
@@ -7512,7 +7512,7 @@
    },
    "B224-G1": {
     "p": -511.2,
-    "q": -27.74693435306529,
+    "q": -27.746934353065285,
     "v": [
      1.04,
      -0.6047548074198624
@@ -7520,7 +7520,7 @@
    },
    "B225-G1": {
     "p": -514.8,
-    "q": -45.747847423368285,
+    "q": -45.74784742336829,
     "v": [
      1.04,
      -2.170484594869427
@@ -7528,7 +7528,7 @@
    },
    "B231-G1": {
     "p": -2.9,
-    "q": -1.2726024512236407,
+    "q": -1.2726024512236405,
     "v": [
      1.04,
      -12.515210786499978
@@ -7602,7 +7602,7 @@
    },
    "B302-G1": {
     "p": -2.9,
-    "q": -20.560605285701072,
+    "q": -20.560605285701076,
     "v": [
      1.04,
      -4.734299334350964
@@ -7626,7 +7626,7 @@
    },
    "B319-G1": {
     "p": -42.3,
-    "q": -16.42014315170036,
+    "q": -16.420143151700355,
     "v": [
      1.04,
      -2.0344848763919963
@@ -7634,7 +7634,7 @@
    },
    "B350-G1": {
     "p": -15.0,
-    "q": -12.065733665191757,
+    "q": -12.06573366519176,
     "v": [
      1.04,
      -12.795178210941259
@@ -7642,7 +7642,7 @@
    },
    "B351-G1": {
     "p": -6.2,
-    "q": -11.055769250028007,
+    "q": -11.055769250028009,
     "v": [
      1.04,
      -13.111993492335381
@@ -7731,7 +7731,7 @@
    },
    "B410-G1": {
     "p": -79.431,
-    "q": -11.610900205528454,
+    "q": -11.61090020552845,
     "v": [
      1.04,
      -9.255605421076368
@@ -7755,7 +7755,7 @@
    },
    "B413-G1": {
     "p": -61.597,
-    "q": -11.181953543848152,
+    "q": -11.18195354384815,
     "v": [
      1.04,
      -9.708375741731576
@@ -7800,7 +7800,7 @@
    },
    "B434-G1": {
     "p": -4.3,
-    "q": -30.124649213663417,
+    "q": -30.124649213663425,
     "v": [
      1.04,
      -7.485321788379574
@@ -7918,7 +7918,7 @@
    },
    "B484-G1": {
     "p": -28.000000000000004,
-    "q": -11.486379456833989,
+    "q": -11.486379456833987,
     "v": [
      1.04,
      -6.651488779735557
@@ -18132,7 +18132,7 @@
  "slack": [
   "B17"
  ],
- "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': 'VL16-17-18_1'})",
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'reactivePowerDispatchMode': 'K_EQUAL_PROPORTION', 'slackBusesIds': 'VL16-17-18_1'})",
  "status": [
   "CONVERGED"
  ]

@@ -42,11 +42,11 @@ impl Worst {
         if want.is_nan() {
             return;
         }
-        let d = (got - want).abs();
-        if !d.is_finite() {
-            self.rows.push((what.into(), f64::INFINITY, id.into(), got));
-            return;
-        }
+        // A missing or non-finite result counts as an infinite difference.
+        let d = match (got - want).abs() {
+            d if d.is_finite() => d,
+            _ => f64::INFINITY,
+        };
         match self.rows.iter_mut().find(|r| r.0 == what) {
             Some(r) if d > r.1 => *r = (what.into(), d, format!("{id} ({got} vs {want})"), got),
             Some(_) => {}

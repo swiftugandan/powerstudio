@@ -31,6 +31,12 @@ The CGMES test configurations are the ENTSO-E CGMES Conformity Assessment Scheme
 Neither package is redistributed with this MIT-licensed repository; the tests read the files from the downloaded
 archives. The goldens in `tests/oracle/golden/cgmes-*.json` hold results computed from them.
 
+The large MATPOWER cases are the ACTIVSg synthetic grids (`case_ACTIVSg2000`, `10k`, `25k`, `70k`, from the Texas
+A&M Electric Grid Test Case Repository) and the PEGASE cases (`case2869pegase`, `case9241pegase`, `case13659pegase`)
+as distributed in MATPOWER's `data` folder (https://github.com/MATPOWER/matpower, commit
+`2e0ef79a6c4526858ee923491d92781ad4507fb7`), listed with their SHA-256 values in `tests/oracle/matpower-cases.json`.
+They are not copied into this repository; `tests/oracle/golden/matpower-*.json` hold results computed from them.
+
 The PSS/E RAW cases are test resources of powsybl-core (https://github.com/powsybl/powsybl-core, MPL 2.0) at commit
 `0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d`, listed with their SHA-256 values in `tests/oracle/psse-cases.json` and
 downloaded by the same script. They are version 33 and 35 files written by PSS/E and by PowSyBl: IEEE 14, 24, 39, 57,
@@ -85,6 +91,17 @@ units, switched shunt levels and node-breaker connectivity. Where PowerStudio di
 (`engine/crates/ps-study/tests/psse.rs`) bridges it and says why: a branch between buses of different base voltage
 is a transformer at the ratio of the bases in PowerStudio and a line with compensating end shunts in PowSyBl; and
 the on and off state of tap controls follows the sign of COD in PowerStudio, which PowSyBl does not read.
+
+The large MATPOWER goldens (`tests/oracle/golden/matpower-*.json`) were written by `scripts/oracle/matpower.py`,
+which converts each `.m` file to the MAT-file layout PowSyBl's MATPOWER importer reads and checks that the case avoids
+the three places where that importer departs from MATPOWER's definitions (`MatpowerImporter`: a generator with a
+voltage set point regulates even on a PQ bus; a transformer's line charging becomes one magnetising admittance; every
+generator on a bus keeps its own set point). None of the seven cases needs a correction.
+
+OpenLoadFlow's `reactivePowerDispatchMode` is set to `K_EQUAL_PROPORTION` in every oracle: each machine on a bus at
+the same fraction of its reactive range, the rule of MATPOWER's `pfsoln.m` that PowerStudio follows. OpenLoadFlow
+falls back to an equal split when a machine's limits are implausible (`AbstractLfBus.dispatchQ`; beyond ±1,000 Mvar
+or a range outside 1 to 10,000 Mvar, `PlausibleValues`), so the comparison checks those buses by their total.
 
 The oracle removes one pandapower modelling choice so both programs describe the same network: pandapower adds a
 placeholder zero-sequence admittance of 1/(1000 + 1000j) p.u. at generator buses; PowerStudio models generator

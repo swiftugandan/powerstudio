@@ -3695,7 +3695,7 @@
    },
    "0452ea80-c766-11e1-8775-005056c00008": {
     "p": -36.0,
-    "q": -21.40757259952245,
+    "q": -21.407572599522446,
     "v": [
      0.9800000000000001,
      -9.995235188916022
@@ -3727,7 +3727,7 @@
    },
    "045ab2b0-c766-11e1-8775-005056c00008": {
     "p": -220.00000000000003,
-    "q": -38.74444574822514,
+    "q": -38.74444574822513,
     "v": [
      1.05,
      -1.9030136667553395
@@ -3735,7 +3735,7 @@
    },
    "04633e31-c766-11e1-8775-005056c00008": {
     "p": -19.0,
-    "q": 2.326981579163731,
+    "q": 2.3269815791637325,
     "v": [
      1.0075757575757576,
      -11.405250852287232
@@ -3751,7 +3751,7 @@
    },
    "046c3ee7-c766-11e1-8775-005056c00008": {
     "p": -48.0,
-    "q": -5.908024602730006,
+    "q": -5.908024602730003,
     "v": [
      0.9550000000000001,
      -14.593671926769536
@@ -3759,7 +3759,7 @@
    },
    "0472a789-c766-11e1-8775-005056c00008": {
     "p": -160.0,
-    "q": 39.39440641942248,
+    "q": 39.394406419422495,
     "v": [
      0.995,
      -5.8466347721071905
@@ -3767,7 +3767,7 @@
    },
    "047f0391-c766-11e1-8775-005056c00008": {
     "p": -392.0,
-    "q": 1.6130941210143495,
+    "q": 1.613094121014358,
     "v": [
      1.05,
      -2.3985804022063877
@@ -3775,7 +3775,7 @@
    },
    "047fc6e6-c766-11e1-8775-005056c00008": {
     "p": -4.0,
-    "q": -15.389601053531774,
+    "q": -15.38960105353177,
     "v": [
      1.015,
      2.140327701695454
@@ -3783,7 +3783,7 @@
    },
    "0483224a-c766-11e1-8775-005056c00008": {
     "p": -314.0,
-    "q": -12.368858619891016,
+    "q": -12.36885861989101,
     "v": [
      1.0150000000000001,
      -0.11422278647137421
@@ -3799,7 +3799,7 @@
    },
    "04856c34-c766-11e1-8775-005056c00008": {
     "p": -7.000000000000001,
-    "q": -28.17559168236633,
+    "q": -28.175591682366324,
     "v": [
      0.9670000000000001,
      -17.02552559314239
@@ -3815,7 +3815,7 @@
    },
    "0489b1fa-c766-11e1-8775-005056c00008": {
     "p": -607.0,
-    "q": -29.072198046580976,
+    "q": -29.072198046580986,
     "v": [
      1.005,
      10.214971582619787
@@ -3823,7 +3823,7 @@
    },
    "048aea70-c766-11e1-8775-005056c00008": {
     "p": -513.4374,
-    "q": 61.68310279324374,
+    "q": 61.68310279324372,
     "v": [
      1.0350000000000001,
      0.0
@@ -7533,7 +7533,7 @@
  "slack": [
   "048aea70-c766-11e1-8775-005056c00008"
  ],
- "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': '0471bd23-c766-11e1-8775-005056c00008_0'})",
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'reactivePowerDispatchMode': 'K_EQUAL_PROPORTION', 'slackBusesIds': '0471bd23-c766-11e1-8775-005056c00008_0'})",
  "status": [
   "CONVERGED"
  ]

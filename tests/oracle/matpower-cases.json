@@ -1,0 +1,79 @@
+{
+ "about": "Large MATPOWER cases compared with PowSyBl: the Texas A&M ACTIVSg synthetic grids and the PEGASE European cases, from MATPOWER's data folder at a pinned commit (MATPOWER is BSD-licensed; docs/research/sources.md describes the cases). scripts/fetch-reference.mjs downloads them into .cache/reference; they are not copied into the repository. 'start' is the load flow's starting point: 'dc' (DC load flow) or 'case' (the voltages stored in the case). 'flows': false leaves branch flows out of a golden to keep it small; its voltages and machine outputs are compared.",
+ "archives": {
+  "case_ACTIVSg2000": {
+   "file": "case_ACTIVSg2000.m",
+   "url": "https://raw.githubusercontent.com/MATPOWER/matpower/2e0ef79a6c4526858ee923491d92781ad4507fb7/data/case_ACTIVSg2000.m",
+   "sha256": "8d00618de8fd10bf35a599f59d2deebfecd0d86e28fcff73219ad7c4ebab860b"
+  },
+  "case_ACTIVSg10k": {
+   "file": "case_ACTIVSg10k.m",
+   "url": "https://raw.githubusercontent.com/MATPOWER/matpower/2e0ef79a6c4526858ee923491d92781ad4507fb7/data/case_ACTIVSg10k.m",
+   "sha256": "ead10b25fecc4dcc02f88bacdfb3526fe8b8985b81f7e539c95abddb32575590"
+  },
+  "case_ACTIVSg25k": {
+   "file": "case_ACTIVSg25k.m",
+   "url": "https://raw.githubusercontent.com/MATPOWER/matpower/2e0ef79a6c4526858ee923491d92781ad4507fb7/data/case_ACTIVSg25k.m",
+   "sha256": "0b7c131ff6434491f5c0f76dedf67bff155d9cbb91ce67aef5ce275fd8bf3004"
+  },
+  "case_ACTIVSg70k": {
+   "file": "case_ACTIVSg70k.m",
+   "url": "https://raw.githubusercontent.com/MATPOWER/matpower/2e0ef79a6c4526858ee923491d92781ad4507fb7/data/case_ACTIVSg70k.m",
+   "sha256": "5df8c785c75f174555d307e05ae279c51f888ebbd85c469dab3265baf3e96293"
+  },
+  "case2869pegase": {
+   "file": "case2869pegase.m",
+   "url": "https://raw.githubusercontent.com/MATPOWER/matpower/2e0ef79a6c4526858ee923491d92781ad4507fb7/data/case2869pegase.m",
+   "sha256": "d205ccbc1c0386715393661d7bd6f1f879ebcdc5d6f0e3665fb0aaf2c4db0b64"
+  },
+  "case9241pegase": {
+   "file": "case9241pegase.m",
+   "url": "https://raw.githubusercontent.com/MATPOWER/matpower/2e0ef79a6c4526858ee923491d92781ad4507fb7/data/case9241pegase.m",
+   "sha256": "593a58ecddb5af509ff94410a6630f81021b48fa31da0694ff516acfa9ea5f3b"
+  },
+  "case13659pegase": {
+   "file": "case13659pegase.m",
+   "url": "https://raw.githubusercontent.com/MATPOWER/matpower/2e0ef79a6c4526858ee923491d92781ad4507fb7/data/case13659pegase.m",
+   "sha256": "6b4f7fec7a509db8291b0e3b2acefa0b164fdfc595085af9eda9634be65271dd"
+  }
+ },
+ "cases": [
+  {
+   "name": "activsg2000",
+   "archive": "case_ACTIVSg2000",
+   "start": "dc"
+  },
+  {
+   "name": "activsg10k",
+   "archive": "case_ACTIVSg10k",
+   "start": "dc"
+  },
+  {
+   "name": "activsg25k",
+   "archive": "case_ACTIVSg25k",
+   "start": "dc",
+   "flows": false
+  },
+  {
+   "name": "activsg70k",
+   "archive": "case_ACTIVSg70k",
+   "start": "case",
+   "flows": false
+  },
+  {
+   "name": "pegase2869",
+   "archive": "case2869pegase",
+   "start": "dc"
+  },
+  {
+   "name": "pegase9241",
+   "archive": "case9241pegase",
+   "start": "dc"
+  },
+  {
+   "name": "pegase13659",
+   "archive": "case13659pegase",
+   "start": "dc"
+  }
+ ]
+}

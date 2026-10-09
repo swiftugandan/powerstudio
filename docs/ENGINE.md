@@ -87,14 +87,22 @@ four times.
   that reaches a limit in a later round is caught too (the `ieee14-qlim` case: G2 reaches 50 Mvar only after G4 and
   G5 are held).
 - **Results.** Voltages, branch flows and currents at both ends, losses, loading (current against the permanent
-  limit for lines, apparent power against the rating for transformers), the output of every machine and grid
-  (reference units share their bus's balance; PV machines share the reactive balance in proportion to their reactive
-  range, as MATPOWER does), the iteration log and the time spent.
+  limit for lines, apparent power against the rating for transformers), the output of every machine and grid, the
+  iteration log and the time spent. A bus's active power balance goes to its reference units. Its reactive balance
+  goes to its external grids if it has any; otherwise the reference and PV machines on the bus share it as MATPOWER
+  does (`pfsoln.m`): each at the same fraction k of its range, Q = Qmin + k·(Qmax − Qmin), with infinite limits
+  replaced by a finite proxy and an equal split when the bus has no range at all.
 
 **Checked by** `engine/crates/ps-study/tests/loadflow.rs` (native) and `tests/loadflow.test.mjs` (WebAssembly):
 MATPOWER case14, case30 and case118 agree with PYPOWER to |ΔU| < 1e-9 p.u. and |Δθ| < 1e-7°; the IEEE 14 and
 Riverside samples agree with pandapower in voltages, branch flows (1e-6 MW) and machine outputs, with and without
 reactive limits; power balances at every bus, computed from the reported flows.
+
+At scale, `engine/crates/ps-study/tests/matpower.rs` compares every bus voltage and machine output, and on the cases
+up to 13,659 buses every branch flow, with PowSyBl's OpenLoadFlow on the ACTIVSg synthetic grids (2,000, 10,000,
+25,000 and 70,000 buses) and the PEGASE European cases (2,869, 9,241 and 13,659 buses). Voltages agree to 1.1e-10
+p.u. or better and flows and outputs to 2e-8 MW or Mvar, except one PEGASE 9241 machine whose reactive output
+differs by 1.7e-4 Mvar.
 
 ## Short circuit
 
@@ -163,7 +171,8 @@ equilibrium.
 
 ## MATPOWER import
 
-There are two MATPOWER importers. The app's (`src/core/matpower.js`) turns a case into a PowerStudio document with a
+There are two MATPOWER importers. The engine's names branches and generators by their row in the case, as MATPOWER
+identifies them (`L17` or `T17` for branch row 17, `G4` for generator row 4). The app's (`src/core/matpower.js`) turns a case into a PowerStudio document with a
 diagram laid out by `src/core/layout.js`: lines get a length of 1 km and their total impedance per km, transformer
 line charging becomes two shunts with exactly MATPOWER's admittances, and phase shifts that are not multiples of
 30° are dropped with a warning. The engine's (`ps-io`) goes straight to the model and is exact for everything

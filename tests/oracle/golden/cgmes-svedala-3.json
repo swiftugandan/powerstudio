@@ -4017,7 +4017,7 @@
    },
    "33c91ecc-b575-4bee-a286-d1a404ea9291": {
     "p": -4.905155,
-    "q": 0.14209035875450568,
+    "q": 0.1420903587545057,
     "v": [
      0.9623909090909091,
      -73.7211161094399
@@ -4057,7 +4057,7 @@
    },
    "53a30c75-4c99-4060-a421-7517f31adffb": {
     "p": -200.39180000000002,
-    "q": -32.39028365874757,
+    "q": -32.390283658747556,
     "v": [
      1.0294117647058822,
      -1.2050729835108513
@@ -4097,7 +4097,7 @@
    },
    "9cfd2812-b0d8-4dff-9c7f-a04b911a85c8": {
     "p": -400.58759999999995,
-    "q": -99.94660790498693,
+    "q": -99.94660790498695,
     "v": [
      1.0592588235294118,
      20.415860860887655
@@ -4145,7 +4145,7 @@
    },
    "cf9bf157-9b80-48be-aaf6-7368966d74bd": {
     "p": -310.3428,
-    "q": -90.61838607189704,
+    "q": -90.61838607189705,
     "v": [
      1.0294117647058822,
      -17.03739079370988
@@ -4185,7 +4185,7 @@
    },
    "e0240be9-4b8b-4faa-9053-d4974c2a1205": {
     "p": -100.2938,
-    "q": -30.98151904032065,
+    "q": -30.981519040320656,
     "v": [
      1.03,
      -1.2132379004115215
@@ -7393,7 +7393,7 @@
  "slack": [
   "4e0971d4-db4c-441d-a9f2-c88d4c04f60b"
  ],
- "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'slackBusesIds': 'fc4d076c-3e12-4c05-ad72-42b090d114a0_2'})",
+ "source": "pypowsybl 1.16.1 OpenLoadFlow; parameters Parameters(voltage_init_mode=DC_VALUES, transformer_voltage_control_on=False, use_reactive_limits=False, phase_shifter_regulation_on=False, twt_split_shunt_admittance=False, shunt_compensator_voltage_control_on=False, read_slack_bus=True, write_slack_bus=True, distributed_slack=False, balance_type=PROPORTIONAL_TO_GENERATION_P_MAX, dc_use_transformer_ratio=True, countries_to_balance=[], component_mode=<ComponentMode.ALL_CONNECTED: 1>, hvdc_ac_emulation=True, dc_power_factor=1.0, dc=False, provider_parameters={'slackBusSelectionMode': 'NAME', 'voltageRemoteControl': 'false', 'generatorsWithZeroMwTargetAreNotStarted': 'false', 'minPlausibleTargetVoltage': '0.0', 'maxPlausibleTargetVoltage': '100.0', 'minNominalVoltageTargetVoltageCheck': '0.0', 'svcVoltageMonitoring': 'false', 'newtonRaphsonConvEpsPerEq': '1.0E-10', 'maxNewtonRaphsonIterations': '50', 'useLoadModel': 'false', 'reactivePowerDispatchMode': 'K_EQUAL_PROPORTION', 'slackBusesIds': 'fc4d076c-3e12-4c05-ad72-42b090d114a0_2'})",
  "status": [
   "CONVERGED"
  ]

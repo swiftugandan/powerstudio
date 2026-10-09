@@ -181,8 +181,9 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
         }
     }
 
-    let (mut lines, mut trafos) = (0, 0);
-    for r in &case.branch {
+    // Branches are named by their row in the case, as MATPOWER identifies them: L17 or T17 for row 17.
+    for (row, r) in case.branch.iter().enumerate() {
+        let row = row + 1;
         let (fb, tb) = (r[branch::F_BUS] as i64, r[branch::T_BUS] as i64);
         let (Some(&(f, vf, _)), Some(&(t, vt, _))) = (node_of.get(&fb), node_of.get(&tb)) else {
             issues.push(format!("Branch {fb}-{tb} refers to a missing bus; skipped."));
@@ -194,7 +195,6 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
         let in_service = r[branch::STATUS] > 0.0;
         if (ratio == 0.0 || ratio == 1.0) && shift == 0.0 && vf == vt {
             let zb = vf * vf / sb;
-            lines += 1;
             let limits = if rate > 0.0 {
                 let amps = rate / (3.0_f64.sqrt() * vf) * 1000.0;
                 vec![
@@ -213,7 +213,7 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 Vec::new()
             };
             m.lines.push(Line {
-                id: format!("L{lines}"),
+                id: format!("L{row}"),
                 name: format!("Line {fb}-{tb}"),
                 node1: NodeRef(f),
                 node2: NodeRef(t),
@@ -236,9 +236,8 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
             let k1 = vf * tap;
             // Impedance in Ω referred to winding 1 (rated k1): p.u. on the system base times k1²/S.
             let z1 = k1 * k1 / sb;
-            trafos += 1;
             m.transformers2.push(Transformer2 {
-                id: format!("T{trafos}"),
+                id: format!("T{row}"),
                 name: format!("Transformer {fb}-{tb}"),
                 node1: NodeRef(f),
                 node2: NodeRef(t),
@@ -265,7 +264,7 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
             });
         }
     }
-    if lines > 0 {
+    if !m.lines.is_empty() {
         issues.push(
             "MATPOWER has no zero-sequence data: lines use R0 = 3·R, X0 = 3·X, B0 = 0.6·B and transformers Z0 = Z."
                 .into(),

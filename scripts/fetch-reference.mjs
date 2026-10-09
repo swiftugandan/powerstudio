@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Downloads the reference models the engine tests read (tests/oracle/cgmes-cases.json and psse-cases.json list them) into
+/** Downloads the reference models the engine tests read (the *-cases.json files in tests/oracle list them) into
  * .cache/reference/, checking each against its pinned SHA-256. Files already present and intact are kept. They are
  * not redistributed with the repository; docs/research/sources.md gives their licences. */
 
@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = join(root, '.cache', 'reference');
-const lists = ['cgmes-cases.json', 'psse-cases.json'];
+const lists = ['cgmes-cases.json', 'psse-cases.json', 'matpower-cases.json'];
 /** @type {Record<string, {file: string, url: string, sha256: string}>} */
 const archives = Object.assign({}, ...lists.map((f) => JSON.parse(readFileSync(join(root, 'tests', 'oracle', f), 'utf8')).archives));
 mkdirSync(dir, { recursive: true });
