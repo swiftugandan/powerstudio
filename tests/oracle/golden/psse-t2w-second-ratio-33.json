@@ -2,6 +2,7 @@
  "case": "t2w-second-ratio-33",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [
    "B1-G1"
   ],
@@ -50,7 +51,8 @@
     "target_v": null
    }
   },
-  "shunts": {}
+  "shunts": {},
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -85,6 +87,7 @@
    }
   },
   "shunts": {},
+  "svcs": {},
   "transformers2": {
    "T-1-2-1": {
     "p1": 10.069927788607332,

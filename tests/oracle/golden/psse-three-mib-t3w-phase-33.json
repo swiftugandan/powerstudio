@@ -2,6 +2,7 @@
  "case": "three-mib-t3w-phase-33",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [],
   "winding_1_ratio": {}
  },
@@ -106,7 +107,8 @@
     "target_v": null
    }
   },
-  "shunts": {}
+  "shunts": {},
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -243,6 +245,7 @@
    }
   },
   "shunts": {},
+  "svcs": {},
   "transformers2": {
    "T-1-4-1": {
     "p1": 1403.9999999999993,

@@ -5,9 +5,6 @@
 //! line with the PSS/E definitions. Each case is compared on what was imported (set points, shunt admittances, line
 //! impedances) and on the load flow (every bus voltage, flows and outputs).
 //!
-//! A case marked `pending` in the case list needs something PowerStudio does not model yet; its import must match and
-//! its load flow is reported without failing the test.
-//!
 //! With distributed slack off, OpenLoadFlow reports a slack machine's active power as its target, not the power it
 //! balances; machines at slack buses are compared by reactive power only. Angles are compared relative to the slack
 //! bus, since PSS/E holds the swing bus at its stated angle and OpenLoadFlow at zero.
@@ -80,6 +77,17 @@ fn compare_import(m: &Model, golden: &Value, w: &mut Worst) {
             w.check("generator V target", id, u.v_set * m.nominal_kv(at), f(&g["target_v"]));
         }
     }
+    for (id, g) in im["svcs"].as_object().unwrap() {
+        let Some(u) = m.svcs.iter().find(|u| u.id == *id) else {
+            missing(w, "SVC", id);
+            continue;
+        };
+        w.check("SVC B min", id, u.b_min, f(&g["b_min"]));
+        w.check("SVC B max", id, u.b_max, f(&g["b_max"]));
+        if g["regulating"] == true {
+            w.check("SVC V target", id, u.v_set * u.nominal_kv, f(&g["target_v"]));
+        }
+    }
     for (id, g) in im["shunts"].as_object().unwrap() {
         let Some(s) = m.shunts.iter().find(|s| s.id == *id) else {
             missing(w, "shunt", id);
@@ -105,7 +113,7 @@ fn compare_import(m: &Model, golden: &Value, w: &mut Worst) {
 ///
 /// Controls compare by target and dead band wherever PowSyBl defines one. Whether a control is switched on differs by
 /// design: PowerStudio follows the sign of COD (negative: off), which PowSyBl does not read; PowSyBl drops a phase
-/// shifter's control when CONT is 0, although PSS/E then measures the transformer's own flow; and it keeps one
+/// shifter's control when CONT is 0, where PowerStudio keeps it on the transformer's own flow; and it keeps one
 /// control per transformer.
 fn compare_taps(m: &Model, golden: &Value, w: &mut Worst) {
     let im = &golden["imported"];
@@ -304,10 +312,11 @@ fn compare_loadflow(m: &Model, start: &str, golden: &Value, w: &mut Worst) {
         match class {
             "generators" => m.generators.iter().find(|x| x.id == id).map(|x| x.node),
             "loads" => m.loads.iter().find(|x| x.id == id).map(|x| x.node),
+            "svcs" => m.svcs.iter().find(|x| x.id == id).map(|x| x.node),
             _ => m.shunts.iter().find(|x| x.id == id).map(|x| x.node),
         }
     };
-    for class in ["generators", "loads", "shunts"] {
+    for class in ["generators", "loads", "shunts", "svcs"] {
         for (id, g) in lf[class].as_object().unwrap() {
             if let Some(n) = node_of(class, id) {
                 voltage(w, "terminal", id, solved(n), &g["v"]);
@@ -323,6 +332,11 @@ fn compare_loadflow(m: &Model, start: &str, golden: &Value, w: &mut Worst) {
             w.check("generator output", id, -u.p, f(&g["p"]));
         }
         w.check("generator output", id, -u.q, f(&g["q"]));
+    }
+    for (id, g) in lf["svcs"].as_object().unwrap() {
+        if let Some(u) = report.svcs.iter().find(|u| u.id == *id) {
+            w.check("SVC output", id, -u.q, f(&g["q"]));
+        }
     }
     for (id, g) in lf["loads"].as_object().unwrap() {
         if let Some(u) = report.loads.iter().find(|u| u.id == *id) {
@@ -355,7 +369,14 @@ fn psse_cases_match_powsybl() {
         for (what, d, at, _) in &w.rows {
             eprintln!("  {what:28} {d:9.2e}  {at}");
         }
-        let flows = ["line flow", "transformer flow", "generator output", "load", "shunt Q"];
+        let flows = [
+            "line flow",
+            "transformer flow",
+            "generator output",
+            "SVC output",
+            "load",
+            "shunt Q",
+        ];
         let voltages = w.max("bus V").max(w.max("terminal V"));
         let angles = w.max("bus angle").max(w.max("terminal angle"));
         let flow = flows.iter().map(|k| w.max(k)).fold(0.0, f64::max);
@@ -368,14 +389,6 @@ fn psse_cases_match_powsybl() {
         eprintln!(
             "SUMMARY {name}: V {voltages:.1e} p.u., angle {angles:.1e}°, flows {flow:.1e} MW or Mvar, data {data:.1e}"
         );
-        if let Some(why) = case["pending"].as_str() {
-            // Reported, not failed: the import must still match.
-            eprintln!("  load flow pending: {why}");
-            if data > DATA_TOL {
-                failures.push(format!("{name}: data {data:.1e}"));
-            }
-            continue;
-        }
         if voltages > V_TOL || angles > ANGLE_TOL || flow > FLOW_TOL || data > DATA_TOL {
             failures.push(format!(
                 "{name}: V {voltages:.1e}, angle {angles:.1e}°, flows {flow:.1e}, data {data:.1e}"

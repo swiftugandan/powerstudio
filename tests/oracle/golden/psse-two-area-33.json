@@ -2,6 +2,7 @@
  "case": "two-area-33",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [
    "B2-G1",
    "B3-G1",
@@ -147,7 +148,8 @@
   },
   "phase_taps": {},
   "ratio_taps": {},
-  "shunts": {}
+  "shunts": {},
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -401,6 +403,7 @@
    }
   },
   "shunts": {},
+  "svcs": {},
   "transformers2": {
    "T-1-5-1": {
     "p1": 726.8023823772488,

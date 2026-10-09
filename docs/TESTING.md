@@ -6,8 +6,8 @@
 npm ci
 npm run check          # strict type checking (tsc --checkJs), page and worker configs
 npm run lint:engine    # rustfmt and Clippy on the engine, warnings denied
-node scripts/fetch-reference.mjs  # once: the ENTSO-E CGMES archives the engine tests read (checksums pinned)
-npm run test:engine    # the engine's tests, native: oracle goldens, CGMES against PowSyBl, model, topology, solvers
+node scripts/fetch-reference.mjs  # once: the CGMES archives and PSS/E files the engine tests read (checksums pinned)
+npm run test:engine    # the engine's tests, native: oracle goldens, CGMES and PSS/E against PowSyBl, model, solvers
 npm test               # builds the WebAssembly engine, then the Node test runner (see below)
 npm run test:browser   # Playwright against dist/PowerStudio.html over HTTP (builds first)
 ```
@@ -55,7 +55,24 @@ The CGMES goldens come from PowSyBl through pypowsybl (same environment):
 ```sh
 .venv/bin/python scripts/oracle/cgmes.py            # every case in tests/oracle/cgmes-cases.json
 .venv/bin/python scripts/oracle/cgmes.py minigrid-3 # one case
+.venv/bin/python scripts/oracle/psse.py             # every case in tests/oracle/psse-cases.json
+.venv/bin/python scripts/oracle/psse.py ieee300     # one case
 ```
+
+Both use the OpenLoadFlow settings in `scripts/oracle/olf.py`: a plain Newton-Raphson with every control off, so the
+comparison tests the network model rather than control strategies. Where PowSyBl's import departs from the format's
+definition, the script corrects PowSyBl's network and records the correction in the golden (`removed` for CGMES,
+`corrected` for PSS/E); docs/research/sources.md cites the source for each. The comparison tests
+(`engine/crates/ps-study/tests/cgmes.rs` and `psse.rs`) check voltages to 1e-6 p.u. and 1e-4°, flows to 1e-3 MW or
+Mvar and imported data to 1e-9 relative, and print the worst difference per quantity with `--nocapture`:
+
+```sh
+cd engine && cargo test --release -p ps-study --test psse -- --nocapture
+```
+
+A case whose files no load flow can solve is marked `"loadflow": false` with the reason in `why`; its import is
+still compared. `ps cgmes <files>` and `ps psse <file.raw>` print an import's report, validation and, with `--lf`,
+a load flow, which is the quickest way to look at a case that fails.
 
 `tests/oracle.test.mjs` fails when the committed inputs no longer match the samples, so a sample cannot drift away
 from its goldens unnoticed. Moving a busbar on the diagram changes the inputs but not the goldens.

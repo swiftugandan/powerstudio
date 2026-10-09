@@ -9,8 +9,10 @@ from, and `docs/design/NATIONAL-GRADE.md` sets out where the engine is going.
 
 Every calculation follows the same path, one crate per step:
 
-1. **Import** (`ps-io`). A PowerStudio document (`powerstudio.rs`) or a MATPOWER case (`matpower.rs`,
-   `matpower_model.rs`) becomes the canonical model.
+1. **Import** (`ps-io`). A PowerStudio document (`powerstudio.rs`), a MATPOWER case (`matpower.rs`,
+   `matpower_model.rs`), a CGMES model (`cgmes.rs` over `rdf.rs` and `zip.rs`) or a PSS/E RAW file (`psse.rs`,
+   `psse_model.rs`) becomes the canonical model. Every importer returns a report (`report.rs`): the files read, what
+   each class of objects became or why it was left out, and the values it filled in.
 2. **Model** (`ps-model`). Equipment in engineering units: nodes, switches, lines, two- and three-winding
    transformers with tap changers, generators, loads, shunts, static var compensators, external grids and areas.
    Edits are operations with exact inverses; models save as binary snapshots with a SHA-256 content hash.
@@ -169,6 +171,57 @@ MATPOWER describes: transformers keep arbitrary phase shifts and carry their cha
 generators keep their active power limits, and buses keep the case's stored voltages for warm starts. MATPOWER has no
 zero-sequence, machine or inertia data; both importers fill them with stated typical values and list them in the
 import's issues.
+
+## CGMES import
+
+`ps-io` reads CGMES 2.4.15 and 3.0 models from XML files, folders or zip archives (nested archives included): EQ, TP,
+SSH, SV, DL, GL and the boundary set. `rdf.rs` merges the profiles by object identifier, so files can come in any
+order. The importer keeps the node-breaker structure: connectivity nodes with their switches, or topological nodes
+where a model has only those. Lines, series compensators and equivalent branches become lines; power transformers
+become two- or three-winding transformers with their ratio and phase tap changers (linear, symmetrical, asymmetrical
+and tabular, with the reactance variation of the asymmetrical and symmetrical kinds), and the tap changer of winding 2
+stays on winding 2. Machines and external network injections keep their regulating controls and reactive capability
+curves; loads keep their load-response characteristics; linear and non-linear shunts, equivalent shunts and
+injections, and static var compensators are mapped. Equipment whose SSH `Equipment.inService` is false is out of
+service. Starting voltages come from SV. Vector group clocks are read but not applied, as PowSyBl does not apply them
+by default; the report says so.
+
+**Checked by** `engine/crates/ps-study/tests/cgmes.rs` against PowSyBl's import and OpenLoadFlow on twelve ENTSO-E
+conformity configurations (MicroGrid, MiniGrid, SmallGrid, Svedala, the PST cases, PowerFlow, FullGrid's import, and
+the 2.4.15 MicroGrid in its BE, NL and assembled forms): imported data to 1e-9 relative, voltages to 1e-6 p.u.,
+flows to 1e-3 MW. The worst case agrees to 1e-11 p.u. and 2e-8 MW.
+
+## PSS/E RAW import
+
+`ps-io` reads RAW files of versions 33 and 35, bus-branch and node-breaker. Fields may be separated by commas or
+blanks; the section terminators' comments name the next section, which copes with files that leave sections out.
+What maps:
+
+| RAW data | Model |
+| --- | --- |
+| Buses | Nodes `B<number>`; type 4 takes everything at the bus out of service; a type 3 bus without a generator gets an external grid |
+| Substations (version 35) | A substation per record, a voltage level per bus, a node per substation node (`B<bus>-N<node>`), switches from the switching devices; equipment connects at the node its terminal record names, otherwise at the bus's lowest node |
+| Loads | Loads `B<bus>-L<id>` at their value at 1 p.u. voltage, P = PL + IP + YP and Q = QL + IQ − YQ, with the constant-power, current and admittance shares kept |
+| Fixed and switched shunts | Shunts; a switched shunt's levels follow its blocks (reactors, then capacitors) and it sits at the level nearest BINIT; MODSW 1 and 2 become voltage control |
+| Generators | Generators `B<bus>-G<id>`, voltage control on type 2 and 3 buses, the first in service on a type 3 bus is the reference; IREG is kept as the regulated node |
+| Branches | Lines `L-<i>-<j>-<ckt>` with their charging split between the ends plus GI, BI, GJ, BJ; a branch between buses of different base voltage becomes a transformer at the ratio of the bases, which is what its per-unit data mean |
+| Transformers | Two- and three-winding transformers (`T-<i>-<j>-<ckt>`, `T-<i>-<j>-<k>-<ckt>`); CW, CZ and CM conversions; three-winding units as a star; each winding's tap range RMI…RMA in NTP steps with the stated ratio as the present step, voltage control from VMA, VMI and CONT; COD 3 windings as phase tap tables with their flow control |
+| System switching devices (version 35) | Switches |
+| FACTS devices | A shunt device (a STATCOM) becomes a static var compensator holding VSET within ±SHMX |
+| Areas | Areas with their scheduled interchange |
+
+HVDC links, series FACTS devices, induction machines, impedance correction tables and the generator step-up data in
+generator records are not modelled yet; the report counts what it left out. Tap, shunt and phase-shifter controls are
+imported but not yet solved (design phase 3); the load flow holds every position as stated.
+
+**Checked by** `engine/crates/ps-study/tests/psse.rs` against PowSyBl on 23 RAW files from powsybl-core's tests,
+versions 33 and 35, up to the 500-bus South Carolina synthetic grid: imported set points, admittances, impedances and
+tap changers, and the load flow at every bus and equipment terminal. Every case that can be solved agrees to 1e-10
+p.u. or better (IEEE 300 to 2e-12 p.u.); `docs/research/sources.md` lists the corrections the comparison makes to
+PowSyBl's network and why.
+
+The app does not open CGMES or RAW files yet; `ps cgmes <files> [--lf]` and `ps psse <file.raw> [--lf]` import them
+and print the report, the validation and a load flow.
 
 ## Requests
 

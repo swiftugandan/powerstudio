@@ -2,6 +2,7 @@
  "case": "ieee14-33",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [
    "B1-G1"
   ],
@@ -266,7 +267,8 @@
     "max_sections": 1,
     "sections": 1
    }
-  }
+  },
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -708,6 +710,7 @@
     ]
    }
   },
+  "svcs": {},
   "transformers2": {
    "T-4-7-1": {
     "p1": 28.074175916008283,

@@ -2,6 +2,7 @@
  "case": "switched-shunt-33",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [],
   "winding_1_ratio": {}
  },
@@ -118,7 +119,8 @@
     "max_sections": 5,
     "sections": 3
    }
-  }
+  },
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -270,6 +272,7 @@
     ]
    }
   },
+  "svcs": {},
   "transformers2": {
    "T-1-4-1": {
     "p1": 1404.000000000001,

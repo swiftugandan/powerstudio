@@ -2,6 +2,7 @@
  "case": "t2w-phase-33",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [
    "B1-G1"
   ],
@@ -36,7 +37,8 @@
    }
   },
   "ratio_taps": {},
-  "shunts": {}
+  "shunts": {},
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -71,6 +73,7 @@
    }
   },
   "shunts": {},
+  "svcs": {},
   "transformers2": {
    "T-1-2-1": {
     "p1": 21.700000000004767,

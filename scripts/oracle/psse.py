@@ -4,7 +4,7 @@ PowSyBl (pypowsybl, with OpenLoadFlow and the settings in olf.py) is the referen
 records, by element identifier, what PowSyBl imported (set points, shunt admittances, line impedances, tap changers)
 and its load flow results (voltages at every bus and equipment terminal, flows, outputs).
 
-Four corrections bring PowSyBl's network in line with the PSS/E definitions before the load flow:
+Five corrections bring PowSyBl's network in line with the PSS/E definitions before the load flow:
 
 * Identifiers lose their blanks. PowSyBl keeps the padding of quoted RAW identifiers ("B1-G1 "); PowerStudio trims it.
 * Loads with a constant-admittance part get Q0 = QL + IQ - YQ. The PSS/E data format defines YQ as negative for an
@@ -12,6 +12,8 @@ Four corrections bring PowSyBl's network in line with the PSS/E definitions befo
 * Generators on type 2 and 3 buses whose reactive range is empty (QB = QT) keep their voltage control. PowSyBl turns it
   off ("we consider < but psse accepts bus type 2 with Qmin == Qmax", GeneratorConverter); with reactive limits
   ignored, as here, PSS/E holds the set point.
+* HVDC links and their converter stations are removed: PowerStudio does not model HVDC yet (design phase 3) and
+  leaves them out, so the comparison covers the AC network both solve. Phase 3 drops this correction.
 * Transformers keep their stated winding ratio. PowSyBl replaces it with a tap step that lies within 1e-5 of it
   (snapped_ratios below); the RAW file's WINDV is the ratio PSS/E solves with.
 
@@ -105,7 +107,8 @@ def snapped_ratios(raw):
 
     PowSyBl builds the steps of a voltage or reactive power controlling winding from RMI to RMA and puts the stated
     ratio in as a step of its own, unless a step lies within 1e-5 of it (TransformerConverter.TOLERANCE); then it
-    uses that step instead.
+    uses that step instead. Three-winding windings would snap the same way; no case has one, and the engine test's tap
+    comparison would show it as a step count one short.
     """
     v35 = raw["rev"] >= 35
     cod_at, rma_at, ntp_at = (15, 18, 22) if v35 else (6, 8, 12)
@@ -143,6 +146,12 @@ def snapped_ratios(raw):
 def corrections(n, path):
     """Brings PowSyBl's network in line with the PSS/E definitions (see the module docstring); returns what changed."""
     raw = sections(path)
+    hvdc = n.get_hvdc_lines()
+    stations = [*hvdc["converter_station1_id"], *hvdc["converter_station2_id"]]
+    for group in (list(hvdc.index), stations):  # a station goes once its line is gone
+        if group:
+            n.remove_elements(group)
+    removed = sorted([*hvdc.index, *stations])
     ide = {int(b[0]): int(b[3]) for b in raw["bus"]}
     loads = {ident(i): i for i in n.get_loads().index}
     q0 = {}
@@ -171,7 +180,7 @@ def corrections(n, path):
         if ide[int(f[0])] in (2, 3) and not g["voltage_regulator_on"] and g["target_v"] > 0 and g["min_q"] >= g["max_q"]:
             n.update_generators(id=by_id[gid], voltage_regulator_on=True)
             regulating.append(gid)
-    return {"q0": q0, "voltage_regulator_on": regulating, "winding_1_ratio": ratio}
+    return {"q0": q0, "voltage_regulator_on": regulating, "winding_1_ratio": ratio, "removed": [ident(i) for i in removed]}
 
 
 def golden(case):
@@ -195,6 +204,10 @@ def golden(case):
         },
         "loads": {i: {"p0": num(r["p0"]), "q0": num(r["q0"])} for i, r in table(n.get_loads).iterrows()},
         "shunts": {i: {"sections": int(r["section_count"]), "max_sections": int(r["max_section_count"]), "g": num(r["g"]), "b": num(r["b"])} for i, r in table(n.get_shunt_compensators).iterrows()},
+        "svcs": {
+            i: {"b_min": num(r["b_min"]), "b_max": num(r["b_max"]), "target_v": num(r["target_v"]), "regulating": bool(r["regulating"])}
+            for i, r in table(n.get_static_var_compensators).iterrows()
+        },
         # Tap changers by transformer and side ("T-4-7-1#ONE"): steps, present step from the lowest, control.
         "ratio_taps": {
             f"{i}#{r['side'] or 'ONE'}": {"steps": int(r["step_count"]), "tap": int(r["tap"] - r["low_tap"]), "regulating": bool(r["regulating"]), "target_v": num(r["target_v"]), "deadband": num(r["target_deadband"])}
@@ -245,6 +258,7 @@ def golden(case):
             "generators": injections(n.get_generators, ("p", "q")),
             "loads": injections(n.get_loads, ("p", "q")),
             "shunts": injections(n.get_shunt_compensators, ("q",)),
+            "svcs": injections(n.get_static_var_compensators, ("q",)),
         }
     golden_path = GOLDEN / f"psse-{case['name']}.json"
     golden_path.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")

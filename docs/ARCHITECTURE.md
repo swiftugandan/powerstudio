@@ -46,7 +46,7 @@ diagram.
 | `ps-num` | Complex numbers and the clock (the host's clock in WebAssembly) |
 | `ps-sparse` | Sparse matrices and the `SparseSolver` trait: faer's sparse LU, a dense reference LU, complex systems |
 | `ps-model` | The canonical model: equipment, operations with inverses, validation, snapshots, study case settings |
-| `ps-io` | Importers: PowerStudio documents, MATPOWER |
+| `ps-io` | Importers: PowerStudio documents, MATPOWER, CGMES 2.4.15 and 3.0, PSS/E RAW 33 and 35; the import report |
 | `ps-topology` | Switches and outages to calculation buses, islands and energisation |
 | `ps-net` | The per-unit network: every conversion from engineering units, defined once |
 | `ps-lf` | Newton-Raphson and DC load flow on sparse matrices |

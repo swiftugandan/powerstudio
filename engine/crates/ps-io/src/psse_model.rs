@@ -21,8 +21,8 @@ use std::collections::HashMap;
 
 use ps_model::{
     Area, CurrentLimit, ExternalGrid, FlowControl, Generator, Line, Load, MachineControl, MachineDynamics,
-    MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap, Shunt, Substation, Switch, SwitchKind,
-    TapPoint, Transformer2, Transformer3, VoltageControl, VoltageLevel, Winding, Winding3,
+    MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap, Shunt, Substation, Svc, Switch,
+    SwitchKind, TapPoint, Transformer2, Transformer3, VoltageControl, VoltageLevel, Winding, Winding3,
 };
 
 use crate::ParseError;
@@ -151,6 +151,7 @@ pub fn to_model(raw: &RawCase, file: &str) -> Result<Imported, ParseError> {
     switches(&mut cx, raw)?;
     transformers(&mut cx, raw)?;
     areas(&mut cx, raw)?;
+    facts(&mut cx, raw)?;
     let mut classes: Vec<ClassReport> = raw
         .records
         .iter()
@@ -196,6 +197,7 @@ fn mapped_as(s: Section) -> &'static str {
         Section::SwitchingDevice => "switches",
         Section::Transformer => "two- and three-winding transformers",
         Section::Area => "areas (interchange control off)",
+        Section::Facts => "static var compensators (shunt devices; series devices not modelled)",
         _ => "",
     }
 }
@@ -205,7 +207,6 @@ fn not_used(s: Section) -> &'static str {
         Section::TwoTerminalDc | Section::VscDc | Section::MultiTerminalDc => {
             "HVDC links: not yet modelled (design phase 3)"
         }
-        Section::Facts => "FACTS devices: not yet modelled (design phase 3)",
         Section::InductionMachine => "induction machines: not yet modelled",
         Section::ImpedanceCorrection => "impedance correction tables: transformers use their stated impedance",
         _ => "not used by the calculations",
@@ -455,6 +456,7 @@ fn shunts(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
     let (first, width) = lay.sws_block();
     let binit_at = lay.sws_binit();
     let v35 = lay.v35();
+    let mut other_control = 0;
     for r in raw.section(Section::SwitchedShunt) {
         let num = r.int(0, 0, 0)?;
         let id = if v35 { id_part(&r.text(0, 1, "1")) } else { "1".into() };
@@ -531,8 +533,11 @@ fn shunts(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 r.num(0, if v35 { 6 } else { 5 }, 1.0)?,
             );
             let tkv = cx.m.nominal_kv(target_node);
+            // MODSW 1 and 2 hold a bus voltage between VSWLO and VSWHI; 3 to 6 follow a machine's reactive power,
+            // a converter or another device, which has no model yet.
             let modsw = r.int(0, if v35 { 2 } else { 1 }, 0)?;
-            (modsw != 0).then_some(VoltageControl {
+            other_control += usize::from(modsw > 2);
+            matches!(modsw, 1 | 2).then_some(VoltageControl {
                 enabled: true,
                 node: target_node,
                 target_kv: (hi + lo) / 2.0 * tkv,
@@ -552,6 +557,11 @@ fn shunts(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
             control,
             points,
         });
+    }
+    if other_control > 0 {
+        cx.notes.push(format!(
+            "{other_control} switched shunt(s) follow a machine's reactive power or another device (MODSW 3 to 6); they stay at their stated sections."
+        ));
     }
     Ok(())
 }
@@ -1097,6 +1107,51 @@ fn areas(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 control: false,
             });
         }
+    }
+    Ok(())
+}
+
+/// FACTS devices. A shunt device (J = 0, a STATCOM) becomes a static var compensator with ±SHMX Mvar at 1 p.u. that
+/// holds VSET; a series device is not modelled yet. Fields: NAME (version 33: N), I, J, MODE, PDES, QDES, VSET, SHMX,
+/// …, FCREG (version 33: REMOT) at position 19.
+fn facts(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
+    let (mut series, mut remote) = (0, 0);
+    for r in raw.section(Section::Facts) {
+        let (i, j) = (r.int(0, 1, 0)?, r.int(0, 2, 0)?);
+        if j != 0 {
+            series += 1;
+            continue;
+        }
+        let name = r.text(0, 0, "").trim().to_string();
+        let (node, kv, ide) = cx.at('A', i, &[], &name, r)?;
+        let reg = r.int(0, 19, 0)?;
+        if reg != 0 && reg != i {
+            remote += 1;
+        }
+        let shmx = r.num(0, 7, 9999.0)?;
+        let vset = r.num(0, 6, 1.0)?;
+        cx.m.svcs.push(Svc {
+            id: format!("FactsDevice-{name}"),
+            name,
+            node,
+            in_service: r.int(0, 3, 1)? != 0 && ide != 4,
+            nominal_kv: kv,
+            b_min: -shmx / (kv * kv),
+            b_max: shmx / (kv * kv),
+            v_set: vset,
+            regulating: vset > 0.0,
+            q: r.num(0, 5, 0.0)?,
+        });
+    }
+    if series > 0 {
+        cx.notes.push(format!(
+            "{series} series FACTS device(s) are not modelled yet (design phase 3)."
+        ));
+    }
+    if remote > 0 {
+        cx.notes.push(format!(
+            "{remote} FACTS device(s) regulate a remote bus; they hold their own terminal voltage instead."
+        ));
     }
     Ok(())
 }

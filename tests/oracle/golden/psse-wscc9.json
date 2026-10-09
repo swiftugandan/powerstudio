@@ -2,6 +2,7 @@
  "case": "wscc9",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [],
   "winding_1_ratio": {}
  },
@@ -99,7 +100,8 @@
   },
   "phase_taps": {},
   "ratio_taps": {},
-  "shunts": {}
+  "shunts": {},
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -279,6 +281,7 @@
    }
   },
   "shunts": {},
+  "svcs": {},
   "transformers2": {
    "T-2-7-1": {
     "p1": 162.99999999994256,

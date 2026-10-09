@@ -2,6 +2,11 @@
  "case": "five-bus-nb-35",
  "corrected": {
   "q0": {},
+  "removed": [
+   "LccConverter-1-EATLP1",
+   "LccConverter-5-EATLP1",
+   "TwoTerminalDc-EATLP1"
+  ],
   "voltage_regulator_on": [
    "B1-G1"
   ],
@@ -91,7 +96,8 @@
     "max_sections": 2,
     "sections": 2
    }
-  }
+  },
+  "svcs": {}
  },
  "slack": [
   "B1"

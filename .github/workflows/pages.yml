@@ -39,7 +39,7 @@ jobs:
         with:
           path: .cache/reference
           key: reference-${{ hashFiles('tests/oracle/*-cases.json') }}
-      - name: Reference models (ENTSO-E CGMES test configurations, checksums pinned)
+      - name: Reference models (CGMES and PSS/E test cases, checksums pinned)
         run: node scripts/fetch-reference.mjs
       - name: Engine tests (native, against the oracle goldens)
         run: npm run test:engine

@@ -2,6 +2,7 @@
  "case": "illinois200",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [],
   "winding_1_ratio": {}
  },
@@ -2504,7 +2505,8 @@
     "max_sections": 2,
     "sections": 2
    }
-  }
+  },
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -7490,6 +7492,7 @@
     ]
    }
   },
+  "svcs": {},
   "transformers2": {
    "T-103-102-1": {
     "p1": -25.1954066125103,

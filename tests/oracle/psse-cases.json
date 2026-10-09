@@ -1,5 +1,5 @@
 {
- "about": "PSS/E RAW cases compared with PowSyBl, from powsybl-core's tests at a pinned commit (MPL 2.0; the IEEE cases are public test systems, the Illinois synthetic grids are from Texas A&M's ACTIVSg collection). scripts/fetch-reference.mjs downloads them into .cache/reference; they are not copied into the repository. 'start' is the load flow's starting point: 'dc' (DC load flow) or 'raw' (the voltages stored in the file). 'loadflow': false marks a case PowSyBl does not solve (its three-winding data are inconsistent); only its import is compared. 'pending' names what PowerStudio lacks to solve a case as PowSyBl does; its import is compared and its load flow is reported without failing.",
+ "about": "PSS/E RAW cases compared with PowSyBl, from powsybl-core's tests at a pinned commit (powsybl-core is MPL 2.0; docs/research/sources.md describes the cases). scripts/fetch-reference.mjs downloads them into .cache/reference; they are not copied into the repository. 'start' is the load flow's starting point: 'dc' (DC load flow) or 'raw' (the voltages stored in the file). 'loadflow': false marks a case no load flow can solve ('why' says what is wrong with its data); only its import is compared.",
  "archives": {
   "ieee14-33": {
    "file": "psse-ieee14-33.raw",
@@ -186,8 +186,7 @@
   {
    "name": "ieee14-completed-35",
    "archive": "ieee14-completed-35",
-   "start": "dc",
-   "loadflow": false
+   "start": "dc"
   },
   {
    "name": "ieee24-35",
@@ -203,7 +202,8 @@
    "name": "five-bus-nb-35",
    "archive": "five-bus-nb-35",
    "start": "dc",
-   "loadflow": false
+   "loadflow": false,
+   "why": "Bus 4's load is fed only through the three-winding transformer, whose resistances are load losses in watts written under CZ = 1 (R12 = 334279 p.u.); neither PowSyBl nor PowerStudio can supply it."
   },
   {
    "name": "wscc9",
@@ -218,8 +218,7 @@
   {
    "name": "ieee300",
    "archive": "ieee300",
-   "start": "dc",
-   "pending": "two-terminal HVDC link at bus 120: PowerStudio does not model HVDC yet (design phase 3)"
+   "start": "dc"
   },
   {
    "name": "rts96",

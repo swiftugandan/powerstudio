@@ -2,6 +2,7 @@
  "case": "south-carolina500",
  "corrected": {
   "q0": {},
+  "removed": [],
   "voltage_regulator_on": [
    "B458-G1"
   ],
@@ -5380,7 +5381,8 @@
     "max_sections": 2,
     "sections": 2
    }
-  }
+  },
+  "svcs": {}
  },
  "loadflow": {
   "buses": {
@@ -16288,6 +16290,7 @@
     ]
    }
   },
+  "svcs": {},
   "transformers2": {
    "T-124-123-1": {
     "p1": -90.45260190773239,

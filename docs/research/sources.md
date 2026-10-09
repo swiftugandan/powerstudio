@@ -31,6 +31,14 @@ The CGMES test configurations are the ENTSO-E CGMES Conformity Assessment Scheme
 Neither package is redistributed with this MIT-licensed repository; the tests read the files from the downloaded
 archives. The goldens in `tests/oracle/golden/cgmes-*.json` hold results computed from them.
 
+The PSS/E RAW cases are test resources of powsybl-core (https://github.com/powsybl/powsybl-core, MPL 2.0) at commit
+`0a7e5410d41a7eee3ccf61fc8f6b39f145ab648d`, listed with their SHA-256 values in `tests/oracle/psse-cases.json` and
+downloaded by the same script. They are version 33 and 35 files written by PSS/E and by PowSyBl: IEEE 14, 24, 39, 57,
+118 and 300 buses, WSCC 9, the IEEE RTS-96, small transformer, switched shunt and remote control cases, node-breaker
+exports, and two synthetic grids from the Texas A&M Electric Grid Test Case Repository (Illinois 200 and South
+Carolina 500 buses) as included in powsybl-core. Their licences were not checked beyond powsybl-core's own, so the
+files are not copied into this repository; `tests/oracle/golden/psse-*.json` hold results computed from them.
+
 ## Reference solvers
 
 The goldens in `tests/oracle/golden/` were written by `scripts/oracle/oracle.py` on 2026-10-09 with the packages
@@ -53,6 +61,30 @@ shunt admittance at the network end, and OpenLoadFlow reports a slack machine's 
 PowSyBl's conversion rules for tap changers (`TapChangerConversion`, `CgmesPhaseTapChangerBuilder`,
 `InterpretedT2xModel`) and dangling and tie lines (`TieLineUtil`) were read in the powsybl-core source
 (https://github.com/powsybl/powsybl-core, MPL 2.0) to match them.
+
+The PSS/E goldens (`tests/oracle/golden/psse-*.json`) were written by `scripts/oracle/psse.py` with the same
+pypowsybl and the same OpenLoadFlow settings (`scripts/oracle/olf.py`). Five corrections bring PowSyBl's network in
+line with the PSS/E definitions before the load flow; each is recorded in the golden's `corrected` field:
+
+- Identifiers lose their blanks: PowSyBl keeps the padding of quoted identifiers ("B1-G1 ").
+- A load's constant-admittance reactive part enters as Q0 = QL + IQ − YQ. The PSS/E data format defines YQ as negative
+  for an inductive load; MATPOWER's `psse_convert.m` (https://github.com/MATPOWER/matpower, `lib/psse_convert.m`)
+  subtracts it with the comment "reactive power component of constant admittance load is negative quantity for
+  inductive load"; PowSyBl 1.16.1 adds it (`LoadConverter`).
+- Generators on type 2 and 3 buses whose reactive range is empty keep their voltage control. PowSyBl turns it off
+  and says why in `GeneratorConverter`: "we consider < but psse accepts bus type 2 with Qmin == Qmax".
+- HVDC links and their converter stations are removed, because PowerStudio does not model HVDC yet (phase 3 drops
+  this correction). Without it, IEEE 300 differs around its link at bus 120; with it, it agrees to 2e-12 p.u.
+- A transformer keeps its stated winding ratio. PowSyBl replaces it with a tap step within 1e-5 of it
+  (`TransformerConverter.TOLERANCE`), which moved IEEE 39 by 1.5e-6 p.u. before the correction.
+
+PowSyBl's PSS/E conversion rules were read in its source (`TransformerConverter`, `LineConverter`,
+`SwitchedShuntCompensatorConverter`, `FactsDeviceConverter`, `VoltageLevelConverter`, `AbstractConverter` in
+`psse/psse-converter`) to match identifiers, winding codes CW, CZ and CM, the star equivalent of three-winding
+units, switched shunt levels and node-breaker connectivity. Where PowerStudio differs on purpose, the comparison test
+(`engine/crates/ps-study/tests/psse.rs`) bridges it and says why: a branch between buses of different base voltage
+is a transformer at the ratio of the bases in PowerStudio and a line with compensating end shunts in PowSyBl; and
+the on and off state of tap controls follows the sign of COD in PowerStudio, which PowSyBl does not read.
 
 The oracle removes one pandapower modelling choice so both programs describe the same network: pandapower adds a
 placeholder zero-sequence admittance of 1/(1000 + 1000j) p.u. at generator buses; PowerStudio models generator
