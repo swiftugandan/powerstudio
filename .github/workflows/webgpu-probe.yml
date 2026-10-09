@@ -18,6 +18,10 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Rust toolchain (pinned by engine/rust-toolchain.toml)
+        working-directory: engine
+        run: rustup toolchain install
+      - run: node scripts/build-engine.mjs
       - run: npx playwright install --with-deps chromium
       - run: node build.mjs
       - name: Probe Chromium WebGPU flag sets

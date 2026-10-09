@@ -7,10 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { ieee14 } from '../src/samples/ieee14.js';
 import { importMatpower } from '../src/core/matpower.js';
-import { runLoadFlow } from '../src/core/loadflow.js';
-import { runShortCircuit } from '../src/core/shortcircuit.js';
-import { runContingency } from '../src/core/contingency.js';
-import { runRms } from '../src/core/rms.js';
+import { EngineHost } from '../src/engine/host.js';
+import { Studies } from '../src/engine/studies.js';
 import { buildScene } from '../src/render/scene.js';
 import { toSVG } from '../src/render/svg.js';
 import { bounds } from '../src/render/geometry.js';
@@ -19,6 +17,8 @@ import { buildOverlay } from '../src/ui/overlay.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (/** @type {string} */ p) => readFileSync(join(root, p), 'utf8');
+/** The engine the app ships, built by npm run build:engine. */
+const engine = new Studies(await EngineHost.create(readFileSync(join(root, 'src/engine/powerstudio-engine.wasm'))));
 
 /** The diagram palette of a theme, read from the app's own style sheet tokens. @param {'light' | 'dark'} theme */
 export function palette(theme) {
@@ -40,7 +40,7 @@ export function palette(theme) {
 /** The IEEE 14-bus diagram after a load flow, as SVG, in a theme. @param {'light' | 'dark'} theme */
 export function diagramSvg(theme) {
   const doc = ieee14();
-  const lf = runLoadFlow(doc);
+  const lf = engine.loadflow(doc);
   const P = palette(theme);
   const { overlay } = buildOverlay('loadflow', lf, doc, P, { colouring: 'results' });
   const list = buildScene({ elements: doc.elements, palette: P, selection: new Set(), hover: '', overlay, preview: null,
@@ -58,19 +58,19 @@ export function studies() {
   const doc = ieee14();
   const name = (/** @type {string} */ id) => doc.elements.find(e => e.id === id)?.name ?? id;
   let t = performance.now();
-  const lf = runLoadFlow(doc);
+  const lf = engine.loadflow(doc);
   const lfMs = performance.now() - t;
   t = performance.now();
-  const sc = runShortCircuit(doc, { fault: '3ph', mode: 'max', location: '' });
+  const sc = engine.shortcircuit(doc, { fault: '3ph', mode: 'max', location: '' });
   const scMs = performance.now() - t;
   const top = sc.buses.reduce((m, b) => (b.ikss > m.ikss ? b : m));
   t = performance.now();
-  const n1 = runContingency(doc);
+  const n1 = engine.contingency(doc);
   const n1Ms = performance.now() - t;
   const bad = n1.cases.filter(c => c.converged && c.violations.some(v => !v.inBase));
   const worst = n1.cases.reduce((m, c) => (c.maxLoading > m.maxLoading ? c : m));
   t = performance.now();
-  const rms = runRms(doc);
+  const rms = engine.rms(doc);
   const rmsMs = performance.now() - t;
   const fault = rms.events.find(e => e.kind === 'fault'), clear = rms.events.find(e => e.kind === 'clear');
   const trip = rms.events.find(e => e.kind === 'trip');
@@ -91,20 +91,20 @@ export function agreement() {
   let mp = 0;
   for (const c of ['case14', 'case30', 'case118']) {
     const g = golden(`matpower-${c}`);
-    const r = runLoadFlow(importMatpower(read(`tests/fixtures/${c}.m`)).doc, { tolerance: 1e-8 });
+    const r = engine.loadflow(importMatpower(read(`tests/fixtures/${c}.m`)).doc, { tolerance: 1e-8 });
     g.bus.forEach((/** @type {number} */ b, /** @type {number} */ k) => { mp = Math.max(mp, Math.abs(/** @type {any} */ (r.buses.find(x => x.id === `B${b}`)).vm - g.vm[k])); });
   }
   let pp = 0;
   for (const [n, q] of /** @type {Array<[string, boolean]>} */ ([['ieee14', false], ['riverside', false], ['riverside', true], ['ieee14-qlim', true]])) {
     const ref = golden(n).loadflow[q ? 'qlim' : 'base'];
-    for (const b of runLoadFlow(input(n), { tolerance: 1e-9, enforceQLimits: q }).buses) pp = Math.max(pp, Math.abs(b.vm - ref.bus[b.id][0]));
+    for (const b of engine.loadflow(input(n), { tolerance: 1e-9, enforceQLimits: q }).buses) pp = Math.max(pp, Math.abs(b.vm - ref.bus[b.id][0]));
   }
   /** @param {readonly ('3ph' | '2ph' | '1ph')[]} faults */
   const scWorst = faults => {
     let w = 0;
     for (const n of ['ieee14', 'riverside']) for (const fault of faults) for (const mode of /** @type {const} */ (['max', 'min'])) {
       const ref = golden(n).shortcircuit[`${fault}-${mode}`];
-      for (const b of runShortCircuit(input(n), { fault, mode, kappa: 'C', lvTolerance: '10', location: '' }).buses) {
+      for (const b of engine.shortcircuit(input(n), { fault, mode, kappa: 'C', lvTolerance: '10', location: '' }).buses) {
         for (const k of /** @type {const} */ (['ikss', 'ip', 'ith'])) {
           const want = ref[b.id][k];
           if (want === null || Math.abs(want) < 1e-3) continue;

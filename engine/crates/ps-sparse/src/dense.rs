@@ -159,9 +159,7 @@ impl SparseSolver for DenseLu {
             return Err(SolveError::NotReady("factor before solve"));
         }
         if rhs.len() != self.n {
-            return Err(SolveError::Shape(
-                "right-hand side has the wrong length".into(),
-            ));
+            return Err(SolveError::Shape("right-hand side has the wrong length".into()));
         }
         self.solve_dense(rhs);
         Ok(())
@@ -172,9 +170,7 @@ impl SparseSolver for DenseLu {
             return Err(SolveError::NotReady("factor before solve"));
         }
         if rhs.len() != self.n {
-            return Err(SolveError::Shape(
-                "right-hand side has the wrong length".into(),
-            ));
+            return Err(SolveError::Shape("right-hand side has the wrong length".into()));
         }
         self.solve_dense_transpose(rhs);
         Ok(())

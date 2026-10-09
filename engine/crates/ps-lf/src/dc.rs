@@ -18,21 +18,12 @@ pub fn dc_angles(net: &PuNetwork, kind: &[BusKind], p: &[f64], fixed: &[f64]) ->
         }
     }
     let mut theta: Vec<f64> = (0..n)
-        .map(|i| {
-            if kind[i] == BusKind::Reference {
-                fixed[i]
-            } else {
-                0.0
-            }
-        })
+        .map(|i| if kind[i] == BusKind::Reference { fixed[i] } else { 0.0 })
         .collect();
     if m == 0 {
         return Some(theta);
     }
-    let mut rhs: Vec<f64> = (0..n)
-        .filter(|&i| unknown[i] != usize::MAX)
-        .map(|i| p[i])
-        .collect();
+    let mut rhs: Vec<f64> = (0..n).filter(|&i| unknown[i] != usize::MAX).map(|i| p[i]).collect();
     let mut b = CscBuilder::new(m, m);
     let mut vals = Vec::with_capacity(4 * net.branches.len() + m);
     for i in 0..m {

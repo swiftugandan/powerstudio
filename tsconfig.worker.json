@@ -8,7 +8,8 @@
   },
   "include": [
     "src/worker/**/*.js",
-    "src/core/**/*.js"
+    "src/core/**/*.js",
+    "src/engine/**/*.js"
   ],
   "exclude": []
 }

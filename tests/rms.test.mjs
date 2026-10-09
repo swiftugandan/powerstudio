@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runRms } from '../src/core/rms.js';
-import { runLoadFlow } from '../src/core/loadflow.js';
+import { studies } from './helpers.mjs';
 import { makeElement } from '../src/core/catalog.js';
 import { emptyDocument } from '../src/core/document.js';
 import { ieee14 } from '../src/samples/ieee14.js';
@@ -18,7 +17,7 @@ function smib(pm = 80) {
 
 /** Critical clearing time from the equal-area criterion for a fault at the machine terminals (Pe = 0 while it lasts). */
 function analyticCct(doc) {
-  const lf = runLoadFlow(doc, { tolerance: 1e-10 });
+  const lf = studies.loadflow(doc, { tolerance: 1e-10 });
   const g = /** @type {any} */ (lf.gens[0]);
   const pm = g.p / 100, q = g.q / 100, xd = 0.3, xl = 0.4 * 50 / (110 * 110 / 100);
   const v = lf.buses[0].vm, th = lf.buses[0].va * Math.PI / 180;
@@ -36,13 +35,13 @@ test('stability: the equal-area critical clearing time separates stable from uns
   const tcr = analyticCct(doc);
   assert.ok(tcr > 0.1 && tcr < 0.5, `tcr ${tcr}`);
   /** @param {number} clear */
-  const run = clear => runRms(doc, { tEnd: 2, dt: 0.0005, events: [{ t: 0, kind: 'fault', target: 'G' }, { t: clear, kind: 'clear', target: 'G' }] });
+  const run = clear => studies.rms(doc, { tEnd: 2, dt: 0.0005, events: [{ t: 0, kind: 'fault', target: 'G' }, { t: clear, kind: 'clear', target: 'G' }] });
   assert.ok(run(tcr * 0.98).stable, 'clearing 2 % before the critical time stays in step');
   assert.ok(!run(tcr * 1.02).stable, 'clearing 2 % after it loses synchronism');
 });
 
 test('stability: undisturbed operation stays at its load-flow equilibrium', () => {
-  const r = runRms(ieee14(), { tEnd: 1, dt: 0.002, events: [] });
+  const r = studies.rms(ieee14(), { tEnd: 1, dt: 0.002, events: [] });
   for (const m of r.machines) {
     const spread = Math.max(...m.delta) - Math.min(...m.delta);
     assert.ok(spread < 1e-4, `${m.id} drifts ${spread}°`);
@@ -51,13 +50,13 @@ test('stability: undisturbed operation stays at its load-flow equilibrium', () =
 
 test('stability: small oscillations follow the linearised swing frequency', () => {
   const doc = smib(50);
-  const r = runRms(doc, { tEnd: 3, dt: 0.001, events: [{ t: 0, kind: 'fault', target: 'G' }, { t: 0.01, kind: 'clear', target: 'G' }] });
+  const r = studies.rms(doc, { tEnd: 3, dt: 0.001, events: [{ t: 0, kind: 'fault', target: 'G' }, { t: 0.01, kind: 'clear', target: 'G' }] });
   const d = r.machines.find(m => m.id === 'M')?.delta ?? new Float32Array();
   // Measure the period between successive maxima after the disturbance.
   const peaks = [];
   for (let i = 1; i < d.length - 1; i++) if (d[i] > d[i - 1] && d[i] >= d[i + 1] && r.t[i] > 0.05) peaks.push(r.t[i]);
   const fMeasured = (peaks.length - 1) / (peaks[peaks.length - 1] - peaks[0]);
-  const lf = runLoadFlow(doc, { tolerance: 1e-10 });
+  const lf = studies.loadflow(doc, { tolerance: 1e-10 });
   const pm = 0.5, q = /** @type {any} */ (lf.gens[0]).q / 100, v = lf.buses[0].vm, th = lf.buses[0].va * Math.PI / 180;
   const ir = (pm * Math.cos(th) + q * Math.sin(th)) / v, ii = (pm * Math.sin(th) - q * Math.cos(th)) / v;
   const E = Math.hypot(v * Math.cos(th) - 0.3 * ii, v * Math.sin(th) + 0.3 * ir);
@@ -68,7 +67,7 @@ test('stability: small oscillations follow the linearised swing frequency', () =
 });
 
 test('the bundled IEEE 14 disturbance is applied in order and the system stays stable', () => {
-  const r = runRms(ieee14());
+  const r = studies.rms(ieee14());
   assert.deepEqual(r.events.map(e => e.applied), [true, true, true]);
   assert.ok(r.stable);
   assert.equal(r.angleReference, 'coi');

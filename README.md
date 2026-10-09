@@ -3,7 +3,8 @@
 **Single-line diagrams, solved in your browser.** PowerStudio is a power system analysis workbench: draw a network
 on a single-line diagram and run Newton-Raphson load flow, IEC 60909-style short-circuit currents, N-1 contingency
 analysis and electromechanical stability simulation. It runs entirely on your device. There is no account, no
-server and no tracking, and the diagram is drawn with WebGPU, with a Canvas 2D fallback.
+server and no tracking. The calculation engine is written in Rust and runs as WebAssembly in background workers; the
+diagram is drawn with WebGPU, with a Canvas 2D fallback.
 
 **Open the app: https://swiftugandan.github.io/powerstudio/app/** · Website: https://swiftugandan.github.io/powerstudio/ ·
 Offline copy: download `PowerStudio.html` from the [latest release](https://github.com/swiftugandan/powerstudio/releases/latest)
@@ -20,9 +21,9 @@ Offline copy: download `PowerStudio.html` from the [latest release](https://gith
 | --- | --- | --- |
 | Diagram | Draw busbars, lines, transformers, synchronous machines, external grids, loads and shunts; move, resize, reroute and reconnect; marquee selection, copy and paste, automatic layout; pan and zoom with mouse, trackpad or touch | Browser test draws a network from scratch with the insert tools and solves it |
 | Rendering | WebGPU (WGSL signed-distance shapes, SDF text, 4× MSAA) with a real Canvas 2D fallback; the badge shows the backend actually in use and why it fell back | Browser tests in two Chromium projects check the reported backend and decode screenshot pixels |
-| Load flow | Newton-Raphson with reference, PV and PQ busbars, transformer taps and phase shifts, reactive limits, DC start, load scaling, de-energised islands | Agrees with MATPOWER's algorithm (PYPOWER) on case14, case30 and case118 to 1e-9 p.u., and with pandapower on both samples |
+| Load flow | Newton-Raphson on sparse matrices with reference, PV and PQ busbars, transformer taps and phase shifts, reactive limits, DC start, load scaling, de-energised islands | Agrees with MATPOWER's algorithm (PYPOWER) on case14, case30 and case118 to 1e-9 p.u., and with pandapower on both samples; the engine solves the 25,000-bus ACTIVSg25k case in 0.3 s as WebAssembly |
 | Short circuit | Three-phase, line-to-line and line-to-earth faults at every busbar or one location; maximum and minimum; Ik″, ip (κ method B or C), Ith, Sk″, branch contributions | Agrees with pandapower's IEC 60909 implementation to about 1e-15 relative (three-phase, line-to-line) and 2e-8 (earth faults) |
-| Contingency | N-1 outages of lines, transformers and machines, ranked, with loading and voltage violations and the worst case per element on the diagram | Each case matches an independent load flow with the element out |
+| Contingency | N-1 outages of lines, transformers and machines, run in parallel across workers, ranked, with loading and voltage violations and the worst case per element on the diagram | Each case matches an independent load flow with the element out; parallel runs equal the sequential result |
 | Stability | Classical-model RMS simulation with fault, clearing, tripping and load-step events; rotor angle, speed, power and voltage plots; time cursor on the diagram | Equal-area critical clearing time and the linearised swing frequency |
 | Results | Result boxes and colour coding on the diagram, sortable tables, CSV export, an output log, results marked stale after edits, optional recalculation on edit | Browser tests compare table values with MATPOWER |
 | Files | Documents saved automatically in IndexedDB; import PowerStudio JSON or MATPOWER `.m` cases (also by drag and drop); export JSON, SVG, PNG and CSV | Browser tests reload the page, import case30 and round-trip an export |
@@ -31,15 +32,19 @@ Offline copy: download `PowerStudio.html` from the [latest release](https://gith
 
 ## Run, build and test
 
-You need Node.js 22 or later.
+You need Node.js 22 or later and [rustup](https://rustup.rs/), which installs the Rust toolchain pinned in
+`engine/rust-toolchain.toml` (with the WebAssembly target) on first use.
 
 ```sh
 npm ci
+npm run build:engine      # compiles the engine to src/engine/powerstudio-engine.wasm (test and build do it too)
 npm start                 # development server at http://127.0.0.1:8770/ (no build step)
 npm run build             # writes dist/PowerStudio.html, one self-contained file, and its SHA-256
 npm run build:pages       # writes _site/: the website at /, the app at /app/, the download and build-info.json
 npm run check             # strict type checking with tsc --checkJs
-npm test                  # unit and engine tests (Node test runner)
+npm run test:engine       # the engine's own tests, native, against the oracle goldens
+npm run lint:engine       # rustfmt and Clippy, warnings denied
+npm test                  # Node tests: the WebAssembly engine, native and WebAssembly compared, store, import, build
 npx playwright install chromium
 npm run test:browser      # Playwright against the built file over HTTP, WebGPU and Canvas 2D projects
 ```
@@ -79,14 +84,19 @@ Mod is ⌘ on macOS and Ctrl elsewhere. Press `?` in the app for the full list, 
 
 ## Architecture
 
-Plain ES modules with no runtime dependencies, in three layers: `src/core/` (document model, undoable store and the
-solvers, with no DOM access), `src/render/` (diagram geometry, a backend-neutral display list and the WebGPU, Canvas
-2D and SVG backends) and `src/ui/` with `src/app.js` (commands, ribbon, tree, inspector, dock, viewport). The
-solvers run in a Web Worker. `build.mjs` bundles everything into one deterministic HTML file with a
-Content-Security-Policy that forbids network connections. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-structure and [docs/ENGINE.md](docs/ENGINE.md) for the models, conventions and verification of every calculation.
+The interface is plain ES modules with no runtime dependencies: `src/core/` (document model and undoable store, with
+no DOM access), `src/render/` (diagram geometry, a backend-neutral display list and the WebGPU, Canvas 2D and SVG
+backends) and `src/ui/` with `src/app.js` (commands, ribbon, tree, inspector, dock, viewport). The calculation engine
+is a Rust workspace in `engine/`: a canonical network model, topology processing, a per-unit network built once, and
+the solvers on sparse matrices. It compiles to WebAssembly for the browser, where a pool of Web Workers runs it, and
+to a native program for tests and benchmarks. `build.mjs` bundles everything, engine included, into one
+deterministic HTML file with a Content-Security-Policy that forbids network connections. Read
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the structure, [docs/ENGINE.md](docs/ENGINE.md) for the models,
+conventions and verification of every calculation, and [docs/design/NATIONAL-GRADE.md](docs/design/NATIONAL-GRADE.md)
+for where the engine is going.
 
-The only development dependencies are TypeScript (for `--checkJs`), Playwright and the WebGPU type definitions.
+The interface's only development dependencies are TypeScript (for `--checkJs`), Playwright and the WebGPU type
+definitions. The engine depends on faer (sparse LU), serde, serde_json, postcard and sha2.
 
 ## Scope and boundaries
 
@@ -101,10 +111,11 @@ actual tap position is used. KG applies in both cases. Ith assumes n = 1 (far fr
 faults are computed but have no external reference.
 
 **Load flow.** Balanced, positive sequence only. Not implemented: automatic tap changers, switched shunts, remote
-voltage control, three-winding transformer elements (the IEEE 14 sample models its three-winding transformer as three
-two-winding units, as the IEEE data does), breakers and switches (elements are only in or out of service),
-voltage-dependent loads, distributed slack, DC lines and converters. The dense LU solver keeps networks to a few
-hundred busbars for interactive speed.
+voltage control, voltage-dependent loads, distributed slack, DC lines and converters. The engine's model and topology
+processing already handle switches and three-winding transformers, but the editor does not offer them yet (the
+IEEE 14 sample models its three-winding transformer as three two-winding units, as the IEEE data does), so in the app
+elements are only in or out of service. The engine solves networks of tens of thousands of buses (docs/ENGINE.md
+gives the timings), but the diagram editor has been used only with networks of up to a few hundred busbars.
 
 **Contingency.** Single outages (N-1) only; no N-2, remedial actions or automatic generation redispatch (the
 reference machines pick up lost generation).

@@ -1,0 +1,529 @@
+//! Equipment records. Values are engineering quantities as operators exchange them: kV, MW, Mvar, MVA, Ω, S, A.
+//! Series impedances and shunt admittances are totals for the element (not per kilometre). Transformer impedances are
+//! referred to winding 1. Positive susceptance is capacitive.
+
+use serde::{Deserialize, Serialize};
+
+use crate::NodeRef;
+
+/// What a node represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum NodeKind {
+    /// A bus of a bus-branch model (MATPOWER, PSS/E, drawn networks).
+    #[default]
+    Bus,
+    /// A busbar section of a node-breaker model.
+    BusbarSection,
+    /// An internal connectivity node of a node-breaker model (between switches).
+    Connectivity,
+}
+
+/// A substation: a group of voltage levels at one site.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Substation {
+    /// Stable identifier (CGMES mRID, source id or PowerStudio id).
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Region or zone.
+    pub region: String,
+}
+
+/// A voltage level within a substation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VoltageLevel {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Substation index, if any.
+    pub substation: Option<u32>,
+    /// Nominal voltage, kV.
+    pub nominal_kv: f64,
+}
+
+/// A connection point: a bus, a busbar section or a connectivity node.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Node {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// What the node is.
+    pub kind: NodeKind,
+    /// Voltage level index, if any.
+    pub voltage_level: Option<u32>,
+    /// Nominal voltage, kV (the voltage level's, repeated so bus-branch models need no voltage levels).
+    pub nominal_kv: f64,
+    /// Lower operational voltage limit, p.u.
+    pub v_min: f64,
+    /// Upper operational voltage limit, p.u.
+    pub v_max: f64,
+    /// Area index, if any.
+    pub area: Option<u32>,
+    /// Starting (or last solved) voltage magnitude, p.u.; 0 when unknown.
+    pub v0: f64,
+    /// Starting (or last solved) voltage angle, degrees.
+    pub angle0: f64,
+}
+
+/// The kind of a switching device.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SwitchKind {
+    /// Circuit breaker.
+    #[default]
+    Breaker,
+    /// Disconnector.
+    Disconnector,
+    /// Load-break switch.
+    LoadBreak,
+    /// Fuse.
+    Fuse,
+    /// Any other switch.
+    Other,
+}
+
+/// A switching device between two nodes. Closed switches merge their nodes into one calculation bus.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Switch {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// First node.
+    pub node1: NodeRef,
+    /// Second node.
+    pub node2: NodeRef,
+    /// Device kind.
+    pub kind: SwitchKind,
+    /// Open state.
+    pub open: bool,
+}
+
+/// A current limit at one end of a branch.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrentLimit {
+    /// Branch end (1 or 2; 3 for a third transformer winding).
+    pub end: u8,
+    /// How long the limit may be applied, seconds; `None` for the permanent limit.
+    pub duration_s: Option<f64>,
+    /// Current, A.
+    pub amps: f64,
+}
+
+/// An AC line or cable (π model).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Line {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// End 1.
+    pub node1: NodeRef,
+    /// End 2.
+    pub node2: NodeRef,
+    /// Switched in.
+    pub in_service: bool,
+    /// Series resistance, Ω.
+    pub r: f64,
+    /// Series reactance, Ω.
+    pub x: f64,
+    /// Total shunt conductance, S.
+    pub g: f64,
+    /// Total shunt susceptance, S.
+    pub b: f64,
+    /// Zero-sequence resistance, Ω.
+    pub r0: f64,
+    /// Zero-sequence reactance, Ω.
+    pub x0: f64,
+    /// Zero-sequence total shunt susceptance, S.
+    pub b0: f64,
+    /// Length, km (informative; the impedances are already totals).
+    pub length_km: f64,
+    /// Current limits.
+    pub limits: Vec<CurrentLimit>,
+}
+
+/// How a transformer winding is connected, for the zero sequence and the phase shift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Winding {
+    /// Star, neutral not earthed.
+    Y,
+    /// Star, neutral earthed.
+    #[default]
+    Yn,
+    /// Delta.
+    D,
+    /// Zigzag, neutral not earthed.
+    Z,
+    /// Zigzag, neutral earthed.
+    Zn,
+}
+
+/// Voltage control by a tap changer, a shunt or a machine.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct VoltageControl {
+    /// Whether the control acts in the load flow.
+    pub enabled: bool,
+    /// The node whose voltage is controlled.
+    pub node: NodeRef,
+    /// Target, kV.
+    pub target_kv: f64,
+    /// Dead band (full width), kV.
+    pub deadband_kv: f64,
+}
+
+/// A ratio tap changer on one winding.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RatioTap {
+    /// Winding the tap changer sits on (1, 2 or 3).
+    pub end: u8,
+    /// Lowest position.
+    pub low: i32,
+    /// Highest position.
+    pub high: i32,
+    /// Position at which the ratio is the rated one.
+    pub neutral: i32,
+    /// Voltage change per step, % of the winding's rated voltage.
+    pub step_pct: f64,
+    /// Present position.
+    pub position: i32,
+    /// Automatic control, if fitted.
+    pub control: Option<VoltageControl>,
+}
+
+/// Active power control by a phase-shifting transformer.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FlowControl {
+    /// Whether the control acts in the load flow.
+    pub enabled: bool,
+    /// Target active power at winding 1, MW.
+    pub target_mw: f64,
+    /// Dead band (full width), MW.
+    pub deadband_mw: f64,
+}
+
+/// A phase tap changer (symmetrical, constant angle per step).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PhaseTap {
+    /// Lowest position.
+    pub low: i32,
+    /// Highest position.
+    pub high: i32,
+    /// Position with no phase shift.
+    pub neutral: i32,
+    /// Phase shift per step, degrees (winding 2 lags winding 1 for positive values).
+    pub step_deg: f64,
+    /// Present position.
+    pub position: i32,
+    /// Automatic control, if fitted.
+    pub control: Option<FlowControl>,
+}
+
+/// A two-winding transformer. Series impedance and magnetising admittance are referred to winding 1.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Transformer2 {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Winding 1 node (normally the HV side).
+    pub node1: NodeRef,
+    /// Winding 2 node.
+    pub node2: NodeRef,
+    /// Switched in.
+    pub in_service: bool,
+    /// Rated voltage of winding 1, kV.
+    pub rated_kv1: f64,
+    /// Rated voltage of winding 2, kV.
+    pub rated_kv2: f64,
+    /// Rated power, MVA.
+    pub rated_mva: f64,
+    /// Series resistance referred to winding 1, Ω.
+    pub r: f64,
+    /// Series reactance referred to winding 1, Ω.
+    pub x: f64,
+    /// Magnetising conductance at winding 1, S.
+    pub g1: f64,
+    /// Magnetising susceptance at winding 1, S (negative: inductive).
+    pub b1: f64,
+    /// Magnetising conductance at winding 2, referred to winding 1, S.
+    pub g2: f64,
+    /// Magnetising susceptance at winding 2, referred to winding 1, S.
+    pub b2: f64,
+    /// Phase displacement as a clock number: winding 2 lags winding 1 by `clock × 30°`.
+    pub clock: u8,
+    /// Further fixed phase shift, degrees, in the same sense (winding 2 lags for positive values). Carries the
+    /// arbitrary angles of bus-branch formats (MATPOWER `SHIFT`, PSS/E `ANG1`).
+    pub phase_shift_deg: f64,
+    /// Winding 1 connection.
+    pub conn1: Winding,
+    /// Winding 2 connection.
+    pub conn2: Winding,
+    /// Zero-sequence series resistance referred to winding 1, Ω.
+    pub r0: f64,
+    /// Zero-sequence series reactance referred to winding 1, Ω.
+    pub x0: f64,
+    /// Ratio tap changer, if fitted.
+    pub ratio_tap: Option<RatioTap>,
+    /// Phase tap changer, if fitted.
+    pub phase_tap: Option<PhaseTap>,
+    /// Current limits.
+    pub limits: Vec<CurrentLimit>,
+}
+
+/// One winding of a three-winding transformer, with its share of the star-equivalent impedance.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Winding3 {
+    /// Node.
+    pub node: NodeRef,
+    /// Rated voltage, kV.
+    pub rated_kv: f64,
+    /// Rated power, MVA.
+    pub rated_mva: f64,
+    /// Star-equivalent resistance referred to this winding, Ω.
+    pub r: f64,
+    /// Star-equivalent reactance referred to this winding, Ω.
+    pub x: f64,
+    /// Clock number of this winding relative to winding 1.
+    pub clock: u8,
+    /// Connection.
+    pub conn: Winding,
+}
+
+/// A three-winding transformer as a star of three windings. Magnetising admittance sits at the star point, referred
+/// to winding 1.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Transformer3 {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// The three windings.
+    pub windings: [Winding3; 3],
+    /// Switched in.
+    pub in_service: bool,
+    /// Magnetising conductance, S, referred to winding 1.
+    pub g: f64,
+    /// Magnetising susceptance, S, referred to winding 1.
+    pub b: f64,
+    /// Ratio tap changer (on any winding), if fitted.
+    pub ratio_tap: Option<RatioTap>,
+    /// Current limits.
+    pub limits: Vec<CurrentLimit>,
+}
+
+/// How a machine is dispatched in the load flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum MachineControl {
+    /// Active power and voltage held.
+    #[default]
+    Pv,
+    /// Active and reactive power held.
+    Pq,
+    /// Reference: holds the angle and balances its island.
+    Reference,
+}
+
+/// Short-circuit data of a synchronous machine (IEC 60909 terms).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineShortCircuit {
+    /// Subtransient reactance, p.u. of the rating.
+    pub xdss: f64,
+    /// Stator resistance, p.u. of the rating.
+    pub rs: f64,
+    /// Rated power factor.
+    pub cos_phi: f64,
+    /// Neutral earthed (zero sequence).
+    pub earthed: bool,
+}
+
+/// The classical dynamic data a machine always carries (detailed models are assigned separately).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineDynamics {
+    /// Transient reactance, p.u. of the rating.
+    pub xdt: f64,
+    /// Inertia constant, s, on the rating.
+    pub h: f64,
+    /// Damping, p.u. of the rating.
+    pub d: f64,
+}
+
+/// A synchronous machine or other controllable generating unit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Generator {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Connection node.
+    pub node: NodeRef,
+    /// Switched in.
+    pub in_service: bool,
+    /// Load-flow control.
+    pub control: MachineControl,
+    /// Active power, MW.
+    pub p: f64,
+    /// Reactive power (PQ control), Mvar.
+    pub q: f64,
+    /// Voltage setpoint, p.u. of the regulated node's nominal voltage.
+    pub v_set: f64,
+    /// Node whose voltage is regulated; `None` for the machine's own node.
+    pub regulated_node: Option<NodeRef>,
+    /// Angle of a reference machine, degrees.
+    pub angle: f64,
+    /// Lower reactive power limit, Mvar.
+    pub q_min: f64,
+    /// Upper reactive power limit, Mvar.
+    pub q_max: f64,
+    /// Lower active power limit, MW (both limits are 0 when the source gives none).
+    pub p_min: f64,
+    /// Upper active power limit, MW.
+    pub p_max: f64,
+    /// Rated power, MVA.
+    pub rated_mva: f64,
+    /// Rated voltage, kV.
+    pub rated_kv: f64,
+    /// Share of a distributed slack (0 for none).
+    pub participation: f64,
+    /// Short-circuit data.
+    pub sc: MachineShortCircuit,
+    /// Classical dynamic data.
+    pub dynamics: MachineDynamics,
+}
+
+/// A load with optional voltage dependence (ZIP).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Load {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Connection node.
+    pub node: NodeRef,
+    /// Switched in.
+    pub in_service: bool,
+    /// Active power at nominal voltage, MW.
+    pub p: f64,
+    /// Reactive power at nominal voltage, Mvar.
+    pub q: f64,
+    /// Shares of constant impedance, current and power in P (summing to 1; `[0, 0, 1]` is constant power).
+    pub p_zip: [f64; 3],
+    /// Shares of constant impedance, current and power in Q.
+    pub q_zip: [f64; 3],
+}
+
+/// A switchable shunt compensator (capacitor bank or reactor).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Shunt {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Connection node.
+    pub node: NodeRef,
+    /// Switched in.
+    pub in_service: bool,
+    /// Voltage at which the per-section values apply, kV.
+    pub nominal_kv: f64,
+    /// Conductance per section, S.
+    pub g_per_section: f64,
+    /// Susceptance per section, S (positive: capacitive).
+    pub b_per_section: f64,
+    /// Sections in service.
+    pub sections: u32,
+    /// Sections installed.
+    pub max_sections: u32,
+    /// Automatic voltage control, if fitted.
+    pub control: Option<VoltageControl>,
+}
+
+/// A static var compensator.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Svc {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Connection node.
+    pub node: NodeRef,
+    /// Switched in.
+    pub in_service: bool,
+    /// Voltage at which the susceptance range applies, kV.
+    pub nominal_kv: f64,
+    /// Lowest susceptance, S.
+    pub b_min: f64,
+    /// Highest susceptance, S.
+    pub b_max: f64,
+    /// Voltage setpoint, p.u.
+    pub v_set: f64,
+}
+
+/// An external grid: the equivalent of the network beyond the model.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalGrid {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Connection node.
+    pub node: NodeRef,
+    /// Switched in.
+    pub in_service: bool,
+    /// Voltage setpoint, p.u.
+    pub v_set: f64,
+    /// Voltage angle, degrees.
+    pub angle: f64,
+    /// Maximum short-circuit power, MVA.
+    pub sk_max: f64,
+    /// Minimum short-circuit power, MVA.
+    pub sk_min: f64,
+    /// R/X at maximum short-circuit power.
+    pub rx_max: f64,
+    /// R/X at minimum short-circuit power.
+    pub rx_min: f64,
+    /// X0/X1.
+    pub x0x1: f64,
+    /// R0/X0.
+    pub r0x0: f64,
+}
+
+/// A control area with an interchange target.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Area {
+    /// Stable identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Net export target, MW (positive: export).
+    pub interchange_mw: f64,
+    /// Tolerance on the target, MW.
+    pub tolerance_mw: f64,
+    /// Whether interchange control acts in the load flow.
+    pub control: bool,
+}

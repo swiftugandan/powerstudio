@@ -21,17 +21,10 @@ pub struct BranchFlow {
 
 /// Bus power injections `S = V·conj(Y·V)`, p.u.
 pub fn bus_injections(y: &Ybus, vm: &[f64], va: &[f64]) -> Vec<C64> {
-    let v: Vec<C64> = vm
-        .iter()
-        .zip(va)
-        .map(|(&m, &a)| C64::from_polar(m, a))
-        .collect();
+    let v: Vec<C64> = vm.iter().zip(va).map(|(&m, &a)| C64::from_polar(m, a)).collect();
     let mut cur = vec![C64::ZERO; y.n];
     y.mul(&v, &mut cur);
-    v.iter()
-        .zip(&cur)
-        .map(|(&vi, &ii)| vi * ii.conj())
-        .collect()
+    v.iter().zip(&cur).map(|(&vi, &ii)| vi * ii.conj()).collect()
 }
 
 /// Flows on every branch for a solved state.

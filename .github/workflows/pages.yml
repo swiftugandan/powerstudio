@@ -24,10 +24,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Rust toolchain (pinned by engine/rust-toolchain.toml)
+        working-directory: engine
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
       - run: npm ci
       - name: Type-check
         run: npm run check
-      - name: Unit and engine tests
+      - name: Engine format and lints
+        run: npm run lint:engine
+      - name: Engine tests (native, against the oracle goldens)
+        run: npm run test:engine
+      - name: Unit and engine tests (the WebAssembly build, native and WebAssembly compared)
         run: npm test
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -59,6 +69,14 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - name: Rust toolchain (pinned by engine/rust-toolchain.toml)
+        working-directory: engine
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine
+      - name: Build the engine (WebAssembly)
+        run: node scripts/build-engine.mjs
       - name: Build the site (marketing page, app at /app/, single-file download)
         run: node build-pages.mjs
       - id: hash

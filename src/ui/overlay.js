@@ -44,7 +44,7 @@ export function buildOverlay(kind, result, doc, P, opt) {
   const deenergized = new Set(/** @type {string[]} */ (result?.deenergized ?? []));
 
   if (kind === 'loadflow') {
-    /** @type {import('../core/loadflow.js').LoadFlowResult} */
+    /** @type {import('../engine/reports.js').LoadFlowResult} */
     const r = result;
     for (const b of r.buses) {
       const bus = byId.get(b.id);
@@ -63,7 +63,7 @@ export function buildOverlay(kind, result, doc, P, opt) {
     if (colour) legend = { kind: 'ramp', title: 'Loading', stops: [P.res.ok, P.res.ok, P.res.warn, P.res.high], from: '0 %', to: '≥ 100 %',
       extra: [{ label: 'Below band', color: P.res.low }, { label: 'Above band', color: P.res.high }] };
   } else if (kind === 'shortcircuit') {
-    /** @type {import('../core/shortcircuit.js').ShortCircuitResult} */
+    /** @type {import('../engine/reports.js').ShortCircuitResult} */
     const r = result;
     faultAt = r.location;
     const maxI = Math.max(1e-9, ...r.buses.map(b => b.ikss));
@@ -79,7 +79,7 @@ export function buildOverlay(kind, result, doc, P, opt) {
     }
     if (colour) legend = { kind: 'ramp', title: r.location ? 'Fault current share' : 'Initial short-circuit current', stops: [P.res.ok, P.res.high], from: 'low', to: 'high' };
   } else if (kind === 'contingency') {
-    /** @type {import('../core/contingency.js').ContingencyResult} */
+    /** @type {import('../engine/reports.js').ContingencyResult} */
     const r = result;
     for (const [id, w] of Object.entries(r.worstLoading)) {
       const out = byId.get(w.outage);
@@ -92,7 +92,7 @@ export function buildOverlay(kind, result, doc, P, opt) {
     }
     if (colour) legend = { kind: 'ramp', title: 'Worst N-1 loading', stops: [P.res.ok, P.res.ok, P.res.warn, P.res.high], from: '0 %', to: '≥ 100 %' };
   } else if (kind === 'rms') {
-    /** @type {import('../core/rms.js').RmsResult} */
+    /** @type {import('../engine/reports.js').RmsResult} */
     const r = result;
     const i = Math.max(0, Math.min(r.t.length - 1, opt.rmsIndex ?? r.t.length - 1));
     r.busIds.forEach((id, k) => {

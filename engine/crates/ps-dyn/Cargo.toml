@@ -1,0 +1,19 @@
+[package]
+name = "ps-dyn"
+description = "Electromechanical (RMS) simulation for PowerStudio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ps-model.workspace = true
+ps-net.workspace = true
+ps-lf.workspace = true
+ps-sparse.workspace = true
+ps-num.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

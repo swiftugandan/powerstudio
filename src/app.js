@@ -562,7 +562,7 @@ export class App {
   report(kind, r, ms, auto) {
     const name = (/** @type {string} */ id) => this.store.get(id)?.name || id;
     if (kind === 'loadflow') {
-      /** @type {import('./core/loadflow.js').LoadFlowResult} */
+      /** @type {import('./engine/reports.js').LoadFlowResult} */
       const lf = r;
       if (lf.converged) {
         const worst = lf.branches.reduce((m, b) => (Number.isFinite(b.loading) && b.loading > m.loading ? b : m), { loading: -Infinity, id: '' });
@@ -572,18 +572,18 @@ export class App {
       if (!auto) for (const w of lf.warnings) this.log('warn', w);
       if (!auto && lf.deenergized.length) this.log('warn', `De-energised busbars: ${lf.deenergized.map(name).join(', ')}.`);
     } else if (kind === 'shortcircuit') {
-      /** @type {import('./core/shortcircuit.js').ShortCircuitResult} */
+      /** @type {import('./engine/reports.js').ShortCircuitResult} */
       const sc = r;
       const top = sc.buses.reduce((m, b) => (b.ikss > m.ikss ? b : m), { ikss: -Infinity, id: '' });
       this.log('ok', `Short circuit (${enumLabel('fault', sc.fault).toLowerCase()}, ${sc.mode === 'max' ? 'maximum' : 'minimum'}) at ${sc.location ? name(sc.location) : `${sc.buses.length} busbars`} in ${duration(ms)}.${top.id ? ` Highest Ik″ ${fixed(top.ikss, 2)} kA at ${name(top.id)}.` : ''}`);
       for (const w of sc.warnings) this.log('warn', w);
     } else if (kind === 'contingency') {
-      /** @type {import('./core/contingency.js').ContingencyResult} */
+      /** @type {import('./engine/reports.js').ContingencyResult} */
       const n1 = r;
       const bad = n1.cases.filter(c => c.converged && c.violations.some(v => !v.inBase)).length, failed = n1.cases.filter(c => !c.converged).length;
       this.log(bad || failed ? 'warn' : 'ok', `N-1 analysis of ${n1.cases.length} outages in ${duration(ms)}: ${bad} with new violations${failed ? `, ${failed} without a solution` : ''}.`);
     } else {
-      /** @type {import('./core/rms.js').RmsResult} */
+      /** @type {import('./engine/reports.js').RmsResult} */
       const rms = r;
       this.log(rms.stable ? 'ok' : 'warn', `Stability simulation of ${fixed(rms.t[rms.t.length - 1], 2)} s in ${duration(ms)}: ${rms.message}`);
       for (const e of rms.events) if (!e.applied) this.log('warn', `Event at ${e.t} s skipped: ${e.note}`);

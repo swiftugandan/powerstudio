@@ -1,86 +1,144 @@
-/** Runs calculations in the engine worker, one at a time, with progress and cancellation. When a worker cannot be
- * started (some file:// contexts), the same solvers run on the main thread instead. */
+/** Runs calculations on the WebAssembly engine in workers, one calculation at a time, with progress and cancellation.
+ *
+ * Ordinary studies run on the first worker. Contingency analysis splits its outages into contiguous chunks across a
+ * pool of workers, and the engine merges the chunks in outage order, so the result is the same as a sequential run
+ * whatever the pool size. When a worker cannot be started (some file:// contexts), one engine runs on the main
+ * thread instead. */
 
-import { runLoadFlow } from '../core/loadflow.js';
-import { runShortCircuit } from '../core/shortcircuit.js';
-import { runContingency } from '../core/contingency.js';
-import { runRms } from '../core/rms.js';
+import { engineModule } from '../engine/module.js';
+import { EngineHost, jsonPayload } from '../engine/host.js';
+import { request } from '../engine/studies.js';
+import { adapt } from '../engine/reports.js';
 
-/** @typedef {'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} CalcKind */
+/** @typedef {import('../engine/reports.js').CalcKind} CalcKind */
+/** @typedef {(done: number, total: number) => void} OnProgress */
+/** @typedef {{ id: number, resolve: (v: { bytes: Uint8Array, ms: number }) => void, reject: (e: Error) => void, onProgress?: OnProgress }} Pending */
+
+/** Outages below which contingency analysis stays on one worker. */
+const PARALLEL_FROM = 16;
+/** Fewest outages per chunk. */
+const MIN_CHUNK = 8;
 
 export class CancelledError extends Error {
   constructor() { super('The calculation was cancelled.'); this.name = 'CancelledError'; }
 }
 
 export class EngineClient {
-  /** @param {() => Worker} factory */
-  constructor(factory) {
+  /** @param {() => Worker} factory @param {{ poolSize?: number }} [opt] */
+  constructor(factory, opt = {}) {
     this.factory = factory;
-    /** @type {Worker | null} */
-    this.worker = null;
-    this.seq = 0;
-    /** @type {{ id: number, resolve: (v: any) => void, reject: (e: Error) => void, onProgress?: (d: number, t: number) => void } | null} */
-    this.pending = null;
+    const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+    this.poolSize = opt.poolSize ?? Math.min(8, Math.max(1, cores - 1));
+    /** @type {Array<{ worker: Worker, pending: Pending | null } | null>} */
+    this.slots = [];
+    /** @type {EngineHost | null} */
+    this.host = null;
     this.inThread = false;
+    this.seq = 0;
+    this.active = 0;
   }
 
-  ensure() {
-    if (this.worker || this.inThread) return;
-    try {
-      this.worker = this.factory();
-      this.worker.onmessage = e => this.receive(e.data);
-      this.worker.onerror = e => { e.preventDefault(); this.fail(new Error(e.message || 'The calculation worker failed.')); this.worker?.terminate(); this.worker = null; };
-    } catch {
-      this.inThread = true;
-    }
-  }
-
-  /** @param {any} msg */
-  receive(msg) {
-    const p = this.pending;
-    if (!p || msg.id !== p.id) return;
-    if (msg.type === 'progress') { p.onProgress?.(msg.done, msg.total); return; }
-    this.pending = null;
-    if (msg.type === 'result') p.resolve({ result: msg.result, ms: msg.ms });
-    else p.reject(new Error(msg.message));
-  }
-
-  /** @param {Error} error */
-  fail(error) { const p = this.pending; this.pending = null; p?.reject(error); }
-
-  get busy() { return this.pending !== null; }
+  get busy() { return this.active > 0; }
 
   /**
-   * @param {CalcKind} kind @param {import('../core/document.js').PowerDocument} doc @param {Record<string, unknown>} [options]
-   * @param {(done: number, total: number) => void} [onProgress] @returns {Promise<{ result: any, ms: number }>}
+   * Starts worker `k` if needed. Returns null when workers are unavailable.
+   * @param {number} k @param {WebAssembly.Module} module
    */
-  run(kind, doc, options = {}, onProgress) {
-    if (this.pending) this.cancel();
-    this.ensure();
-    const id = ++this.seq;
-    if (this.inThread) {
-      const t0 = performance.now();
-      return new Promise((resolve, reject) => {
-        setTimeout(() => {
-          try {
-            const result = kind === 'loadflow' ? runLoadFlow(doc, options) : kind === 'shortcircuit' ? runShortCircuit(doc, options)
-              : kind === 'contingency' ? runContingency(doc, { onProgress }) : runRms(doc, { ...options, onProgress });
-            resolve({ result, ms: performance.now() - t0 });
-          } catch (e) { reject(e instanceof Error ? e : new Error(String(e))); }
-        }, 0);
-      });
+  slot(k, module) {
+    if (this.inThread) return null;
+    const existing = this.slots[k];
+    if (existing) return existing;
+    let worker;
+    try { worker = this.factory(); } catch { this.inThread = true; return null; }
+    const s = { worker, pending: /** @type {Pending | null} */ (null) };
+    worker.onmessage = e => {
+      const msg = e.data, p = s.pending;
+      if (!p || msg.id !== p.id) return;
+      if (msg.type === 'progress') { p.onProgress?.(msg.done, msg.total); return; }
+      s.pending = null;
+      if (msg.type === 'result') p.resolve({ bytes: msg.bytes, ms: msg.ms });
+      else p.reject(new Error(msg.message));
+    };
+    worker.onerror = e => {
+      e.preventDefault();
+      const p = s.pending;
+      s.pending = null;
+      worker.terminate();
+      this.slots[k] = null;
+      p?.reject(new Error(e.message || 'The calculation worker failed.'));
+    };
+    worker.postMessage({ type: 'init', module });
+    this.slots[k] = s;
+    return s;
+  }
+
+  /**
+   * Runs one engine request on worker `k`, or on the main thread when there are no workers.
+   * @param {number} k @param {WebAssembly.Module} module @param {string} kind
+   * @param {import('../core/document.js').PowerDocument | null} doc @param {Record<string, any>} options @param {OnProgress} [onProgress]
+   * @returns {Promise<{ bytes: Uint8Array, ms: number }>}
+   */
+  async exec(k, module, kind, doc, options, onProgress) {
+    const s = this.slot(k, module);
+    if (!s) {
+      this.host ??= await EngineHost.create(module);
+      const host = this.host;
+      return new Promise((resolve, reject) => setTimeout(() => {
+        const t0 = performance.now();
+        try { resolve({ bytes: request(host, kind, doc, options, onProgress), ms: performance.now() - t0 }); }
+        catch (e) { reject(e instanceof Error ? e : new Error(String(e))); }
+      }, 0));
     }
     return new Promise((resolve, reject) => {
-      this.pending = { id, resolve, reject, onProgress };
-      /** @type {Worker} */ (this.worker).postMessage({ id, kind, doc, options });
+      const id = ++this.seq;
+      s.pending = { id, resolve, reject, onProgress };
+      s.worker.postMessage({ id, kind, doc, options });
     });
   }
 
-  /** Stops the running calculation by restarting the worker. */
+  /**
+   * Runs a calculation. A new calculation cancels the one in progress.
+   * @param {CalcKind} kind @param {import('../core/document.js').PowerDocument} doc @param {Record<string, unknown>} [options]
+   * @param {OnProgress} [onProgress] @returns {Promise<{ result: any, ms: number }>}
+   */
+  async run(kind, doc, options = {}, onProgress) {
+    if (this.busy) this.cancel();
+    this.active++;
+    const t0 = performance.now();
+    try {
+      const module = await engineModule();
+      const { bytes } = kind === 'contingency'
+        ? await this.contingency(module, doc, onProgress)
+        : await this.exec(0, module, kind, doc, options, onProgress);
+      return { result: adapt(kind, jsonPayload(bytes)), ms: performance.now() - t0 };
+    } finally {
+      this.active--;
+    }
+  }
+
+  /**
+   * Contingency analysis across the pool.
+   * @param {WebAssembly.Module} module @param {import('../core/document.js').PowerDocument} doc @param {OnProgress} [onProgress]
+   */
+  async contingency(module, doc, onProgress) {
+    const plan = jsonPayload((await this.exec(0, module, 'contingency_plan', doc, {})).bytes);
+    const count = /** @type {number} */ (plan.count);
+    const parts = this.inThread || count < PARALLEL_FROM ? 1 : Math.min(this.poolSize, Math.ceil(count / MIN_CHUNK));
+    if (parts <= 1) return this.exec(0, module, 'contingency', doc, {}, onProgress);
+    const size = Math.ceil(count / parts);
+    const done = new Array(parts).fill(0);
+    const chunks = await Promise.all(Array.from({ length: parts }, (_, k) => this.exec(k, module, 'contingency_chunk', doc, { from: k * size, to: (k + 1) * size },
+      d => { done[k] = d; onProgress?.(done.reduce((a, b) => a + b, 0), count); })));
+    return this.exec(0, module, 'contingency_merge', null, chunks.map(c => jsonPayload(c.bytes)));
+  }
+
+  /** Stops the running calculation by restarting the workers. */
   cancel() {
-    if (!this.pending) return;
-    this.worker?.terminate();
-    this.worker = null;
-    this.fail(new CancelledError());
+    for (const [k, s] of this.slots.entries()) {
+      if (!s?.pending) continue;
+      s.worker.terminate();
+      this.slots[k] = null;
+      s.pending.reject(new CancelledError());
+    }
   }
 }

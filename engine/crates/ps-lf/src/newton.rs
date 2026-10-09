@@ -5,6 +5,7 @@ use ps_sparse::{CscBuilder, FaerLu, Pattern, SparseSolver};
 
 use crate::dc::dc_angles;
 use crate::flows::bus_injections;
+use crate::network::nominal_angles;
 use crate::{BusKind, MachineMode, PuNetwork, Ybus};
 
 /// Load flow settings.
@@ -81,6 +82,8 @@ pub struct Solution {
     pub grids: Vec<UnitOutput>,
     /// Per-iteration progress.
     pub log: Vec<IterationLog>,
+    /// Machines fixed at a reactive limit, in the order the outer loop fixed them: (machine index, −1 lower / +1 upper).
+    pub held: Vec<(usize, i8)>,
     /// Time spent, milliseconds: building and ordering, factorising, everything else.
     pub timing: Timing,
 }
@@ -210,14 +213,7 @@ fn layout(y: &Ybus, kind: &[BusKind]) -> JacobianLayout {
 }
 
 /// Mismatches `F = S(V) − S_spec` on the unknowns' rows, the bus currents and the largest mismatch.
-fn mismatch(
-    y: &Ybus,
-    lay: &JacobianLayout,
-    sch: &Schedule,
-    v: &[C64],
-    cur: &mut [C64],
-    f: &mut [f64],
-) -> f64 {
+fn mismatch(y: &Ybus, lay: &JacobianLayout, sch: &Schedule, v: &[C64], cur: &mut [C64], f: &mut [f64]) -> f64 {
     y.mul(v, cur);
     let mut worst = 0.0_f64;
     for i in 0..y.n {
@@ -237,14 +233,7 @@ fn mismatch(
 }
 
 /// Fills the Jacobian values: ∂S/∂θk = j·Vi·conj(δik·Ii − Yik·Vk), ∂S/∂|Vk| = Vi·conj(Yik·Vk/|Vk|) + δik·conj(Ii)·Vi/|Vi|.
-fn jacobian(
-    y: &Ybus,
-    lay: &JacobianLayout,
-    v: &[C64],
-    vm: &[f64],
-    cur: &[C64],
-    values: &mut [f64],
-) {
+fn jacobian(y: &Ybus, lay: &JacobianLayout, v: &[C64], vm: &[f64], cur: &[C64], values: &mut [f64]) {
     values.fill(0.0);
     for i in 0..y.n {
         if lay.col_a[i] == NONE && lay.col_m[i] == NONE {
@@ -287,13 +276,27 @@ pub fn solve(net: &PuNetwork, opt: &Options) -> Solution {
     let mut fixed: Vec<Option<(f64, i8)>> = vec![None; net.machines.len()];
     let mut timing = Timing::default();
 
-    // Starting point: setpoints (or the previous solution), angles from a DC load flow.
+    // Starting point: setpoints, with the nominal angles (every transformer phase shift applied outward from the
+    // references) or, for a warm start, the previous solution. A DC load flow then refines cold-start angles.
     let mut vm: Vec<f64> = net
         .buses
         .iter()
         .map(|b| if opt.warm_start { b.vm0 } else { 1.0 })
         .collect();
-    let mut va: Vec<f64> = net.buses.iter().map(|b| b.va0).collect();
+    let mut seed = vec![0.0; n];
+    for g in &net.machines {
+        if g.mode == MachineMode::Reference {
+            seed[g.bus] = g.angle;
+        }
+    }
+    for g in &net.grids {
+        seed[g.bus] = g.angle;
+    }
+    let mut va: Vec<f64> = if opt.warm_start {
+        net.buses.iter().map(|b| b.va0).collect()
+    } else {
+        nominal_angles(net, &seed)
+    };
     let sch0 = schedule(net, &fixed);
     for g in &net.machines {
         if g.mode != MachineMode::Pq {
@@ -318,23 +321,15 @@ pub fn solve(net: &PuNetwork, opt: &Options) -> Solution {
     let mut log = Vec::new();
     let mut iterations = 0;
     let mut converged = false;
-    let mut message = String::from("No energised buses.");
+    let mut message = String::from("No energised busbars: the network has no external grid or generator.");
+    let mut held = Vec::new();
     let mut worst = 0.0;
     let mut kind = sch0.kind.clone();
     if n > 0 {
         for round in 0..20 {
             let sch = schedule(net, &fixed);
             kind.clone_from(&sch.kind);
-            let out = newton(
-                &y,
-                &sch,
-                &mut vm,
-                &mut va,
-                opt,
-                &mut log,
-                &mut iterations,
-                &mut timing,
-            );
+            let out = newton(&y, &sch, &mut vm, &mut va, opt, &mut log, &mut iterations, &mut timing);
             converged = out.0;
             worst = out.1;
             message = out.2;
@@ -344,18 +339,17 @@ pub fn solve(net: &PuNetwork, opt: &Options) -> Solution {
             let units = dispatch(net, &y, &vm, &va, &fixed);
             let mut any = false;
             for (m, g) in net.machines.iter().enumerate() {
-                if g.mode != MachineMode::Pv
-                    || fixed[m].is_some()
-                    || sch.kind[g.bus] == BusKind::Reference
-                {
+                if g.mode != MachineMode::Pv || fixed[m].is_some() || sch.kind[g.bus] == BusKind::Reference {
                     continue;
                 }
                 let q = units.0[m].q;
                 if q > g.q_max + 1e-9 {
                     fixed[m] = Some((g.q_max, 1));
+                    held.push((m, 1));
                     any = true;
                 } else if q < g.q_min - 1e-9 {
                     fixed[m] = Some((g.q_min, -1));
+                    held.push((m, -1));
                     any = true;
                 }
             }
@@ -385,6 +379,7 @@ pub fn solve(net: &PuNetwork, opt: &Options) -> Solution {
         machines,
         grids,
         log,
+        held,
         timing,
     }
 }
@@ -406,11 +401,7 @@ fn newton(
     let dim = lay.pattern.nrows;
     let mut solver = FaerLu::new();
     if let Err(e) = solver.analyse(&lay.pattern) {
-        return (
-            false,
-            f64::INFINITY,
-            format!("The Jacobian could not be ordered: {e}."),
-        );
+        return (false, f64::INFINITY, format!("The Jacobian could not be ordered: {e}."));
     }
     timing.analyse_ms += clock::now_ms() - ta;
     let mut v: Vec<C64> = (0..n).map(|i| C64::from_polar(vm[i], va[i])).collect();
@@ -438,9 +429,7 @@ fn newton(
             return (
                 false,
                 worst,
-                format!(
-                    "The Jacobian is singular ({e}): check for isolated machines or zero impedances."
-                ),
+                format!("The Jacobian is singular ({e}): check for isolated machines or zero impedances."),
             );
         }
         if dx.iter().any(|d| !d.is_finite()) {

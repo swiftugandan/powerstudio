@@ -23,10 +23,7 @@ impl Pattern {
     /// Position of entry `(row, col)` in the value array, if it is part of the pattern.
     pub fn find(&self, row: usize, col: usize) -> Option<usize> {
         let (start, end) = (self.col_ptr[col], self.col_ptr[col + 1]);
-        self.row_idx[start..end]
-            .binary_search(&row)
-            .ok()
-            .map(|k| start + k)
+        self.row_idx[start..end].binary_search(&row).ok().map(|k| start + k)
     }
 }
 
@@ -101,11 +98,7 @@ impl CscBuilder {
 
     /// Compresses the entries. Returns the pattern and, for each handle, its position in the value array.
     pub fn build(self) -> (Pattern, Vec<usize>) {
-        let Self {
-            nrows,
-            ncols,
-            entries,
-        } = self;
+        let Self { nrows, ncols, entries } = self;
         let mut order: Vec<usize> = (0..entries.len()).collect();
         order.sort_unstable_by_key(|&h| (entries[h].1, entries[h].0));
         let mut col_ptr = vec![0usize; ncols + 1];

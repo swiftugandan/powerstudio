@@ -147,3 +147,42 @@ pub fn two_port(z: C64, ysh: C64, ratio: f64, shift: f64) -> (C64, C64, C64, C64
     let ytf = -(ys / t);
     (yff, yft, ytf, ytt)
 }
+
+/// Nominal angle of every bus, radians: the sum of the transformer phase shifts on a path from its island's reference,
+/// found breadth-first from the grids, then the reference machines. `seed` gives the references' own angles; buses no
+/// reference reaches keep their seed value.
+pub fn nominal_angles(net: &PuNetwork, seed: &[f64]) -> Vec<f64> {
+    let n = net.buses.len();
+    let mut va = seed.to_vec();
+    va.resize(n, 0.0);
+    let mut visited = vec![false; n];
+    let mut queue = std::collections::VecDeque::new();
+    let roots = net.grids.iter().map(|g| g.bus).chain(
+        net.machines
+            .iter()
+            .filter(|g| g.mode == MachineMode::Reference)
+            .map(|g| g.bus),
+    );
+    for b in roots {
+        if b < n && !visited[b] {
+            visited[b] = true;
+            queue.push_back(b);
+        }
+    }
+    let mut adj: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+    for br in &net.branches {
+        // The to end lags the from end by the phase shift.
+        adj[br.f].push((br.t, -br.shift));
+        adj[br.t].push((br.f, br.shift));
+    }
+    while let Some(i) = queue.pop_front() {
+        for &(to, shift) in &adj[i] {
+            if !visited[to] {
+                visited[to] = true;
+                va[to] = va[i] + shift;
+                queue.push_back(to);
+            }
+        }
+    }
+    va
+}

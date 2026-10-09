@@ -9,13 +9,14 @@
 
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { gzipSync, constants } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 
 const root = dirname(fileURLToPath(import.meta.url));
-/** The built page may run its own inline code and a worker from a Blob URL, and nothing else: no network
- * connections, no external scripts, styles, fonts or images. */
-export const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; worker-src blob:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+/** The built page may run its own inline code, compile its embedded WebAssembly engine and start workers from Blob
+ * URLs, and nothing else: no network connections, no external scripts, styles, fonts or images. */
+export const CSP = "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; worker-src blob:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 const WORKER = "new Worker(new URL('./worker/engine.worker.js', import.meta.url), { type: 'module' })";
 
 /** @param {string} dir @returns {Promise<string[]>} */
@@ -92,7 +93,10 @@ export async function buildApp() {
   const modules = await loadModules();
   const worker = program(modules, closure(modules, '/src/worker/engine.worker.js'), '/src/worker/engine.worker.js');
   const app = program(modules, closure(modules, '/src/main.js'), '/src/main.js');
-  const bundle = `globalThis.__POWERSTUDIO_WORKER_URL__=URL.createObjectURL(new Blob([${JSON.stringify(worker)}],{type:'text/javascript'}));\n${app}`.replace(/<\/script/gi, '<\\/script');
+  // The engine travels gzip-compressed and base64-encoded; gzip with a fixed level and no timestamp keeps it byte-stable.
+  const wasm = await readFile(join(root, 'src', 'engine', 'powerstudio-engine.wasm')).catch(() => { throw new Error('src/engine/powerstudio-engine.wasm is missing: run npm run build:engine.'); });
+  const engine = gzipSync(wasm, { level: constants.Z_BEST_COMPRESSION }).toString('base64');
+  const bundle = `globalThis.__POWERSTUDIO_ENGINE__=${JSON.stringify(engine)};\nglobalThis.__POWERSTUDIO_WORKER_URL__=URL.createObjectURL(new Blob([${JSON.stringify(worker)}],{type:'text/javascript'}));\n${app}`.replace(/<\/script/gi, '<\\/script');
   const css = await readFile(join(root, 'style.css'), 'utf8');
   const favicon = await readFile(join(root, 'favicon.svg'), 'utf8');
   let html = await readFile(join(root, 'index.html'), 'utf8');

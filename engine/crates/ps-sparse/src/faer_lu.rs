@@ -2,9 +2,7 @@
 
 use faer::dyn_stack::{MemBuffer, MemStack, StackReq};
 use faer::linalg::lu::partial_pivoting::factor::PartialPivLuParams;
-use faer::sparse::linalg::lu::{
-    LuRef, LuSymbolicParams, NumericLu, SymbolicLu, factorize_symbolic_lu,
-};
+use faer::sparse::linalg::lu::{LuRef, LuSymbolicParams, NumericLu, SymbolicLu, factorize_symbolic_lu};
 use faer::sparse::{SparseColMatRef, SymbolicSparseColMatRef};
 use faer::{Conj, MatMut, Par, Spec};
 
@@ -58,9 +56,7 @@ impl FaerLu {
             .ok_or(SolveError::NotReady("analyse before solve"))?;
         let n = symbolic.nrows();
         if rhs.len() != n {
-            return Err(SolveError::Shape(
-                "right-hand side has the wrong length".into(),
-            ));
+            return Err(SolveError::Shape("right-hand side has the wrong length".into()));
         }
         let req = symbolic.solve_in_place_scratch::<f64>(1, Par::Seq);
         let enough = self
@@ -95,8 +91,7 @@ impl SparseSolver for FaerLu {
             None,
             &pattern.row_idx,
         );
-        let symbolic = factorize_symbolic_lu(sym, LuSymbolicParams::default())
-            .map_err(|_| SolveError::OutOfMemory)?;
+        let symbolic = factorize_symbolic_lu(sym, LuSymbolicParams::default()).map_err(|_| SolveError::OutOfMemory)?;
         self.symbolic = Some(symbolic);
         self.pattern = Some(pattern.clone());
         self.factored = false;
@@ -135,17 +130,14 @@ impl SparseSolver for FaerLu {
             .symbolic
             .as_ref()
             .ok_or(SolveError::NotReady("analyse before factor"))?;
-        let sym =
-            SymbolicSparseColMatRef::new_checked(n, n, &pattern.col_ptr, None, &pattern.row_idx);
+        let sym = SymbolicSparseColMatRef::new_checked(n, n, &pattern.col_ptr, None, &pattern.row_idx);
         let a = SparseColMatRef::new(sym, values);
         let buf = self.scratch.as_mut().ok_or(SolveError::OutOfMemory)?;
         let stack = MemStack::new(buf);
         symbolic
             .factorize_numeric_lu(&mut self.numeric, a, Par::Seq, stack, params)
             .map_err(|e| match e {
-                faer::sparse::linalg::LuError::SymbolicSingular { index } => {
-                    SolveError::Singular { column: index }
-                }
+                faer::sparse::linalg::LuError::SymbolicSingular { index } => SolveError::Singular { column: index },
                 faer::sparse::linalg::LuError::Generic(_) => SolveError::OutOfMemory,
             })?;
         // faer does not reject numerically zero pivots; a solve of such factors yields non-finite values, which the

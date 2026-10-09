@@ -5,9 +5,17 @@
 ```sh
 npm ci
 npm run check          # strict type checking (tsc --checkJs), page and worker configs
-npm test               # Node test runner: engine, store, import, diagram, build
+npm run lint:engine    # rustfmt and Clippy on the engine, warnings denied
+npm run test:engine    # the engine's tests, native: oracle goldens, model, topology, sparse solvers
+npm test               # builds the WebAssembly engine, then the Node test runner (see below)
 npm run test:browser   # Playwright against dist/PowerStudio.html over HTTP (builds first)
 ```
+
+The oracle checks run twice, once in each build of the engine: natively in `engine/crates/ps-study/tests/` and as
+WebAssembly in `tests/*.test.mjs`, with the same goldens and tolerances. `tests/engine.test.mjs` then runs every
+study on every oracle input through both builds and requires their reports to agree to 1e-9 relative (native code
+may fuse multiply-adds that WebAssembly rounds twice), and requires repeated runs, on one engine instance and on a
+fresh one, to give identical reports.
 
 `npm run test:browser` needs Playwright's Chromium: `npx playwright install chromium`. It runs every scenario twice:
 
@@ -31,7 +39,7 @@ drawn with.
 
 ## Oracle goldens
 
-The engine tests compare against results produced by two independent programs (see `docs/research/sources.md`).
+The oracle tests compare against results produced by two independent programs (see `docs/research/sources.md`).
 The goldens are committed; CI compares against them but does not regenerate them. To regenerate after changing a
 sample:
 

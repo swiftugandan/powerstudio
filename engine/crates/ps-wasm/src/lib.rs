@@ -25,6 +25,24 @@ thread_local! {
 unsafe extern "C" {
     /// The host's monotonic clock in milliseconds (`performance.now()`).
     fn ps_now() -> f64;
+    /// Progress of the running request: `done` of `total` units.
+    fn ps_progress(done: f64, total: f64);
+}
+
+/// Forwards progress to the host.
+struct HostProgress;
+
+impl ps_study::Progress for HostProgress {
+    #[allow(unsafe_code)]
+    fn report(&mut self, done: f64, total: f64) {
+        #[cfg(target_arch = "wasm32")]
+        // SAFETY: `ps_progress` is a host function taking two numbers and returning nothing.
+        unsafe {
+            ps_progress(done, total);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = (done, total);
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -72,7 +90,7 @@ pub unsafe extern "C" fn ps_call(ptr: *const u8, len: usize) -> *mut u8 {
     ps_num::clock::install(host_now);
     // SAFETY: the host wrote `len` bytes at `ptr` into a buffer from `ps_alloc`.
     let request = unsafe { std::slice::from_raw_parts(ptr, len) };
-    let response = ENGINE.with(|e| e.borrow_mut().handle(request));
+    let response = ENGINE.with(|e| e.borrow_mut().handle(request, &mut HostProgress));
     let total = 4 + response.len();
     let mut out = Vec::with_capacity(total);
     out.extend_from_slice(&(total as u32).to_le_bytes());

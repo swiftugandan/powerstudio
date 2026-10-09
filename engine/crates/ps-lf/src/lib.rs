@@ -17,7 +17,7 @@ mod ybus;
 pub use dc::dc_angles;
 pub use flows::{BranchFlow, branch_flows, bus_injections};
 pub use network::{
-    BusKind, MachineMode, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt, two_port,
+    BusKind, MachineMode, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt, nominal_angles, two_port,
 };
 pub use newton::{IterationLog, Options, Solution, UnitOutput, solve};
 pub use ybus::Ybus;

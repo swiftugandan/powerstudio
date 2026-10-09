@@ -4,6 +4,8 @@
 //! units). Conversion into the engine's canonical model happens in a separate step that reports every approximation.
 
 pub mod matpower;
+pub mod matpower_model;
+pub mod powerstudio;
 
 /// A problem found while reading a file, located well enough for the user to find it.
 #[derive(Debug, Clone, PartialEq)]

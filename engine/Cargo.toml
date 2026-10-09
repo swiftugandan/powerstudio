@@ -17,6 +17,13 @@ serde_json = "1"
 ps-sparse = { path = "crates/ps-sparse" }
 ps-io = { path = "crates/ps-io" }
 ps-lf = { path = "crates/ps-lf" }
+ps-num = { path = "crates/ps-num" }
+ps-model = { path = "crates/ps-model" }
+ps-topology = { path = "crates/ps-topology" }
+ps-net = { path = "crates/ps-net" }
+ps-sc = { path = "crates/ps-sc" }
+ps-dyn = { path = "crates/ps-dyn" }
+ps-study = { path = "crates/ps-study" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

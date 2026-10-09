@@ -24,8 +24,7 @@ impl Ybus {
     /// admittances in the short-circuit and dynamic studies).
     pub fn build(net: &PuNetwork, extra: &[(usize, C64)]) -> Self {
         let n = net.buses.len();
-        let mut entries: Vec<(usize, usize, C64)> =
-            Vec::with_capacity(4 * net.branches.len() + n + extra.len());
+        let mut entries: Vec<(usize, usize, C64)> = Vec::with_capacity(4 * net.branches.len() + n + extra.len());
         for i in 0..n {
             entries.push((i, i, C64::ZERO));
         }
@@ -41,7 +40,8 @@ impl Ybus {
         for &(bus, y) in extra {
             entries.push((bus, bus, y));
         }
-        entries.sort_unstable_by_key(|e| (e.0, e.1));
+        // A stable sort keeps duplicate entries in insertion order, so their sum is the same on every run.
+        entries.sort_by_key(|e| (e.0, e.1));
         let mut row_ptr = vec![0usize; n + 1];
         let mut col = Vec::with_capacity(entries.len());
         let mut val: Vec<C64> = Vec::with_capacity(entries.len());

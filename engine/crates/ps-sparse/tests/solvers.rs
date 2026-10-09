@@ -57,10 +57,7 @@ fn faer_matches_dense_and_solves_transposes() -> Result<(), Box<dyn std::error::
         let mut y = b.clone();
         dense.solve(&mut y)?;
         for i in 0..n {
-            assert!(
-                (x[i] - y[i]).abs() < 1e-8 * (1.0 + y[i].abs()),
-                "n={n} entry {i}"
-            );
+            assert!((x[i] - y[i]).abs() < 1e-8 * (1.0 + y[i].abs()), "n={n} entry {i}");
         }
         // Transposed solve against the dense transpose.
         let mut xt = b.clone();
@@ -78,17 +75,12 @@ fn faer_matches_dense_and_solves_transposes() -> Result<(), Box<dyn std::error::
 }
 
 #[test]
-fn refactorising_new_values_on_the_same_pattern_reuses_the_analysis()
--> Result<(), Box<dyn std::error::Error>> {
+fn refactorising_new_values_on_the_same_pattern_reuses_the_analysis() -> Result<(), Box<dyn std::error::Error>> {
     let a = random(120, 0.05, 7);
     let mut solver = FaerLu::new();
     solver.analyse(&a.pattern)?;
     for round in 0..4 {
-        let values: Vec<f64> = a
-            .values
-            .iter()
-            .map(|v| v * (1.0 + 0.1 * round as f64))
-            .collect();
+        let values: Vec<f64> = a.values.iter().map(|v| v * (1.0 + 0.1 * round as f64)).collect();
         let m = Csc {
             pattern: a.pattern.clone(),
             values,

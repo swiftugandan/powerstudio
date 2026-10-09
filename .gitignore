@@ -9,3 +9,5 @@ __pycache__/
 
 engine/target/
 .cache/
+src/engine/powerstudio-engine.wasm
+src/engine/powerstudio-engine.wasm.sha256

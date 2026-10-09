@@ -94,17 +94,11 @@ pub fn parse(text: &str) -> Result<MatpowerCase, ParseError> {
         let value = rest[eq + 1..].trim();
         match key {
             "baseMVA" => {
-                case.base_mva =
-                    value
-                        .trim_end_matches(';')
-                        .trim()
-                        .parse::<f64>()
-                        .map_err(|_| {
-                            ParseError::new(
-                                format!("baseMVA \"{value}\" is not a number"),
-                                Some(ln + 1),
-                            )
-                        })?;
+                case.base_mva = value
+                    .trim_end_matches(';')
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|_| ParseError::new(format!("baseMVA \"{value}\" is not a number"), Some(ln + 1)))?;
             }
             "bus" | "gen" | "branch" => {
                 let rows = read_matrix(value, &mut lines, ln)?;
@@ -173,9 +167,10 @@ where
                 if tok.is_empty() {
                     continue;
                 }
-                row.push(tok.parse::<f64>().map_err(|_| {
-                    ParseError::new(format!("\"{tok}\" is not a number"), Some(ln + 1))
-                })?);
+                row.push(
+                    tok.parse::<f64>()
+                        .map_err(|_| ParseError::new(format!("\"{tok}\" is not a number"), Some(ln + 1)))?,
+                );
             }
             // A semicolon ends a row; the last piece of a line continues unless the line ends the row.
             if !row.is_empty() {
@@ -191,10 +186,7 @@ where
                 chunk = strip_comment(next).to_string();
             }
             None => {
-                return Err(ParseError::new(
-                    "matrix not closed with ];",
-                    Some(start + 1),
-                ));
+                return Err(ParseError::new("matrix not closed with ];", Some(start + 1)));
             }
         }
     }

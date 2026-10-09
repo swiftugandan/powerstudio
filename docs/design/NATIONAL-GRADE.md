@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | In progress: phase 0 complete (see section 11) |
+| Status | In progress: phases 0 and 1 complete (see section 11) |
 | Date | 2026-10-09 |
 | Scope | Take PowerStudio from a small-network study tool to studies a national transmission operator can rely on, still entirely in the browser, with no server |
 | Starting point | PowerStudio 0.1.0 (this repository): JavaScript solvers with dense matrices, bus-branch model, WebGPU diagram |
@@ -50,7 +50,7 @@ own tool on its own model. Only the operator can run that last comparison; secti
 - **Local-first and sealed.** No account, no telemetry, `connect-src 'none'`. A national model is critical
   infrastructure data; that it never leaves the device is a requirement, not a side effect.
 - **No runtime JavaScript dependencies, no framework.** The UI stays plain ES modules with strict `tsc --checkJs`.
-  Build-time tooling (Rust toolchain, `wasm-bindgen`) is allowed.
+  Build-time tooling (the Rust toolchain) is allowed.
 - **Static hosting cannot set HTTP headers.** GitHub Pages cannot send the COOP and COEP headers that cross-origin
   isolation needs, so SharedArrayBuffer and WebAssembly threads are unavailable without a service-worker workaround
   ([GitHub community discussion](https://github.com/orgs/community/discussions/13309)).
@@ -111,7 +111,8 @@ flowchart LR
 
 | Crate | Responsibility |
 | --- | --- |
-| `ps-model` | Canonical network model: equipment classes, identifiers, attributes in columnar storage, the operation log, the binary snapshot format |
+| `ps-num` | Complex numbers and the clock (the host's clock in WebAssembly) |
+| `ps-model` | Canonical network model: equipment classes, identifiers, operations with inverses, validation, the binary snapshot format, study case settings |
 | `ps-topology` | Topology processor: switch states → electrical nodes, islands, energisation; maps between node-breaker and bus-branch views |
 | `ps-sparse` | Sparse matrices (CSC), orderings, and the `SparseSolver` trait with its implementations |
 | `ps-lf` | AC load flow (Newton-Raphson polar and current-injection, fast decoupled), DC load flow, control outer loops |
@@ -120,7 +121,9 @@ flowchart LR
 | `ps-sc` | Short circuit: IEC 60909-0 equivalent voltage source method and the superposition (complete) method |
 | `ps-dyn` | Electromechanical (RMS) simulation: DAE solver, events, the dynamic model library |
 | `ps-io` | Importers and exporters: CGMES 2.4.15 and 3.0, PSS/E RAW and DYR, MATPOWER, PowerStudio JSON (0.1 documents) |
-| `ps-wasm` | The browser API (`wasm-bindgen`), memory views for result columns, error mapping |
+| `ps-net` | The per-unit network: every conversion from engineering units, used by every study |
+| `ps-study` | Studies on a model, their reports, and the request interface shared by `ps-wasm` and `ps-cli` |
+| `ps-wasm` | The browser boundary: one entry point, `ps_call`, exchanging envelopes (ADR-10) |
 | `ps-cli` | Native command-line runner over the same crates, for CI, benchmarking and oracle comparison |
 
 `ps-cli` matters as much as `ps-wasm`: it runs the same code natively, so the oracle suite, fuzzing and benchmarks run
@@ -140,14 +143,17 @@ and because it makes CGMES import a structural fit rather than a conversion:
 | Diagram | Schematic and geographic positions | DL, GL |
 | Dynamics | Dynamic model assignments and parameters | DY |
 
-Identifiers are CIM mRIDs (UUID strings) at the edges and dense `u32` indices inside the engine. Attributes are stored
-column-wise per class (`Vec<f64>` for each numeric field), which keeps the model compact, makes the binary snapshot a
-set of aligned arrays the UI can read through typed-array views without parsing, and makes bulk edits and scenario
-overlays cheap.
+Identifiers are strings (CIM mRIDs for CGMES models) and every element keeps its own; inside the engine elements
+refer to nodes by dense `u32` index. Each class is a table of records (ADR-11): a record serialises, validates and
+round-trips as one value, and the model compiles to the per-unit network, which is where the solvers need contiguous
+arrays. Result columns, which the UI reads in bulk, are the columnar part of the design.
 
-**Operations** are the only way to change the model: `Set(class, index, field, value)`, `Add`, `Remove`, `Switch`.
-The same operation log drives undo and redo in the UI, incremental updates in every worker, scenario and variant
-overlays (section 7), and the audit trail.
+**Operations** are the only way to change the model: insert, replace, set one field, remove, restore, and batches
+that apply whole or not at all. They address elements by class and identifier, so a log stays valid while tables
+grow, and applying one returns its exact inverse. The same operation log is to drive undo and redo in the UI,
+incremental updates in every worker, scenario and variant overlays (section 7), and the audit trail. A field edit
+currently round-trips its record through JSON; that is fast enough for interactive edits and is to be measured
+before scenario overlays at 70,000 buses rely on it.
 
 ### 5.3 Topology processing
 
@@ -265,12 +271,12 @@ evidence, wave by wave, not all at once.
 
 ### 6.1 Build and loading
 
-- The engine compiles with a pinned Rust toolchain (`rust-toolchain.toml`), `cargo build --locked`,
-  `--target wasm32-unknown-unknown` with SIMD128, `wasm-bindgen`, and `wasm-opt`. The `.wasm` hash is recorded in
-  every build and every study record.
-- The single-file build embeds the `.wasm` (compressed, decompressed with the built-in `DecompressionStream`), so the
-  offline HTML file still works; the hosted site serves it as a separate cached file. The expected size is a few
-  megabytes, to be measured in phase 0.
+- The engine compiles with a pinned Rust toolchain (`rust-toolchain.toml`), `cargo build --locked` and
+  `--target wasm32-unknown-unknown` with SIMD128, with no other tools. The `.wasm` hash is recorded in every build
+  and is to be recorded in every study record.
+- The single-file build embeds the `.wasm` gzip-compressed and decompresses it with the built-in
+  `DecompressionStream`, so the offline HTML file still works. At the end of phase 1 the module is 931 KB, 316 KB
+  compressed. The main thread compiles it once and sends the compiled module to every worker.
 - The Content-Security-Policy gains `'wasm-unsafe-eval'` in `script-src` (required to compile WebAssembly) and keeps
   `connect-src 'none'`.
 
@@ -446,10 +452,11 @@ writes a difference report. The design's own verification makes this comparison 
 | 4 | Node-breaker model shaped after the CGMES profiles; bus-branch is a derived view | Bus-branch only: national models and switching studies are node-breaker |
 | 5 | Edits travel as typed operations; one log serves undo, workers, scenarios and audit | Re-sending documents: impossible at 70,000 buses |
 | 6 | Projects in OPFS, catalogue in IndexedDB, File System Access where available | IndexedDB only: poor for large binary files and streaming results |
-| 7 | UI stays plain ES modules with strict `checkJs`; engine types reach the UI through generated `.d.ts` files | A framework or a TypeScript build step: no benefit that outweighs the dependency and the break with the current codebase |
+| 7 | UI stays plain ES modules with strict `checkJs`; engine report types reach the UI as JSDoc typedefs in `src/engine/reports.js`, kept beside the Rust reports, with the native-versus-WebAssembly test comparing every field | A framework or a TypeScript build step: no benefit that outweighs the dependency and the break with the current codebase |
 | 8 | Dynamic models in Rust behind a `DynModel` trait, delivered in validated waves | A model description language interpreted at run time: slower, and harder to verify than compiled, tested models |
-| 10 | The WebAssembly boundary is one exported function, `ps_call`, taking and returning an envelope (u32 header length, JSON header, binary payload), plus `ps_alloc` and `ps_free`; no generated bindings | `wasm-bindgen`: generated glue tied to a tool version, many exports that grow with the engine. A single entry point keeps the boundary stable and the build free of extra tools |
 | 9 | Short circuit validated against open references only (pandapower's encoding of the TR 60909-4 and VDE examples); it stays "IEC 60909-style" | Buying the standard to claim conformance: the project makes no purchases. Claiming conformance from formulas alone: not evidence |
+| 10 | The WebAssembly boundary is one exported function, `ps_call`, taking and returning an envelope (u32 header length, JSON header, binary payload), plus `ps_alloc` and `ps_free`; no generated bindings | `wasm-bindgen`: generated glue tied to a tool version, many exports that grow with the engine. A single entry point keeps the boundary stable and the build free of extra tools |
+| 11 | Model classes are tables of records addressed by identifier, not columns of fields | Columnar storage: the solvers never read the model directly (they read the per-unit network), so columns would add bookkeeping to every import and edit without a measured benefit |
 
 ## 11. Roadmap
 
@@ -458,7 +465,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | Phase | Delivers | Exit criteria |
 | --- | --- | --- |
 | **0. Spikes** — done | Sparse LU in `wasm32` on ACTIVSg25k and 70k; faer confirmed; WebAssembly memory measured | See the phase 0 results below |
-| **1. Engine foundation** | Rust workspace, model and operations, snapshot format, topology processor, sparse Newton-Raphson with 0.1's controls, coordinator and pool, `ps-cli` | Every 0.1 oracle test passes on the engine; ACTIVSg25k solves within target; the JavaScript solvers are deleted |
+| **1. Engine foundation** — done | Rust workspace, model and operations, snapshot format, topology processor, per-unit network, and all four 0.1 calculations ported at 0.1 parity (sparse Newton-Raphson with 0.1's controls, short circuit, N-1, classical stability; the national-grade versions are phases 3, 5 and 6); coordinator and worker pool; `ps-cli` | Every 0.1 oracle test passes on the engine; ACTIVSg25k solves within target; the JavaScript solvers are deleted. See the phase 1 results below |
 | **2. Data exchange** | CGMES 2.4.15 and 3.0 import (EQ, TP, SSH, SV, DL, GL) and SSH/SV export; PSS/E RAW import and export; validation reports | CGMES conformity configurations and ACTIVSg cases import and agree with PowSyBl to the fidelity bar |
 | **3. Steady-state completeness** | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis |
 | **4. Workspace at scale** (runs alongside 2 and 3) | Projects, variants, scenarios, study cases; data manager; substation diagrams; renderer at scale; result browser and comparison; reports | A 70,000-bus project is usable end to end with no frame over 100 ms |
@@ -491,6 +498,32 @@ Findings:
   the normal path, but cold-start robustness (an optimal step multiplier, a fast-decoupled pre-solve) is added to
   phase 3.
 - **The module is 486 KB** before compression.
+
+### Phase 1 results (2026-10-09)
+
+The exit criteria are met. The JavaScript solvers (`loadflow.js`, `shortcircuit.js`, `contingency.js`, `rms.js`,
+`dcflow.js`, `linalg.js`, `network.js`) are deleted; the app runs every calculation on the Rust engine as
+WebAssembly. Evidence:
+
+- **Oracle parity, twice.** The 0.1 oracle tests pass natively (39 engine tests) and through the WebAssembly build
+  (62 Node tests), with the same goldens and tolerances. Agreement is as in 0.1: MATPOWER case14 to 6.7e-16 p.u.,
+  pandapower load flows to 6.7e-16 p.u., short circuit to 1.3e-15 relative (three-phase and line-to-line) and 1.7e-8
+  (earth faults).
+- **Native and WebAssembly agree.** Every study on every oracle input differs between the two builds by at most
+  1.1e-12 relative; 39,564 of the 41,102 numbers in the reports are bit-identical. Repeated runs, on one instance and
+  on a fresh one, give identical reports.
+- **The app works end to end.** All 28 Playwright tests pass in both projects on the built file, which loads the
+  embedded engine with no network request; the development server loads the module as a file under its own policy.
+- **Scale through the real path** (MATPOWER → model → topology → per-unit network → Newton-Raphson, WebAssembly
+  under Node 26 on an Apple M5 Pro): ACTIVSg25k in 297 ms, ACTIVSg70k in 686 ms from its stored voltages, against
+  285 ms and 500 ms natively. Engine memory at 70,000 buses is 332 MB. docs/ENGINE.md has the full table.
+- **Parallel contingency analysis.** Outages split into contiguous chunks across up to eight workers; the engine
+  merges them so the report equals a sequential run, which a test checks for 2, 3 and 7 chunks.
+
+What phase 1 leaves for later: the app still sends its document with each request (the engine re-uses its import
+when the document is unchanged); moving the workspace onto the model, with snapshots sent once and operations after,
+belongs to phase 4, where the editor itself changes. The model's operations, validation and snapshots are built and
+tested but not yet used by the app. ACTIVSg70k still needs a warm start (phase 3).
 
 ## 12. Risks
 

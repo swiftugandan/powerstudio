@@ -22,7 +22,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   webServer: {
-    command: 'node build.mjs && node serve.mjs',
+    command: 'node scripts/build-engine.mjs && node build.mjs && node serve.mjs',
     env: { SERVE_ROOT: 'dist', PORT: String(port) },
     url: `http://127.0.0.1:${port}/PowerStudio.html`,
     reuseExistingServer: !process.env.CI,

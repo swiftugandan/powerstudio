@@ -1,32 +1,41 @@
 /** Host side of the engine's WebAssembly boundary: instantiates the module and exchanges envelopes with it.
  *
  * An envelope is a little-endian u32 header length, a UTF-8 JSON header and an optional binary payload. The engine has
- * one entry point, `ps_call`; requests name an operation in their header's `op`. This module works the same in a
- * browser worker and in Node, so the engine tests run without a browser. */
+ * one entry point, `ps_call`; requests name an operation in their header's `op` (engine/crates/ps-wasm/src/engine.rs
+ * lists them). This module runs unchanged on the main thread, in a worker and in Node, so the engine tests need no
+ * browser. */
 
 /** @typedef {{ header: Record<string, any>, payload: Uint8Array }} Envelope */
+/** @typedef {{ memory: WebAssembly.Memory, ps_alloc: (n: number) => number, ps_free: (p: number, n: number) => void, ps_call: (p: number, n: number) => number }} EngineExports */
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 export class EngineHost {
-  /** @param {WebAssembly.Instance} instance */
-  constructor(instance) {
-    this.exports = /** @type {{ memory: WebAssembly.Memory, ps_alloc: (n: number) => number, ps_free: (p: number, n: number) => void, ps_call: (p: number, n: number) => number }} */ (/** @type {unknown} */ (instance.exports));
+  /** @param {WebAssembly.Instance} instance @param {{ progress: ((done: number, total: number) => void) | null }} hooks */
+  constructor(instance, hooks) {
+    this.exports = /** @type {EngineExports} */ (/** @type {unknown} */ (instance.exports));
+    this.hooks = hooks;
   }
 
-  /** Instantiates the engine from its compiled bytes. @param {BufferSource} bytes */
-  static async create(bytes) {
+  /** Instantiates the engine from a compiled module or its bytes. @param {WebAssembly.Module | BufferSource} source */
+  static async create(source) {
     const now = typeof performance !== 'undefined' ? () => performance.now() : () => Date.now();
-    const { instance } = await WebAssembly.instantiate(bytes, { env: { ps_now: now } });
-    return new EngineHost(instance);
+    /** @type {{ progress: ((done: number, total: number) => void) | null }} */
+    const hooks = { progress: null };
+    const imports = { env: { ps_now: now, ps_progress: (/** @type {number} */ done, /** @type {number} */ total) => hooks.progress?.(done, total) } };
+    const instance = source instanceof WebAssembly.Module
+      ? await WebAssembly.instantiate(source, imports)
+      : (await WebAssembly.instantiate(source, imports)).instance;
+    return new EngineHost(instance, hooks);
   }
 
   /**
    * Sends one request and returns the reply. Throws when the engine reports an error.
-   * @param {Record<string, any>} header @param {Uint8Array} [payload] @returns {Envelope}
+   * @param {Record<string, any>} header @param {Uint8Array} [payload] @param {(done: number, total: number) => void} [onProgress]
+   * @returns {Envelope}
    */
-  call(header, payload = new Uint8Array(0)) {
+  call(header, payload = new Uint8Array(0), onProgress) {
     const head = encoder.encode(JSON.stringify(header));
     const len = 4 + head.length + payload.length;
     const { ps_alloc, ps_free, ps_call } = this.exports;
@@ -35,8 +44,10 @@ export class EngineHost {
     new DataView(mem.buffer).setUint32(ptr, head.length, true);
     mem.set(head, ptr + 4);
     mem.set(payload, ptr + 4 + head.length);
-    const out = ps_call(ptr, len);
-    ps_free(ptr, len);
+    this.hooks.progress = onProgress ?? null;
+    let out;
+    try { out = ps_call(ptr, len); }
+    finally { this.hooks.progress = null; ps_free(ptr, len); }
     // The call may have grown memory; take fresh views.
     mem = new Uint8Array(this.exports.memory.buffer);
     const view = new DataView(mem.buffer);
@@ -48,9 +59,19 @@ export class EngineHost {
     if (reply.ok === false) throw new Error(reply.error);
     return { header: reply, payload: body };
   }
+
+  /** The engine's version. */
+  version() {
+    return /** @type {string} */ (this.call({ op: 'version' }).header.engine);
+  }
 }
 
-/** Reads a payload of little-endian f64 values. @param {Uint8Array} bytes */
-export function f64s(bytes) {
-  return new Float64Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 8);
+/** Reads a JSON payload. @param {Uint8Array} bytes */
+export function jsonPayload(bytes) {
+  return JSON.parse(decoder.decode(bytes));
+}
+
+/** Encodes text for a payload. @param {string} text */
+export function textPayload(text) {
+  return encoder.encode(text);
 }

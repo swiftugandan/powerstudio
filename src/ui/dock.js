@@ -162,7 +162,7 @@ export class Dock {
   staleNote() { return this.tab !== 'output' && this.app.resultsStale(this.tab) ? h('span', { class: 'pill warn', html: `${icon('warning', 13)}Calculated before the last edit` }) : null; }
 
   renderLoadFlow() {
-    const app = this.app, { result: r, ms } = /** @type {{ result: import('../core/loadflow.js').LoadFlowResult, ms: number }} */ (app.results.loadflow);
+    const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').LoadFlowResult, ms: number }} */ (app.results.loadflow);
     const pill = r.converged ? h('span', { class: 'pill ok', html: `${icon('check', 13)}Converged in ${r.iterations} iteration${r.iterations === 1 ? '' : 's'}` }) : h('span', { class: 'pill bad', html: `${icon('error', 13)}${esc(r.message)}` });
     const summary = h('div', { class: 'summary', html: `<span>Generation <b>${fixed(r.totals.generation, 2)} MW</b></span><span>Load <b>${fixed(r.totals.load, 2)} MW</b></span><span>Losses <b>${fixed(r.totals.losses, 3)} MW</b></span><span>Mismatch <b>${r.mismatch.toExponential(1)} MVA</b></span><span>Time <b>${duration(ms)}</b></span>` });
     const seg = this.segmented([['buses', `Busbars ${r.buses.length}`], ['branches', `Branches ${r.branches.length}`], ['units', `Machines and loads ${r.gens.length + r.grids.length + r.loads.length + r.shunts.length}`]], this.lfView, v => { this.lfView = v; });
@@ -211,7 +211,7 @@ export class Dock {
   }
 
   renderShortCircuit() {
-    const app = this.app, { result: r, ms } = /** @type {{ result: import('../core/shortcircuit.js').ShortCircuitResult, ms: number }} */ (app.results.shortcircuit);
+    const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').ShortCircuitResult, ms: number }} */ (app.results.shortcircuit);
     const where = r.location ? `at ${this.nameOf(r.location)}` : 'at every busbar';
     const pill = h('span', { class: 'pill neutral', text: `${enumLabel('fault', r.fault)} · ${r.mode === 'max' ? 'maximum' : 'minimum'} · κ method ${r.kappaMethod}` });
     const summary = h('div', { class: 'summary', html: `<span>Fault <b>${esc(where)}</b></span><span>Busbars <b>${r.buses.length}</b></span><span>Time <b>${duration(ms)}</b></span>` });
@@ -247,12 +247,12 @@ export class Dock {
   }
 
   renderContingency() {
-    const app = this.app, { result: r, ms } = /** @type {{ result: import('../core/contingency.js').ContingencyResult, ms: number }} */ (app.results.contingency);
+    const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').ContingencyResult, ms: number }} */ (app.results.contingency);
     const failed = r.cases.filter(c => !c.converged).length, viol = r.cases.filter(c => c.converged && c.violations.some(v => !v.inBase)).length;
     const pill = failed || viol ? h('span', { class: 'pill bad', html: `${icon('warning', 13)}${viol} outage${viol === 1 ? '' : 's'} with new violations${failed ? `, ${failed} not solvable` : ''}` }) : h('span', { class: 'pill ok', html: `${icon('check', 13)}Secure under every single outage` });
     const summary = h('div', { class: 'summary', html: `<span>Outages <b>${r.cases.length}</b></span><span>Loading limit <b>${r.limit} %</b></span><span>Base case max <b>${fixed(r.base.maxLoading, 1)} %</b></span><span>Time <b>${duration(ms)}</b></span>` });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary);
-    const describe = (/** @type {import('../core/contingency.js').ContingencyCase} */ c) => c.violations.map(v => v.kind === 'loading' ? `${this.nameOf(v.id)} ${fixed(v.value, 0)} %` : `${this.nameOf(v.id)} ${fixed(v.value, 3)} p.u.`).join(', ');
+    const describe = (/** @type {import('../engine/reports.js').ContingencyCase} */ c) => c.violations.map(v => v.kind === 'loading' ? `${this.nameOf(v.id)} ${fixed(v.value, 0)} %` : `${this.nameOf(v.id)} ${fixed(v.value, 3)} p.u.`).join(', ');
     const table = this.table([
       { key: 'name', label: 'Outage', value: (/** @type {any} */ c) => this.nameOf(c.id) },
       { key: 'cls', label: 'Type', value: (/** @type {any} */ c) => CLASSES[/** @type {import('../core/catalog.js').ElementClass} */ (c.cls)].label },
@@ -269,7 +269,7 @@ export class Dock {
   }
 
   renderRms() {
-    const app = this.app, { result: r, ms } = /** @type {{ result: import('../core/rms.js').RmsResult, ms: number }} */ (app.results.rms);
+    const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').RmsResult, ms: number }} */ (app.results.rms);
     const pill = r.stable ? h('span', { class: 'pill ok', html: `${icon('check', 13)}${esc(r.message)}` }) : h('span', { class: 'pill bad', html: `${icon('warning', 13)}${esc(r.message)}` });
     const vars = /** @type {Array<[string, string]>} */ ([['delta', 'Rotor angle'], ['speed', 'Speed'], ['pe', 'Electrical power'], ['v', 'Busbar voltage']]);
     const seg = this.segmented(vars, this.rmsVar, v => { this.rmsVar = v; });

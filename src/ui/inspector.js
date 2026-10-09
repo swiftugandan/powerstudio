@@ -140,7 +140,7 @@ export class Inspector {
     const kind = app.overlayKind;
     if (kind === 'none') return null;
     if (kind === 'loadflow' && R.loadflow) {
-      /** @type {import('../core/loadflow.js').LoadFlowResult} */
+      /** @type {import('../engine/reports.js').LoadFlowResult} */
       const r = R.loadflow.result;
       if (r.deenergized.includes(el.id)) rows.push(['State', 'De-energised']);
       const b = r.buses.find(x => x.id === el.id);
@@ -154,7 +154,7 @@ export class Inspector {
         if ('atLimit' in u && u.atLimit) rows.push(['Limit', u.atLimit === 'max' ? 'At upper Q limit' : 'At lower Q limit']);
       }
     } else if (kind === 'shortcircuit' && R.shortcircuit) {
-      /** @type {import('../core/shortcircuit.js').ShortCircuitResult} */
+      /** @type {import('../engine/reports.js').ShortCircuitResult} */
       const r = R.shortcircuit.result;
       const b = r.buses.find(x => x.id === el.id);
       if (b) rows.push(['Ik″', `${fixed(b.ikss, 3)} kA`], ['ip', `${fixed(b.ip, 3)} kA`], ['Ith (1 s)', `${fixed(b.ith, 3)} kA`], ['Sk″', `${fixed(b.skss, 1)} MVA`],
@@ -163,7 +163,7 @@ export class Inspector {
       const c = r.contributions.find(x => x.id === el.id);
       if (c) rows.push(['Fault current', `${fixed(Math.max(c.iFrom, c.iTo), 3)} kA`]);
     } else if (kind === 'contingency' && R.contingency) {
-      /** @type {import('../core/contingency.js').ContingencyResult} */
+      /** @type {import('../engine/reports.js').ContingencyResult} */
       const r = R.contingency.result;
       const w = r.worstLoading[el.id];
       if (w) rows.push(['Worst loading', `${fixed(w.value, 1)} %`], ['Worst outage', app.store.get(w.outage)?.name || w.outage]);
@@ -172,7 +172,7 @@ export class Inspector {
       const c = r.cases.find(x => x.id === el.id);
       if (c) rows.push(['When out of service', c.converged ? `${c.violations.length} violation${c.violations.length === 1 ? '' : 's'}` : 'No convergence']);
     } else if (kind === 'rms' && R.rms) {
-      /** @type {import('../core/rms.js').RmsResult} */
+      /** @type {import('../engine/reports.js').RmsResult} */
       const r = R.rms.result;
       const m = r.machines.find(x => x.id === el.id);
       if (m) rows.push(['Rotor angle range', `${fixed(Math.min(...m.delta), 1)}° … ${fixed(Math.max(...m.delta), 1)}°`], ['Speed range', `${fixed(Math.min(...m.speed), 3)} … ${fixed(Math.max(...m.speed), 3)} Hz`]);

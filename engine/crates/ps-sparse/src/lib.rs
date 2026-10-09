@@ -10,10 +10,12 @@
 //! [`FaerLu`] is the production solver (faer's sparse LU with COLAMD ordering and partial pivoting). [`DenseLu`] is a
 //! reference for tests on small systems.
 
+mod complex;
 mod csc;
 mod dense;
 mod faer_lu;
 
+pub use complex::ComplexLu;
 pub use csc::{Csc, CscBuilder, Pattern};
 pub use dense::DenseLu;
 pub use faer_lu::FaerLu;

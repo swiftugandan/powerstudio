@@ -1,31 +1,29 @@
 #!/usr/bin/env node
-/** Times the engine's load flow in WebAssembly (under Node's V8, the engine Chromium uses) on MATPOWER cases.
+/** Times the engine's load flow in WebAssembly (under Node's V8, the JavaScript engine of Chromium) on MATPOWER cases,
+ * through the full path: MATPOWER → model → topology → per-unit network → Newton-Raphson.
  * Usage: node scripts/wasm-bench.mjs <engine.wasm> <case.m>... [--warm] [--repeat n] */
 import { readFile } from 'node:fs/promises';
 import { EngineHost } from '../src/engine/host.js';
 
 const args = process.argv.slice(2);
-const wasm = args.shift();
+const wasm = /** @type {string} */ (args.shift());
 const warm = args.includes('--warm');
 const ri = args.indexOf('--repeat');
 const repeat = ri >= 0 ? Number(args[ri + 1]) : 3;
 const cases = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--repeat');
+const bytes = await readFile(wasm);
 const t0 = performance.now();
-const engine = await EngineHost.create(await readFile(/** @type {string} */ (wasm)));
-const instantiate = performance.now() - t0;
-console.log(JSON.stringify({ instantiate_ms: instantiate, engine: engine.call({ op: 'version' }).header.engine }));
+const engine = await EngineHost.create(bytes);
+console.log(JSON.stringify({ module_kb: +(bytes.length / 1024).toFixed(1), instantiate_ms: +(performance.now() - t0).toFixed(1), engine: engine.version() }));
 for (const path of cases) {
-  const bytes = await readFile(path);
-  const tl = performance.now();
-  const loaded = engine.call({ op: 'load_matpower' }, bytes).header;
-  const load = performance.now() - tl;
-  const runs = [];
-  let last;
+  const loaded = engine.call({ op: 'load_matpower' }, await readFile(path)).header;
+  /** @type {any} */
+  let best = null;
   for (let k = 0; k < repeat; k++) {
-    const t = performance.now();
-    last = engine.call({ op: 'solve_lf', tolerance: 1e-8, warm_start: warm, dc_start: !warm }).header;
-    runs.push(performance.now() - t);
+    const r = engine.call({ op: 'solve_model', tolerance: 1e-6, warm_start: warm, dc_start: !warm }).header;
+    if (!best || r.timing.totalMs < best.timing.totalMs) best = r;
   }
-  console.log(JSON.stringify({ case: loaded.name, buses: loaded.buses, load_ms: +load.toFixed(1), converged: last?.converged, iterations: last?.iterations,
-    memory_mb: +(engine.exports.memory.buffer.byteLength / 2 ** 20).toFixed(1), solve_ms_best: +Math.min(...runs).toFixed(1), analyse_ms: +last?.timing.analyse_ms.toFixed(1), factor_solve_ms: +last?.timing.factor_solve_ms.toFixed(1) }));
+  console.log(JSON.stringify({ case: loaded.name, nodes: loaded.nodes, parse_ms: +loaded.parse_ms.toFixed(1), convert_ms: +loaded.convert_ms.toFixed(1),
+    converged: best.converged, iterations: best.iterations, total_ms: +best.timing.totalMs.toFixed(1), analyse_ms: +best.timing.analyseMs.toFixed(1),
+    factor_solve_ms: +best.timing.factorSolveMs.toFixed(1), memory_mb: +(engine.exports.memory.buffer.byteLength / 2 ** 20).toFixed(1) }));
 }

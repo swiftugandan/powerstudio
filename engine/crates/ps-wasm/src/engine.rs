@@ -1,7 +1,21 @@
 //! The engine state behind the WebAssembly boundary and its request handler. Natively testable: nothing here touches
 //! raw memory.
+//!
+//! Requests (the header's `op`):
+//!
+//! | `op` | Header fields | Payload | Reply |
+//! | --- | --- | --- | --- |
+//! | `version` | | | `engine` version |
+//! | `study` | `kind`, `options` | PowerStudio document (JSON text); none for `contingency_merge` | the report as JSON text |
+//! | `load_matpower` | | MATPOWER case text | model size and conversion issues |
+//! | `solve_model` | `tolerance` (MVA), `warm_start`, `dc_start`, `q_limits` | | load flow summary |
+//!
+//! Reports travel as a payload, not in the header, so the header stays small and the host can parse them separately.
 
 use serde_json::{Value, json};
+
+use ps_study::api::{self, Loaded};
+use ps_study::{LoadFlowRun, Progress};
 
 /// A decoded message: JSON header and binary payload.
 #[derive(Debug, Clone, PartialEq)]
@@ -23,8 +37,8 @@ impl Envelope {
             .checked_add(n)
             .filter(|&e| e <= bytes.len())
             .ok_or("the header length exceeds the request")?;
-        let header = serde_json::from_slice(&bytes[4..end])
-            .map_err(|e| format!("the header is not valid JSON: {e}"))?;
+        let header =
+            serde_json::from_slice(&bytes[4..end]).map_err(|e| format!("the header is not valid JSON: {e}"))?;
         Ok(Self {
             header,
             payload: bytes[end..].to_vec(),
@@ -42,16 +56,26 @@ impl Envelope {
     }
 }
 
-/// The engine instance: loaded networks and the results of the latest studies.
-#[derive(Debug, Default)]
+/// The engine instance: the last document it read and the model loaded for benchmarks.
+#[derive(Default)]
 pub struct Engine {
-    network: Option<ps_bridge::Converted>,
+    document: Option<(Vec<u8>, Loaded, Vec<String>)>,
+    model: Option<ps_model::Model>,
+}
+
+impl std::fmt::Debug for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Engine")
+            .field("document", &self.document.is_some())
+            .field("model", &self.model.is_some())
+            .finish()
+    }
 }
 
 impl Engine {
     /// Handles one encoded request and returns the encoded response. Errors become `{"ok": false, "error": …}`.
-    pub fn handle(&mut self, request: &[u8]) -> Vec<u8> {
-        let reply = Envelope::decode(request).and_then(|env| self.dispatch(&env));
+    pub fn handle(&mut self, request: &[u8], progress: &mut dyn Progress) -> Vec<u8> {
+        let reply = Envelope::decode(request).and_then(|env| self.dispatch(&env, progress));
         match reply {
             Ok(env) => env.encode(),
             Err(error) => Envelope {
@@ -62,70 +86,107 @@ impl Engine {
         }
     }
 
-    fn dispatch(&mut self, req: &Envelope) -> Result<Envelope, String> {
+    /// Reads a document, re-using the previous one when the bytes are the same.
+    fn document(&mut self, bytes: &[u8]) -> Result<(&Loaded, &[String]), String> {
+        let same = self.document.as_ref().is_some_and(|(b, _, _)| b.as_slice() == bytes);
+        if !same {
+            let text = std::str::from_utf8(bytes).map_err(|_| "the document is not UTF-8 text")?;
+            let imp = ps_io::powerstudio::parse(text).map_err(|e| e.to_string())?;
+            self.document = Some((
+                bytes.to_vec(),
+                Loaded {
+                    model: imp.model,
+                    study: imp.study,
+                },
+                imp.issues,
+            ));
+        }
+        let (_, loaded, issues) = self.document.as_ref().ok_or("no document")?;
+        Ok((loaded, issues))
+    }
+
+    fn dispatch(&mut self, req: &Envelope, progress: &mut dyn Progress) -> Result<Envelope, String> {
         let op = req
             .header
             .get("op")
             .and_then(Value::as_str)
             .ok_or("the request has no op")?;
         match op {
-            "version" => Ok(ok(json!({ "engine": env!("CARGO_PKG_VERSION") }))),
+            "version" => Ok(ok(json!({ "engine": env!("CARGO_PKG_VERSION") }), Vec::new())),
+            "study" => {
+                let kind = req
+                    .header
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .ok_or("the study request has no kind")?;
+                let opts = req.header.get("options").cloned().unwrap_or(Value::Null);
+                let (report, issues) = if kind == "contingency_merge" {
+                    (api::handle(kind, &opts, None, progress)?, Vec::new())
+                } else {
+                    let (doc, issues) = self.document(&req.payload)?;
+                    let issues = issues.to_vec();
+                    (api::handle(kind, &opts, Some(doc), progress)?, issues)
+                };
+                Ok(ok(json!({ "issues": issues }), report.to_string().into_bytes()))
+            }
             "load_matpower" => {
-                let text = std::str::from_utf8(&req.payload)
-                    .map_err(|_| "the MATPOWER file is not UTF-8 text")?;
+                let text = std::str::from_utf8(&req.payload).map_err(|_| "the MATPOWER file is not UTF-8 text")?;
                 let t0 = ps_num::clock::now_ms();
                 let case = ps_io::matpower::parse(text).map_err(|e| e.to_string())?;
-                let conv = ps_bridge::from_matpower(&case);
-                let (buses, branches) = (conv.net.buses.len(), conv.net.branches.len());
-                self.network = Some(conv);
-                Ok(ok(
-                    json!({ "name": case.name, "buses": buses, "branches": branches, "parse_ms": ps_num::clock::now_ms() - t0 }),
-                ))
+                let t1 = ps_num::clock::now_ms();
+                let imp = ps_io::matpower_model::to_model(&case);
+                let t2 = ps_num::clock::now_ms();
+                let m = &imp.model;
+                let header = json!({
+                    "name": m.meta.name, "nodes": m.nodes.len(), "branches": m.lines.len() + m.transformers2.len(),
+                    "parse_ms": t1 - t0, "convert_ms": t2 - t1, "issues": imp.issues,
+                });
+                self.model = Some(imp.model);
+                Ok(ok(header, Vec::new()))
             }
-            "solve_lf" => {
-                let conv = self.network.as_ref().ok_or("no network is loaded")?;
+            "solve_model" => {
+                let model = self.model.as_ref().ok_or("no model is loaded")?;
                 let h = &req.header;
-                let opt = ps_lf::Options {
-                    tolerance: h.get("tolerance").and_then(Value::as_f64).unwrap_or(1e-8),
-                    max_iter: h
-                        .get("max_iter")
-                        .and_then(Value::as_u64)
-                        .map_or(30, |v| v as usize),
+                let settings = ps_model::study::LoadFlowSettings {
+                    tolerance: h.get("tolerance").and_then(Value::as_f64).unwrap_or(1e-6),
                     enforce_q_limits: h.get("q_limits").and_then(Value::as_bool).unwrap_or(false),
                     dc_start: h.get("dc_start").and_then(Value::as_bool).unwrap_or(true),
-                    warm_start: h
-                        .get("warm_start")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
+                    ..Default::default()
                 };
-                let sol = ps_lf::solve(&conv.net, &opt);
-                // Voltages travel as a binary payload: magnitudes then angles, f64 little-endian.
-                let mut payload = Vec::with_capacity(16 * sol.vm.len());
-                for v in sol.vm.iter().chain(&sol.va) {
-                    payload.extend_from_slice(&v.to_le_bytes());
-                }
-                Ok(Envelope {
-                    header: json!({
-                        "ok": true, "converged": sol.converged, "message": sol.message, "iterations": sol.iterations,
-                        "mismatch": sol.mismatch, "n": sol.vm.len(),
-                        "timing": { "analyse_ms": sol.timing.analyse_ms, "factor_solve_ms": sol.timing.factor_solve_ms, "total_ms": sol.timing.total_ms },
+                let warm = h.get("warm_start").and_then(Value::as_bool).unwrap_or(false);
+                let start = warm.then(|| {
+                    model
+                        .nodes
+                        .iter()
+                        .map(|n| (n.v0 > 0.0).then(|| (n.v0, n.angle0.to_radians())))
+                        .collect()
+                });
+                let r = ps_study::loadflow::run(
+                    model,
+                    &LoadFlowRun {
+                        settings,
+                        start,
+                        ..Default::default()
+                    },
+                );
+                Ok(ok(
+                    json!({
+                        "converged": r.converged, "message": r.message, "iterations": r.iterations, "mismatch": r.mismatch,
+                        "buses": r.buses.len(), "timing": r.timing,
                     }),
-                    payload,
-                })
+                    Vec::new(),
+                ))
             }
             other => Err(format!("unknown op \"{other}\"")),
         }
     }
 }
 
-fn ok(mut header: Value) -> Envelope {
+fn ok(mut header: Value, payload: Vec<u8>) -> Envelope {
     if let Some(obj) = header.as_object_mut() {
         obj.insert("ok".into(), Value::Bool(true));
     }
-    Envelope {
-        header,
-        payload: Vec::new(),
-    }
+    Envelope { header, payload }
 }
 
 #[cfg(test)]
@@ -140,6 +201,7 @@ mod tests {
         };
         assert_eq!(Envelope::decode(&env.encode())?, env);
         let mut engine = Engine::default();
+        let mut quiet = ps_study::Silent;
         let reply = Envelope::decode(
             &engine.handle(
                 &Envelope {
@@ -147,10 +209,11 @@ mod tests {
                     payload: vec![],
                 }
                 .encode(),
+                &mut quiet,
             ),
         )?;
         assert_eq!(reply.header["ok"], json!(false));
-        let reply = Envelope::decode(&engine.handle(&[1, 2]))?;
+        let reply = Envelope::decode(&engine.handle(&[1, 2], &mut quiet))?;
         assert_eq!(reply.header["ok"], json!(false));
         Ok(())
     }

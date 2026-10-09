@@ -2,7 +2,7 @@
  *
  * The field specs are the single source of truth for the inspector, for validation of imported files and for the
  * documentation tables in docs/ENGINE.md. Values are stored in engineering units (kV, MW, Ω/km, %) as a network
- * engineer enters them; the solvers convert to per unit in src/core/network.js. */
+ * engineer enters them; the engine converts them to its model on import (engine/crates/ps-io/src/powerstudio.rs). */
 
 /**
  * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus'} FieldType

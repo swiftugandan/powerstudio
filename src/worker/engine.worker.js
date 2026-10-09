@@ -1,26 +1,27 @@
-/** Calculation worker: runs the solvers off the main thread so the diagram stays responsive.
- * Messages in: { id, kind, doc, options }. Messages out: { id, type: 'progress' | 'result' | 'error', ... }. */
+/** Calculation worker: one engine instance, so the diagram stays responsive while it computes.
+ * Messages in: `{ type: 'init', module }` once, then `{ id, kind, doc, options }`. Messages out: `{ id, type: 'progress',
+ * done, total }`, then `{ id, type: 'result', bytes, ms }` (the JSON report, transferred) or `{ id, type: 'error', message }`. */
 
-import { runLoadFlow } from '../core/loadflow.js';
-import { runShortCircuit } from '../core/shortcircuit.js';
-import { runContingency } from '../core/contingency.js';
-import { runRms } from '../core/rms.js';
+import { EngineHost } from '../engine/host.js';
+import { request } from '../engine/studies.js';
 
-/** @param {{ id: number, kind: string, doc: import('../core/document.js').PowerDocument, options?: Record<string, unknown> }} msg */
-function handle(msg) {
+/** @type {Promise<EngineHost> | null} */
+let engine = null;
+
+self.onmessage = async (/** @type {MessageEvent} */ event) => {
+  const msg = event.data;
+  if (msg.type === 'init') {
+    engine = EngineHost.create(msg.module);
+    return;
+  }
   const { id, kind, doc, options = {} } = msg;
-  const progress = (/** @type {number} */ done, /** @type {number} */ total) => postMessage({ id, type: 'progress', done, total });
-  const t0 = performance.now();
-  let result;
-  if (kind === 'loadflow') result = runLoadFlow(doc, options);
-  else if (kind === 'shortcircuit') result = runShortCircuit(doc, options);
-  else if (kind === 'contingency') result = runContingency(doc, { onProgress: progress });
-  else if (kind === 'rms') result = runRms(doc, { ...options, onProgress: progress });
-  else throw new Error(`Unknown calculation ${kind}.`);
-  postMessage({ id, type: 'result', result, ms: performance.now() - t0 });
-}
-
-self.onmessage = (/** @type {MessageEvent} */ event) => {
-  try { handle(event.data); }
-  catch (error) { postMessage({ id: event.data.id, type: 'error', message: error instanceof Error ? error.message : String(error) }); }
+  try {
+    if (!engine) throw new Error('The calculation engine was not started.');
+    const host = await engine;
+    const t0 = performance.now();
+    const bytes = request(host, kind, doc, options, (done, total) => postMessage({ id, type: 'progress', done, total }));
+    postMessage({ id, type: 'result', bytes, ms: performance.now() - t0 }, [bytes.buffer]);
+  } catch (error) {
+    postMessage({ id, type: 'error', message: error instanceof Error ? error.message : String(error) });
+  }
 };
