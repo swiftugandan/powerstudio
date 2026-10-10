@@ -48,7 +48,8 @@
  * @typedef {{ class: string, count: number, status: 'mapped' | 'used' | 'not used', detail: string }} ImportClass
  * @typedef {{ files: Array<{ name: string, profiles: string[] }>, classes: ImportClass[], notes: string[] }} ImportReport
  * @typedef {{ severity: 'warning' | 'error', class: string, id: string, message: string }} ModelIssue
- * @typedef {{ busIds: string[], vm: number[], va: number[] }} StartVoltages
+ * @typedef {{ busIds: string[], vm: number[], va: number[], held?: Array<{ id: string, limit: 'min' | 'max' }> }} StartVoltages
+ *   Where a load flow starts: busbar voltages, and the machines held at a reactive limit
  * @typedef {{ solved: boolean, maxDv: number, maxDa: number, worst: string, editorConverges: boolean, start: StartVoltages }} Fidelity
  * @typedef {{ nodes: number, branches: number, sources: number, loads: number, switches: number }} ImportSize
  * @typedef {{ format: 'cgmes' | 'psse' | 'matpower', report: ImportReport, validation: ModelIssue[], conversion: string[],

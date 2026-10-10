@@ -20,8 +20,7 @@ fn solve(model: &ps_model::Model, area_interchange: bool) -> LoadFlowReport {
                 area_interchange,
                 ..LoadFlowSettings::plain()
             },
-            outages: Default::default(),
-            start: None,
+            ..Default::default()
         },
     )
 }

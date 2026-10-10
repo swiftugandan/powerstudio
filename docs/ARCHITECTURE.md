@@ -133,12 +133,20 @@ core, up to eight), then has the engine merge the chunks. Workers need no Shared
 GitHub Pages and from a file on disk. Cancelling terminates the busy workers. If workers cannot start, one engine
 runs on the main thread.
 
-Each worker keeps its own copy of the open document. The client sends a worker the whole document as JSON once
-(serialised in slices by `serialise`, the same function autosave uses, and shared by every worker of the pool), and
-after that forwards each store change's operations, which the worker applies to its copy with the store's own
-`applyOp`. A calculation names the document state it expects (`opened:edits`); a worker whose copy is behind, such
-as one started after a cancel, receives the whole document again first. So a calculation never copies the document
-on the page's thread, and a contingency analysis over eight workers does not copy it eight times.
+Each worker's engine holds the open document. The client sends a worker the whole document as JSON once (serialised
+in slices by `serialise`, the same function autosave uses, and shared by every worker of the pool), which the engine
+reads with `doc_open`; after that it forwards each store change's operations, which the engine applies to its
+document (`doc_edit`). A calculation names the document state it expects (`opened:edits`); a worker whose engine is
+behind, such as one started after a cancel or one whose edit failed, receives the whole document again first, once.
+So a calculation never copies the document on the page's thread, a contingency analysis over eight workers does not
+copy it eight times, and the engine does not read the document's text again after an edit.
+
+Memory sets the pool's lifetime. At 70,000 buses an engine that reads the document whole peaks at 478 MB, and one
+holding it open at 618 MB, because the open document is a JSON tree (324 MB) beside its model; WebAssembly memory
+never shrinks. So the pool's other workers end after each contingency analysis and only the first stays resident;
+the next analysis starts them again and sends them the document (about 0.4 s each, in parallel). Holding each element
+as its text and parsing it only while converting would cut both figures; it is the next step if memory becomes the
+limit.
 
 ## Data flow of a calculation
 

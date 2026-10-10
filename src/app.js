@@ -48,7 +48,8 @@ export class App {
     this.rendererPreference = opt.renderer;
     this.store = new DocumentStore(emptyDocument());
     this.docId = '';
-    /** Starting voltages for an imported network's load flow (see calc). @type {import('./engine/reports.js').StartVoltages | null} */
+    /** Where the next load flow starts: the last converged solution, or an imported network's voltages (see calc).
+     * @type {import('./engine/reports.js').StartVoltages | null} */
     this.start = null;
     /** @type {Set<string>} */
     this.selection = new Set();
@@ -593,12 +594,19 @@ export class App {
     const revision = this.networkRevision;
     const t0 = performance.now();
     try {
-      // An imported network's load flow starts from the import's voltages, then from its own last solution.
-      const options = kind === 'loadflow' && this.start ? { start: this.start } : {};
-      const { result, ms } = await this.engine.run(kind, doc, options, (done, total) => this.showProgress(done, total));
-      if (kind === 'loadflow' && this.start && result.converged) {
-        this.start = { busIds: result.buses.map((/** @type {any} */ b) => b.id), vm: result.buses.map((/** @type {any} */ b) => b.vm), va: result.buses.map((/** @type {any} */ b) => b.va) };
+      // A load flow starts from the last converged one (its voltages and the machines it held at a reactive limit),
+      // or an imported network's voltages, so a re-solve after an edit takes a few iterations. One that does not
+      // converge from there is tried once more from the usual start before it is reported.
+      const progress = (/** @type {number} */ done, /** @type {number} */ total) => this.showProgress(done, total);
+      const warm = kind === 'loadflow' && this.start;
+      let { result, ms } = await this.engine.run(kind, doc, warm ? { start: this.start } : {}, progress);
+      if (warm && !result.converged) {
+        this.start = null;
+        const cold = await this.engine.run(kind, doc, {}, progress);
+        result = cold.result;
+        ms += cold.ms;
       }
+      if (kind === 'loadflow' && result.converged) this.start = startOf(result);
       this.results[kind] = { result, ms, revision };
       // The calculation is over once its result is stored: other commands work while the result is shown.
       this.finishCalc();
@@ -1000,4 +1008,13 @@ export class App {
     c.add({ id: 'help.about', label: 'About PowerStudio', icon: 'info', group: 'Help', run: () => openBackstage(this, 'about') });
     void closeBackstage;
   }
+}
+
+/** Where the next load flow starts, from a converged one: its busbar voltages and its machines at a reactive limit.
+ * @param {import('./engine/reports.js').LoadFlowResult} r @returns {import('./engine/reports.js').StartVoltages} */
+function startOf(r) {
+  /** @type {Array<{ id: string, limit: 'min' | 'max' }>} */
+  const held = [];
+  for (const u of [...r.gens, ...r.svcs]) if (u.atLimit) held.push({ id: u.id, limit: u.atLimit });
+  return { busIds: r.buses.map(b => b.id), vm: r.buses.map(b => b.vm), va: r.buses.map(b => b.va), held };
 }

@@ -21,7 +21,7 @@ fn every_outage_equals_a_load_flow_with_that_element_switched_out() {
             &LoadFlowRun {
                 settings: imp.study.loadflow,
                 outages: outages_by_id(&imp.model, [c.id.as_str()]).0,
-                start: None,
+                ..Default::default()
             },
         );
         assert_eq!(c.converged, direct.converged);
@@ -273,8 +273,7 @@ fn screening_never_misses_an_element_parked_at_its_limit() {
         &imp.model,
         &LoadFlowRun {
             settings: imp.study.loadflow,
-            outages: Default::default(),
-            start: None,
+            ..Default::default()
         },
     );
     let (mut misses, mut flagged, mut screened) = (Vec::new(), 0, 0);

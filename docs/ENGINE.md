@@ -465,7 +465,7 @@ carries options that override the document's study case for one run, and returns
 
 | Kind | Options | Report |
 | --- | --- | --- |
-| `loadflow` | `tolerance` (MVA), `maxIter`, `enforceQLimits`, `dcStart`, `loadScale` (%), `outages` (identifiers), `start` (`busIds`, `vm`, `va` in degrees) | buses, branches, units, totals, warnings, state, timing |
+| `loadflow` | `tolerance` (MVA), `maxIter`, `enforceQLimits`, `dcStart`, `loadScale` (%), `outages` (identifiers), `start` (`busIds`, `vm`, `va` in degrees, and `held`: the generators and static var compensators at a reactive limit, `{ id, limit: 'min' \| 'max' }`) | buses, branches, units, totals, warnings, state, timing |
 | `shortcircuit` | `fault` (`3ph`, `2ph`, `1ph`), `mode` (`max`, `min`), `kappa` (`B`, `C`), `lvTolerance` (`6`, `10`), `location` | per-bus Ik″, ip, Ith, Sk″, κ, Thévenin impedances; branch contributions |
 | `contingency` | none | base case, ranked cases, worst loading per branch, voltage extremes per bus |
 | `contingency_plan`, `contingency_chunk`, `contingency_merge` | none; `from`, `to`; the chunks | the outage list; one chunk; the merged report |
@@ -475,6 +475,19 @@ The WebAssembly module has one entry point, `ps_call`, which takes and returns a
 header length, a JSON header, and a payload (the document in, the report out). `ps_alloc` and `ps_free` manage the
 buffers; the host provides `ps_now` (a clock) and `ps_progress`. `engine/crates/ps-wasm/src/engine.rs` lists the
 operations.
+
+An engine instance can hold the editor's document open (`doc_open`) and apply the editor's operations to it
+(`doc_edit`, `ps-io/src/powerstudio_edit.rs`); a study with `resident` then runs on it, converting it to the model
+again only after an edit. Each instance also keeps the load flow's analysed Jacobian patterns (the ordering and
+symbolic factorisation of the last three patterns it solved, `ps_lf::Cache`), so a re-solve after an edit that keeps
+the pattern skips that step.
+
+**Re-solving after an edit.** The app starts every load flow from the last converged one: its voltages and the
+machines it held at a reactive limit, which start held. Without the held machines a re-solve with reactive limits
+finds every limit again: ACTIVSg70k took 16 to 18 iterations from the previous voltages alone and takes 1 to 4 with
+them. A start that does not converge is tried once more from the usual start. Two costs remain at that scale: the
+reactive limit loop moves to held sets no earlier solve analysed, so each pass of it orders a new pattern (about
+85 ms natively at 70,000 buses), and the report travels as about 39 MB of JSON.
 
 ## Numerical methods and scale
 

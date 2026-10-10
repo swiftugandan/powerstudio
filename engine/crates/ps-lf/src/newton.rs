@@ -247,12 +247,18 @@ pub(crate) struct Solver {
     pub factored: bool,
 }
 
+/// Patterns a [`Cache`] keeps.
+const CACHE_ENTRIES: usize = 3;
+
 /// What a solve can lend later solves of a network with the same equations and admittance pattern: the Jacobian's
 /// layout and its ordering and symbolic factorisation. Contingency analysis solves thousands of outages that keep the
-/// pattern (a branch's admittances set to zero leave its entries in place) and pays for the ordering once.
+/// pattern (a branch's admittances set to zero leave its entries in place) and pays for the ordering once; an
+/// editing session re-solves a network whose pattern an edit of values does not change. A few patterns are kept,
+/// most recently used first, since the reactive limit loop moves between the equations with and without the held
+/// machines' voltages.
 #[derive(Default)]
 pub struct Cache {
-    entry: Option<CacheEntry>,
+    entries: Vec<CacheEntry>,
     /// Solves that reused the analysis.
     pub hits: usize,
     /// Solves that analysed afresh.
@@ -271,26 +277,33 @@ impl Cache {
     /// The layout and an analysed solver for these equations, from the cache when they match, otherwise analysed and
     /// kept.
     fn get(&mut self, y: &Ybus, st: &Structure) -> (Layout, FaerLu, Result<(), ps_sparse::SolveError>) {
-        if let Some(e) = &self.entry
-            && e.st == *st
-            && e.row_ptr == y.row_ptr
-            && e.col == y.col
+        if let Some(k) = self
+            .entries
+            .iter()
+            .position(|e| e.st.same_pattern(st) && e.row_ptr == y.row_ptr && e.col == y.col)
         {
             self.hits += 1;
-            return (e.lay.clone(), e.lu.analysed_copy(), Ok(()));
+            let e = self.entries.remove(k);
+            let found = (e.lay.clone(), e.lu.analysed_copy(), Ok(()));
+            self.entries.insert(0, e);
+            return found;
         }
         self.misses += 1;
         let lay = Layout::new(y, st);
         let mut lu = FaerLu::new();
         let analysed = lu.analyse(&lay.pattern);
         if analysed.is_ok() {
-            self.entry = Some(CacheEntry {
-                st: st.clone(),
-                row_ptr: y.row_ptr.clone(),
-                col: y.col.clone(),
-                lay: lay.clone(),
-                lu: lu.analysed_copy(),
-            });
+            self.entries.insert(
+                0,
+                CacheEntry {
+                    st: st.clone(),
+                    row_ptr: y.row_ptr.clone(),
+                    col: y.col.clone(),
+                    lay: lay.clone(),
+                    lu: lu.analysed_copy(),
+                },
+            );
+            self.entries.truncate(CACHE_ENTRIES);
         }
         (lay, lu, analysed)
     }
@@ -433,7 +446,7 @@ pub fn solve_cached(net: &PuNetwork, opt: &Options, cache: &mut Cache) -> Soluti
                             last_unstable = Some(c);
                             outer += 1;
                             work.outer = outer;
-                            s.refresh(&mut work, opt, &mut timing);
+                            s.refresh(&mut work, opt, cache, &mut timing);
                             (converged, worst, message) = s.newton(opt, &mut log, &mut iterations, &mut timing);
                             if !converged || outer >= opt.max_outer {
                                 break;
@@ -954,19 +967,19 @@ impl Solver {
 
     /// Rebuilds what the outer loops changed: the admittances, the schedule and, when the voltage controls changed,
     /// the equations and their ordering.
-    pub(crate) fn refresh(&mut self, work: &mut Work, opt: &Options, timing: &mut Timing) {
+    pub(crate) fn refresh(&mut self, work: &mut Work, opt: &Options, cache: &mut Cache, timing: &mut Timing) {
         self.y = Ybus::build(&work.net, &[]);
         self.sch = work.schedule(opt);
         let groups = work.groups(opt, &self.vm);
         let st = Structure::new(work.net.buses.len(), &work.reference(), &groups);
         let ta = clock::now_ms();
-        if st != self.st || self.lay.pattern.nnz() == 0 {
-            self.lay = Layout::new(&self.y, &st);
-            self.st = st;
-            self.lu = FaerLu::new();
+        if !st.same_pattern(&self.st) || self.lay.pattern.nnz() == 0 {
             // An ordering failure shows up as a failed factorisation in the next solve.
-            let _ = self.lu.analyse(&self.lay.pattern);
+            let (lay, lu, _) = cache.get(&self.y, &st);
+            self.lay = lay;
+            self.lu = lu;
         }
+        self.st = st;
         timing.analyse_ms += clock::now_ms() - ta;
         self.factored = false;
         self.apply_fixed();

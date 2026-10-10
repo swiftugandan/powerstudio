@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { root, engine, wasmPath } from './helpers.mjs';
 import { EngineHost, jsonPayload } from '../src/engine/host.js';
-import { request } from '../src/engine/studies.js';
+import { request, requestOpen, openDocument, editDocument } from '../src/engine/studies.js';
+import { applyOp } from '../src/core/store.js';
 
 /** The requests compared: every study on every oracle input, with the simulation shortened to keep the run quick. */
 const REQUESTS = /** @type {Array<[string, Record<string, unknown>]>} */ ([
@@ -76,6 +77,39 @@ test('engine errors arrive as messages and leave the instance usable', () => {
   assert.throws(() => engine.call({ op: 'study', kind: 'loadflow' }, new TextEncoder().encode('{')), /not valid JSON/);
   assert.throws(() => engine.call({ op: 'nothing' }), /unknown op/);
   assert.ok(jsonPayload(request(engine, 'loadflow', JSON.parse(read('ieee14')), {})).converged);
+});
+
+test('a document held open and edited in the engine gives the same results as the edited document sent whole', async () => {
+  const held = await EngineHost.create(readFileSync(wasmPath));
+  for (const name of INPUTS) {
+    const text = read(name);
+    /** @type {import('../src/core/document.js').PowerDocument} */
+    const doc = JSON.parse(text);
+    const index = new Map(doc.elements.map(e => [e.id, e]));
+    openDocument(held, text);
+    const loads = doc.elements.filter(e => e.cls === 'load');
+    const [first, second] = loads;
+    /** @type {import('../src/core/store.js').Op[]} */
+    const ops = [
+      { type: 'set', id: first.id, key: 'p', before: first.p, after: Number(first.p) * 1.1 },
+      { type: 'remove', el: second },
+      { type: 'add', index: doc.elements.length - 1, el: { ...second, id: `${second.id}-new` } },
+      { type: 'study', section: 'loadflow', key: 'tolerance', before: doc.study.loadflow.tolerance, after: 1e-4 },
+    ];
+    // The engine applies the operations as the editor does, so the two documents agree.
+    for (const op of ops) applyOp(doc, index, op);
+    editDocument(held, ops);
+    for (const [kind, options] of REQUESTS) {
+      const open = JSON.stringify(withoutTiming(jsonPayload(requestOpen(held, kind, options))));
+      const whole = JSON.stringify(withoutTiming(jsonPayload(request(engine, kind, doc, options))));
+      assert.equal(open, whole, `${name} ${kind}`);
+    }
+  }
+  // An edit that does not apply leaves no document open, so a study on it fails until the document comes again.
+  assert.throws(() => editDocument(held, [{ type: 'set', id: 'nowhere', key: 'p', before: 0, after: 1 }]), /unknown element/);
+  assert.throws(() => requestOpen(held, 'loadflow', {}), /no document is open/);
+  openDocument(held, read('ieee14'));
+  assert.ok(jsonPayload(requestOpen(held, 'loadflow', {})).converged);
 });
 
 /** @param {string} name */

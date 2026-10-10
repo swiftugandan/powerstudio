@@ -1333,18 +1333,13 @@ fn solve_case(
     for &(k, row) in found {
         outages.insert(k, row);
     }
-    let (calc, sol, report) = loadflow::solve_prepared(
+    let (calc, sol, report) = loadflow::solve(
         model,
         &LoadFlowRun {
             settings: study.loadflow,
             outages,
             start: Some(start.voltages.clone()),
-        },
-        |calc| {
-            for (b, bus) in calc.topo.buses.iter().enumerate() {
-                let held = bus.nodes.iter().map(|&n| start.held[n as usize]).find(|&h| h != 0);
-                calc.net.buses[b].held0 = held.unwrap_or(0);
-            }
+            held: Some(start.held.clone()),
         },
     );
     let lost = report

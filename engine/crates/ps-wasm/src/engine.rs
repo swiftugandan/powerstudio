@@ -6,7 +6,9 @@
 //! | `op` | Header fields | Payload | Reply |
 //! | --- | --- | --- | --- |
 //! | `version` | | | `engine` version |
-//! | `study` | `kind`, `options` | PowerStudio document (JSON text); none for `contingency_merge` | the report as JSON text |
+//! | `study` | `kind`, `options`, `resident` (use the open document) | PowerStudio document (JSON text); none for `contingency_merge` or with `resident` | the report as JSON text |
+//! | `doc_open` | | PowerStudio document (JSON text) | `elements` |
+//! | `doc_edit` | `ops`: the editor's operations (see `ps_io::powerstudio_edit`) | | `elements` |
 //! | `load_matpower` | | MATPOWER case text | model size and conversion issues |
 //! | `solve_model` | `tolerance` (MVA), `warm_start`, `dc_start`, `q_limits`, `bump` (change the largest load by this factor first), `keep` (store the solution as the next warm start) | | load flow summary |
 //! | `import` | `files`: `[{ name, size }]` | the files' bytes, one after another | format, import report, validation, conversion notes, fidelity and size; the editor's document as payload |
@@ -15,6 +17,7 @@
 
 use serde_json::{Value, json};
 
+use ps_io::powerstudio_edit::OpenDocument;
 use ps_study::api::{self, Loaded};
 use ps_study::{LoadFlowRun, Progress};
 
@@ -57,17 +60,45 @@ impl Envelope {
     }
 }
 
-/// The engine instance: the last document it read and the model loaded for benchmarks.
+/// The engine instance: the last document it read, the document the editor has open, the model loaded for
+/// benchmarks, and what load flows keep between requests.
 #[derive(Default)]
 pub struct Engine {
     document: Option<(Vec<u8>, Loaded, Vec<String>)>,
+    /// The document the editor has open, kept in step by its edits, and its conversion since the last edit.
+    open: Option<Open>,
     model: Option<ps_model::Model>,
+    session: api::Session,
+}
+
+/// The document the editor has open, and its conversion since the last edit.
+struct Open {
+    doc: OpenDocument,
+    loaded: Option<(Loaded, Vec<String>)>,
+}
+
+impl Open {
+    /// The converted document and its conversion notes, converting it when an edit came since.
+    fn loaded(&mut self) -> Result<&(Loaded, Vec<String>), String> {
+        if self.loaded.is_none() {
+            let imp = self.doc.convert().map_err(|e| e.to_string())?;
+            let loaded = Loaded {
+                model: imp.model,
+                study: imp.study,
+            };
+            self.loaded = Some((loaded, imp.issues));
+        }
+        self.loaded
+            .as_ref()
+            .ok_or_else(|| "the open document was not converted".to_string())
+    }
 }
 
 impl std::fmt::Debug for Engine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Engine")
             .field("document", &self.document.is_some())
+            .field("open", &self.open.is_some())
             .field("model", &self.model.is_some())
             .finish()
     }
@@ -87,8 +118,8 @@ impl Engine {
         }
     }
 
-    /// Reads a document, re-using the previous one when the bytes are the same.
-    fn document(&mut self, bytes: &[u8]) -> Result<(&Loaded, &[String]), String> {
+    /// Reads a document into `self.document`, re-using the previous one when the bytes are the same.
+    fn load_document(&mut self, bytes: &[u8]) -> Result<(), String> {
         let same = self.document.as_ref().is_some_and(|(b, _, _)| b.as_slice() == bytes);
         if !same {
             let text = std::str::from_utf8(bytes).map_err(|_| "the document is not UTF-8 text")?;
@@ -102,8 +133,7 @@ impl Engine {
                 imp.issues,
             ));
         }
-        let (_, loaded, issues) = self.document.as_ref().ok_or("no document")?;
-        Ok((loaded, issues))
+        Ok(())
     }
 
     fn dispatch(&mut self, req: &Envelope, progress: &mut dyn Progress) -> Result<Envelope, String> {
@@ -121,14 +151,46 @@ impl Engine {
                     .and_then(Value::as_str)
                     .ok_or("the study request has no kind")?;
                 let opts = req.header.get("options").cloned().unwrap_or(Value::Null);
+                let resident = req.header.get("resident").and_then(Value::as_bool).unwrap_or(false);
                 let (report, issues) = if kind == "contingency_merge" {
-                    (api::handle(kind, &opts, None, progress)?, Vec::new())
+                    (api::handle(kind, &opts, None, &mut self.session, progress)?, Vec::new())
+                } else if resident {
+                    let (loaded, issues) = self.open.as_mut().ok_or("no document is open")?.loaded()?;
+                    (
+                        api::handle(kind, &opts, Some(loaded), &mut self.session, progress)?,
+                        issues.clone(),
+                    )
                 } else {
-                    let (doc, issues) = self.document(&req.payload)?;
-                    let issues = issues.to_vec();
-                    (api::handle(kind, &opts, Some(doc), progress)?, issues)
+                    self.load_document(&req.payload)?;
+                    let (_, doc, issues) = self.document.as_ref().ok_or("no document")?;
+                    (
+                        api::handle(kind, &opts, Some(doc), &mut self.session, progress)?,
+                        issues.clone(),
+                    )
                 };
                 Ok(ok(json!({ "issues": issues }), report.to_string().into_bytes()))
+            }
+            "doc_open" => {
+                let text = std::str::from_utf8(&req.payload).map_err(|_| "the document is not UTF-8 text")?;
+                let doc = OpenDocument::open(text).map_err(|e| e.to_string())?;
+                let elements = doc.len();
+                self.open = Some(Open { doc, loaded: None });
+                Ok(ok(json!({ "elements": elements }), Vec::new()))
+            }
+            "doc_edit" => {
+                let ops = req
+                    .header
+                    .get("ops")
+                    .and_then(Value::as_array)
+                    .ok_or("the edit has no operations")?;
+                let open = self.open.as_mut().ok_or("no document is open")?;
+                open.loaded = None;
+                if let Err(e) = open.doc.apply(ops) {
+                    // Out of step with the editor: it sends the whole document again.
+                    self.open = None;
+                    return Err(e.to_string());
+                }
+                Ok(ok(json!({ "elements": open.doc.len() }), Vec::new()))
             }
             "load_matpower" => {
                 let text = std::str::from_utf8(&req.payload).map_err(|_| "the MATPOWER file is not UTF-8 text")?;

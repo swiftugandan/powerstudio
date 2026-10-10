@@ -79,6 +79,21 @@ pub(crate) struct Group {
 }
 
 impl Structure {
+    /// Whether two structures give the Jacobian the same pattern (with the same admittance pattern): the same
+    /// unknowns and the same reactive rows using each bus, whatever the targets and coefficients.
+    pub fn same_pattern(&self, other: &Structure) -> bool {
+        self.dim == other.dim
+            && self.n_p == other.n_p
+            && self.col_a == other.col_a
+            && self.col_m == other.col_m
+            && self.q_uses.len() == other.q_uses.len()
+            && self
+                .q_uses
+                .iter()
+                .zip(&other.q_uses)
+                .all(|(a, b)| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.0 == y.0))
+    }
+
     /// The structure for the given references (angle fixed) and voltage control groups. Buses not in any group keep
     /// an unknown magnitude unless `v_fixed_extra` fixes it.
     pub fn new(n: usize, reference: &[bool], groups: &[Group]) -> Self {

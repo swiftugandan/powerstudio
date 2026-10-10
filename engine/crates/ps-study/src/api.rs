@@ -13,6 +13,22 @@ use crate::loadflow::{self, LoadFlowRun};
 use crate::progress::Progress;
 use crate::rms;
 
+/// What an engine instance keeps between requests: the load flow's analysed Jacobian patterns, so a re-solve after an
+/// edit that keeps the network's pattern (any change of values) skips the ordering and symbolic factorisation.
+#[derive(Default)]
+pub struct Session {
+    lf: ps_lf::Cache,
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session")
+            .field("hits", &self.lf.hits)
+            .field("misses", &self.lf.misses)
+            .finish()
+    }
+}
+
 /// Load flow options; absent fields take the document's study case.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -34,6 +50,23 @@ struct StartOptions {
     vm: Vec<f64>,
     /// Degrees.
     va: Vec<f64>,
+    /// The generators and static var compensators the solution held at a reactive limit, and which limit.
+    #[serde(default)]
+    held: Vec<HeldUnit>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HeldUnit {
+    id: String,
+    limit: Limit,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum Limit {
+    Min,
+    Max,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -85,7 +118,13 @@ pub struct Loaded {
 ///
 /// `kind` is `loadflow`, `shortcircuit`, `contingency`, `contingency_plan`, `contingency_chunk`, `contingency_merge`
 /// or `rms`. Every kind but `contingency_merge` needs `doc`; `contingency_merge` takes the chunks as `options`.
-pub fn handle(kind: &str, opts: &Value, doc: Option<&Loaded>, progress: &mut dyn Progress) -> Result<Value, String> {
+pub fn handle(
+    kind: &str,
+    opts: &Value,
+    doc: Option<&Loaded>,
+    session: &mut Session,
+    progress: &mut dyn Progress,
+) -> Result<Value, String> {
     if kind == "contingency_merge" {
         let chunks: Vec<Chunk> =
             serde_json::from_value(opts.clone()).map_err(|e| format!("invalid contingency chunks: {e}"))?;
@@ -105,23 +144,50 @@ pub fn handle(kind: &str, opts: &Value, doc: Option<&Loaded>, progress: &mut dyn
             if let Some(id) = unknown.first() {
                 return Err(format!("the outage {id} is not an element of the network"));
             }
-            let start = o.start.map(|s| {
-                let index = model.index();
-                let mut per_node = vec![None; model.nodes.len()];
-                for (k, id) in s.bus_ids.iter().enumerate() {
-                    if let (Some(row), Some(&vm), Some(&va)) = (index.get(Class::Node, id), s.vm.get(k), s.va.get(k)) {
-                        per_node[row] = Some((vm, va.to_radians()));
+            let (start, held) = match o.start {
+                Some(s) => {
+                    let index = model.index();
+                    let mut per_node = vec![None; model.nodes.len()];
+                    for (k, id) in s.bus_ids.iter().enumerate() {
+                        if let (Some(row), Some(&vm), Some(&va)) =
+                            (index.get(Class::Node, id), s.vm.get(k), s.va.get(k))
+                        {
+                            per_node[row] = Some((vm, va.to_radians()));
+                        }
                     }
+                    // Units no longer in the network are passed over: the solve finds their limits as usual.
+                    let mut dir = vec![0_i8; model.nodes.len()];
+                    for u in &s.held {
+                        let node = index
+                            .get(Class::Generator, &u.id)
+                            .and_then(|r| model.generators.get(r))
+                            .map(|g| g.node)
+                            .or_else(|| {
+                                index
+                                    .get(Class::Svc, &u.id)
+                                    .and_then(|r| model.svcs.get(r))
+                                    .map(|v| v.node)
+                            });
+                        if let Some(slot) = node.and_then(|n| dir.get_mut(n.index())) {
+                            *slot = match u.limit {
+                                Limit::Min => -1,
+                                Limit::Max => 1,
+                            };
+                        }
+                    }
+                    (Some(per_node), Some(dir))
                 }
-                per_node
-            });
-            to_json(&loadflow::run(
+                None => (None, None),
+            };
+            to_json(&loadflow::run_cached(
                 model,
                 &LoadFlowRun {
                     settings,
                     outages,
                     start,
+                    held,
                 },
+                &mut session.lf,
             ))
         }
         "shortcircuit" => {

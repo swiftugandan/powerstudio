@@ -12,7 +12,8 @@ import { adapt } from './reports.js';
  * @typedef {import('./reports.js').CalcKind} CalcKind
  * @typedef {(done: number, total: number) => void} OnProgress
  * @typedef {{ tolerance?: number, maxIter?: number, enforceQLimits?: boolean, loadScale?: number, dcStart?: boolean,
- *   start?: { busIds: string[], vm: ArrayLike<number>, va: ArrayLike<number> }, outages?: Iterable<string> }} LoadFlowOptions
+ *   start?: { busIds: string[], vm: ArrayLike<number>, va: ArrayLike<number>, held?: Array<{ id: string, limit: 'min' | 'max' }> },
+ *   outages?: Iterable<string> }} LoadFlowOptions
  */
 
 /**
@@ -27,7 +28,10 @@ export function engineOptions(kind, options) {
   for (const key of ['tolerance', 'maxIter', 'enforceQLimits', 'dcStart']) if (options[key] !== undefined) out[key] = options[key];
   if (options.loadScale !== undefined) out.loadScale = options.loadScale * 100;
   if (options.outages) out.outages = [...options.outages];
-  if (options.start) out.start = { busIds: options.start.busIds, vm: Array.from(options.start.vm), va: Array.from(options.start.va) };
+  if (options.start) {
+    const { busIds, vm, va, held } = options.start;
+    out.start = { busIds, vm: Array.from(vm), va: Array.from(va), ...(held?.length ? { held } : {}) };
+  }
   return out;
 }
 
@@ -40,6 +44,21 @@ export function request(engine, kind, doc, options, onProgress) {
   const payload = doc ? textPayload(JSON.stringify(doc)) : undefined;
   return engine.call({ op: 'study', kind, options: engineOptions(kind, options) }, payload, onProgress).payload;
 }
+
+/**
+ * Runs one engine request on the document the engine holds open (`openDocument`), and returns the raw JSON report.
+ * @param {EngineHost} engine @param {string} kind @param {Record<string, any>} options @param {OnProgress} [onProgress]
+ */
+export function requestOpen(engine, kind, options, onProgress) {
+  return engine.call({ op: 'study', kind, options: engineOptions(kind, options), resident: true }, undefined, onProgress).payload;
+}
+
+/** Gives the engine a document to hold open, as JSON text. @param {EngineHost} engine @param {string} json */
+export function openDocument(engine, json) { engine.call({ op: 'doc_open' }, textPayload(json)); }
+
+/** Applies the editor's operations to the engine's open document. Throws when they do not apply (the engine then
+ * holds no document). @param {EngineHost} engine @param {unknown[]} ops */
+export function editDocument(engine, ops) { engine.call({ op: 'doc_edit', ops }); }
 
 /** Studies bound to one engine instance. */
 export class Studies {

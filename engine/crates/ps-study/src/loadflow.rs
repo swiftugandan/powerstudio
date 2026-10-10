@@ -17,6 +17,10 @@ pub struct LoadFlowRun {
     pub outages: Outages,
     /// Starting voltage of each node (magnitude p.u., angle radians); `None` entries start from setpoints.
     pub start: Option<Vec<Option<(f64, f64)>>>,
+    /// With a start and reactive limits: for each node, 1 or -1 where the solution the start comes from held the
+    /// machines at their upper or lower limit, 0 elsewhere. Those machines start held, so a re-solve does not find
+    /// every limit again.
+    pub held: Option<Vec<i8>>,
 }
 
 /// A calculation bus's result.
@@ -289,15 +293,14 @@ pub struct LoadFlowReport {
 
 /// Runs a load flow and returns the solved network with its report. Studies built on the load flow use the network.
 pub fn solve(model: &Model, run: &LoadFlowRun) -> (Calc, ps_lf::Solution, LoadFlowReport) {
-    solve_prepared(model, run, |_| {})
+    solve_cached(model, run, &mut ps_lf::Cache::default())
 }
 
-/// [`solve`], with `prepare` adjusting the calculation network before the solve (such as the starting state of
-/// reactive limits that a contingency takes over from its base case).
-pub fn solve_prepared(
+/// [`solve`], reusing (and filling) the analysed Jacobian patterns in `cache`.
+pub fn solve_cached(
     model: &Model,
     run: &LoadFlowRun,
-    prepare: impl FnOnce(&mut Calc),
+    cache: &mut ps_lf::Cache,
 ) -> (Calc, ps_lf::Solution, LoadFlowReport) {
     let t0 = ps_num::clock::now_ms();
     let st = &run.settings;
@@ -311,11 +314,20 @@ pub fn solve_prepared(
     if let Some(start) = &run.start {
         calc.set_start(start);
     }
-    prepare(&mut calc);
+    if let Some(held) = &run.held {
+        for (b, bus) in calc.topo.buses.iter().enumerate() {
+            let dir = bus
+                .nodes
+                .iter()
+                .map(|&n| held.get(n as usize).copied().unwrap_or(0))
+                .find(|&h| h != 0);
+            calc.net.buses[b].held0 = dir.unwrap_or(0);
+        }
+    }
     let build_ms = ps_num::clock::now_ms() - t0;
     let sb = model.meta.base_mva;
     let opt = options(st, sb, run.start.is_some());
-    let sol = ps_lf::solve(&calc.net, &opt);
+    let sol = ps_lf::solve_cached(&calc.net, &opt, cache);
     let mut report = assemble(model, &calc, &sol, st);
     report.timing = Timing {
         build_ms,
@@ -356,6 +368,11 @@ pub fn options(st: &LoadFlowSettings, sb: f64, warm_start: bool) -> Options {
 /// Runs a load flow.
 pub fn run(model: &Model, run: &LoadFlowRun) -> LoadFlowReport {
     solve(model, run).2
+}
+
+/// [`run`], reusing (and filling) the analysed Jacobian patterns in `cache`.
+pub fn run_cached(model: &Model, run: &LoadFlowRun, cache: &mut ps_lf::Cache) -> LoadFlowReport {
+    solve_cached(model, run, cache).2
 }
 
 fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSettings) -> LoadFlowReport {

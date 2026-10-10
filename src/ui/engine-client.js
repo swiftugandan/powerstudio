@@ -5,10 +5,11 @@
  * whatever the pool size. When a worker cannot be started (some file:// contexts), one engine runs on the main
  * thread instead.
  *
- * Each worker keeps its own copy of the document. It receives the document as JSON once per document (serialised in
+ * Each worker's engine holds the document open. It receives the document as JSON once per document (serialised in
  * slices, so a national network does not hold the page), and after that only the store's operations, which it applies
- * to its copy; a calculation names the document state it expects. So the page never copies the whole document for a
- * calculation, and a contingency analysis across eight workers does not copy it eight times. */
+ * to its open document; a calculation names the document state it expects. So the page never copies the whole
+ * document for a calculation, a contingency analysis across eight workers does not copy it eight times, and the
+ * engine does not read the document's text again after an edit. */
 
 import { engineModule } from '../engine/module.js';
 import { EngineHost, jsonPayload } from '../engine/host.js';
@@ -29,6 +30,13 @@ import { yieldToBrowser } from './dom.js';
 const PARALLEL_FROM = 16;
 /** Fewest outages per chunk. */
 const MIN_CHUNK = 8;
+
+/** A worker's engine did not hold the document state a study named; the message says why when opening or editing
+ * the document failed. */
+class StaleDocument extends Error {
+  /** @param {string} message */
+  constructor(message) { super(message); this.name = 'StaleDocument'; }
+}
 
 export class CancelledError extends Error {
   constructor() { super('The calculation was cancelled.'); this.name = 'CancelledError'; }
@@ -116,7 +124,7 @@ export class EngineClient {
       if (msg.type === 'progress') { p.onProgress?.(msg.done, msg.total); return; }
       s.pending = null;
       if (msg.type === 'result') p.resolve({ bytes: msg.bytes, ms: msg.ms, summary: msg.summary });
-      else p.reject(new Error(msg.message));
+      else p.reject(msg.stale ? new StaleDocument(msg.message) : new Error(msg.message));
     };
     worker.onerror = e => {
       e.preventDefault();
@@ -148,14 +156,27 @@ export class EngineClient {
         catch (e) { reject(e instanceof Error ? e : new Error(String(e))); }
       }, 0));
     }
-    // The worker computes on its own copy of the document when the request is about the current one.
+    // The worker's engine computes on the document it holds open when the request is about the current one.
     const resident = doc !== null && doc === this.doc;
-    if (resident) await this.ensureDocument(s);
-    return new Promise((resolve, reject) => {
-      const id = ++this.seq;
-      s.pending = { id, resolve, reject, onProgress };
-      s.worker.postMessage(resident ? { id, kind, key: this.key, options } : { id, kind, doc, options });
-    });
+    /** @returns {Promise<Reply>} */
+    const send = async () => {
+      if (resident) await this.ensureDocument(s);
+      return new Promise((resolve, reject) => {
+        const id = ++this.seq;
+        s.pending = { id, resolve, reject, onProgress };
+        s.worker.postMessage(resident ? { id, kind, key: this.key, options } : { id, kind, doc, options });
+      });
+    };
+    try {
+      return await send();
+    } catch (error) {
+      // An edit the engine could not apply: it gets the whole document again, once. A second failure reports the
+      // engine's reason as an ordinary error.
+      if (!(error instanceof StaleDocument)) throw error;
+      s.key = '';
+      try { return await send(); }
+      catch (again) { throw again instanceof StaleDocument ? new Error(again.message) : again; }
+    }
   }
 
   /**
@@ -230,10 +251,26 @@ export class EngineClient {
     if (parts <= 1) return this.exec(0, module, 'contingency', doc, {}, onProgress);
     const size = Math.ceil(count / parts);
     const done = new Array(parts).fill(0);
-    const chunks = await Promise.all(Array.from({ length: parts }, (_, k) => this.exec(k, module, 'contingency_chunk', doc, { from: k * size, to: (k + 1) * size },
-      d => { done[k] = d; onProgress?.(done.reduce((a, b) => a + b, 0), count); })));
-    this.check(token);
-    return this.exec(0, module, 'contingency_merge', null, chunks.map(c => jsonPayload(c.bytes)));
+    try {
+      const chunks = await Promise.all(Array.from({ length: parts }, (_, k) => this.exec(k, module, 'contingency_chunk', doc, { from: k * size, to: (k + 1) * size },
+        d => { done[k] = d; onProgress?.(done.reduce((a, b) => a + b, 0), count); })));
+      this.check(token);
+      return await this.exec(0, module, 'contingency_merge', null, chunks.map(c => jsonPayload(c.bytes)));
+    } finally {
+      this.releasePool();
+    }
+  }
+
+  /** Ends the pool's idle workers after a contingency analysis, keeping the first. Each engine holds a national
+   * network's document and model, and WebAssembly memory never shrinks, so only one stays resident between runs; the
+   * next analysis starts the others again and sends them the document. */
+  releasePool() {
+    for (let k = 1; k < this.slots.length; k++) {
+      const s = this.slots[k];
+      if (!s || s.pending) continue;
+      s.worker.terminate();
+      this.slots[k] = null;
+    }
   }
 
   /** Stops the running calculation by restarting the busy workers. A run on the main thread cannot be interrupted;

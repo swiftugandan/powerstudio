@@ -90,8 +90,7 @@ fn a_transformer_without_a_rating_reports_no_loading() {
             m,
             &ps_study::LoadFlowRun {
                 settings: ps_model::study::LoadFlowSettings::default(),
-                outages: Default::default(),
-                start: None,
+                ..Default::default()
             },
         );
         assert!(r.converged);

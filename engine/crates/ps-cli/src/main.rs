@@ -184,7 +184,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 model: imp.model,
                 study: imp.study,
             };
-            Ok(api::handle(kind, &opts, Some(&loaded), &mut Silent)?.to_string())
+            Ok(api::handle(kind, &opts, Some(&loaded), &mut api::Session::default(), &mut Silent)?.to_string())
         }
         Some("contingency") => {
             // N-1 of a model's branches (and generators with --gens), timed; prints the effort and the worst cases.

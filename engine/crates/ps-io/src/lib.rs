@@ -10,6 +10,7 @@ pub mod files;
 pub mod matpower;
 pub mod matpower_model;
 pub mod powerstudio;
+pub mod powerstudio_edit;
 pub mod powerstudio_write;
 pub mod psse;
 pub mod psse_model;
