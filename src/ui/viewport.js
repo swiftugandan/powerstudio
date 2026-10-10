@@ -89,6 +89,7 @@ export class Viewport {
     this.renderer = renderer;
     this.fallbackReason = fallbackReason;
     renderer.onLost = reason => this.recover(reason);
+    if (renderer instanceof Canvas2DRenderer) renderer.onPending = () => this.invalidate('view');
     this.attach(renderer.canvas);
     this.resize();
     this.updateBadge();
@@ -108,7 +109,9 @@ export class Viewport {
     this.host.querySelector('canvas')?.remove();
     const canvas = h('canvas', { class: 'viewport-canvas', tabindex: '0', 'aria-label': 'Single-line diagram' });
     this.host.prepend(canvas);
-    this.renderer = new Canvas2DRenderer(canvas);
+    const fallback = new Canvas2DRenderer(canvas);
+    fallback.onPending = () => this.invalidate('view');
+    this.renderer = fallback;
     this.fallbackReason = `WebGPU device lost: ${reason}`;
     this.attach(canvas);
     this.resize();
@@ -181,6 +184,8 @@ export class Viewport {
     const list = yield* sceneSteps(this.sceneInput());
     if (r instanceof Canvas2DRenderer) r.commit('base', yield* r.packSteps(list));
     else r.commit('base', yield* r.packSteps(list));
+    // Canvas 2D says on the badge when it draws a large diagram from a cache.
+    this.updateBadge();
   }
 
   /** Finishes a diagram build under way at once (before a snapshot). */
@@ -310,6 +315,8 @@ export class Viewport {
     cam.width = w; cam.height = hgt; cam.zoom = 1; cam.cx = (box.x0 + box.x1) / 2; cam.cy = (box.y0 + box.y1) / 2;
     r.resize(w, hgt, scale);
     r.setScene(this.buildList());
+    // An export draws the whole diagram at once, however large.
+    r.cached = false;
     r.draw(cam, { ...this.app.palette, grid: [0, 0, 0, 0] }, scale);
     return new Promise((resolve, reject) => canvas.toBlob(b => (b ? resolve(b) : reject(new Error('PNG encoding failed.'))), 'image/png'));
   }

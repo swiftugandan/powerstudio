@@ -595,6 +595,8 @@ export class App {
         this.start = { busIds: result.buses.map((/** @type {any} */ b) => b.id), vm: result.buses.map((/** @type {any} */ b) => b.vm), va: result.buses.map((/** @type {any} */ b) => b.va) };
       }
       this.results[kind] = { result, ms, revision };
+      // The calculation is over once its result is stored: other commands work while the result is shown.
+      this.finishCalc();
       this.report(kind, result, ms, !!opt.auto);
       if (kind === 'rms') this.rmsIndex = result.t.length - 1;
       // The result's colours, its table and the panels each take their own task, so a national network's result
@@ -614,12 +616,17 @@ export class App {
         if (!opt.auto) toast('error', msg, { title: `${CALC_LABEL[kind]} failed` });
       }
     } finally {
-      this.running = '';
-      this.hideProgress();
-      this.commands.changed();
-      this.updateStatus();
-      if (this.autoPending) { this.autoPending = false; if (this.resultsStale('loadflow')) this.maybeAutoLoadFlow(); }
+      if (this.running === kind) this.finishCalc();
     }
+  }
+
+  /** Marks the running calculation as over, and runs the load flow an edit asked for meanwhile. */
+  finishCalc() {
+    this.running = '';
+    this.hideProgress();
+    this.commands.changed();
+    this.updateStatus();
+    if (this.autoPending) { this.autoPending = false; if (this.resultsStale('loadflow')) this.maybeAutoLoadFlow(); }
   }
 
   /** Logs the outcome of a calculation in plain words. @param {CalcKind} kind @param {any} r @param {number} ms @param {boolean} auto */
