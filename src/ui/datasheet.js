@@ -65,6 +65,16 @@ export class DataSheet {
     document.addEventListener('paste', e => { if (mine()) this.onPaste(e); });
   }
 
+  /** Another document opened: its sheet starts unfiltered, at the top, measured afresh. The class stays. */
+  reset() {
+    this.measured.clear();
+    this.active = { id: '', key: 'name' };
+    this.anchor = '';
+    this.filter = '';
+    this.onlySelected = false;
+    this.editing = null;
+  }
+
   /** The selection changed on the diagram or in the tree. */
   selectionChanged() { if (this.onlySelected) this.refresh(); else this.restyle(); }
 

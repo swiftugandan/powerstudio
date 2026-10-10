@@ -346,6 +346,7 @@ export class App {
   onChange(change) {
     // The calculation workers keep their own copies of the document.
     if (change.source === 'load') this.engine.setDocument(this.store.doc); else this.engine.applyOps(change.ops);
+    if (change.source === 'load') this.dock.sheet.reset();
     if (change.network || change.study) this.networkRevision++;
     for (const id of [...this.selection]) if (!this.store.get(id)) this.selection.delete(id);
     const name = /** @type {HTMLInputElement} */ (byId('doc-name'));
