@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { DocumentStore } from '../src/core/store.js';
 import { makeElement } from '../src/core/catalog.js';
 import { riverside } from '../src/samples/riverside.js';
+import { ieee14 } from '../src/samples/ieee14.js';
 
 const snapshot = (/** @type {DocumentStore} */ s) => JSON.stringify(s.doc);
 
@@ -25,6 +26,19 @@ test('invalid values are refused and leave no trace', () => {
   assert.equal(s.canUndo, false);
   assert.throws(() => s.transact('Loop', tx => tx.set('L1', 'to', 'B2')), /same busbar/);
   assert.throws(() => s.transact('Dangling', tx => tx.set('L1', 'to', 'D1')), /must be a busbar/);
+});
+
+test('an optional busbar field can be emptied, and deleting the busbar it names empties it', () => {
+  const s = new DocumentStore(ieee14());
+  const gen = /** @type {import('../src/core/catalog.js').Element} */ (s.doc.elements.find(e => e.cls === 'gen' && e.mode !== 'slack'));
+  s.transact('Regulate', tx => tx.set(gen.id, 'regBus', 'B9'));
+  s.transact('Own busbar', tx => tx.set(gen.id, 'regBus', ''));
+  assert.equal(s.get(gen.id)?.regBus, '');
+  assert.throws(() => s.transact('Empty', tx => tx.set(gen.id, 'bus', '')), /must be a busbar/);
+  s.transact('Regulate', tx => tx.set(gen.id, 'regBus', 'B9'));
+  s.transact('Delete busbar', tx => tx.remove('B9'));
+  assert.ok(!s.get('B9'));
+  assert.equal(s.get(gen.id)?.regBus, '');
 });
 
 test('edits with the same coalescing key become one undo step', () => {

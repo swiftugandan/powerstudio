@@ -136,7 +136,8 @@ export class Tx {
     if (!spec) throw new Error(`${CLASSES[el.cls].label} has no field ${key}.`);
     const err = checkValue(spec, value);
     if (err) throw new Error(err);
-    if (spec.type === 'bus') {
+    // An optional busbar field may be empty: its named default ("Own busbar").
+    if (spec.type === 'bus' && !(value === '' && spec.optional !== undefined)) {
       const bus = this.store.get(/** @type {string} */ (value));
       if (!bus || bus.cls !== 'bus') throw new Error(`${spec.label} must be a busbar.`);
       const others = busesOf(el).filter((_, i) => CLASSES[el.cls].ends[i] !== key);
