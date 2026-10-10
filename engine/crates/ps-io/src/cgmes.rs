@@ -39,11 +39,7 @@ const TYPICAL_SC: MachineShortCircuit = MachineShortCircuit {
     cos_phi: 0.85,
     earthed: false,
 };
-const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics {
-    xdt: 0.3,
-    h: 4.0,
-    d: 0.0,
-};
+const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics::classical(0.3, 4.0, 0.0);
 
 const SWITCH_CLASSES: [&str; 10] = [
     "Switch",
@@ -1060,15 +1056,13 @@ fn injections(cx: &mut Ctx) {
                 }
             };
             let dynamics = match dynamics.get(&*o.id) {
-                Some(d) => MachineDynamics {
-                    xdt: cx
-                        .num(d, "SynchronousMachineTimeConstantReactance.xDirectTrans")
+                Some(d) => MachineDynamics::classical(
+                    cx.num(d, "SynchronousMachineTimeConstantReactance.xDirectTrans")
                         .unwrap_or(TYPICAL_DYNAMICS.xdt),
-                    h: cx
-                        .num(d, "RotatingMachineDynamics.inertia")
+                    cx.num(d, "RotatingMachineDynamics.inertia")
                         .unwrap_or(TYPICAL_DYNAMICS.h),
-                    d: cx.numd(d, "RotatingMachineDynamics.damping"),
-                },
+                    cx.numd(d, "RotatingMachineDynamics.damping"),
+                ),
                 None => {
                     typical_dyn += usize::from(class == "SynchronousMachine");
                     TYPICAL_DYNAMICS

@@ -1,0 +1,358 @@
+{
+ "about": "Stability cases compared with ANDES (GPL-3.0; its published cases at a pinned commit, downloaded by scripts/fetch-reference.mjs into .cache/reference and never copied into the repository). scripts/oracle/andes_dyn.py runs each case in ANDES and writes tests/oracle/golden/dyn-<name>.json. 'overrides' change a parameter in both programs (scripts/oracle/andes_dyn.py says why); 'replace' gives a machine another control, written as a DYR record for ANDES and set on the engine's model, for models no published DYR case uses. Events: 'fault' with its resistance rf and reactance xf in p.u. on the system base, 'clear', 'trip' and 'close' of a line. tstep is ANDES's fixed integration step, step the engine's, and sample the spacing of the recorded values, all in seconds. ANDES runs at a quarter of the engine's step because its anti-windup limits carry an error that shrinks with the step (docs/TESTING.md); ANDES adds a 0.1 ms step after each event, so the recorded times are its own, and the engine test interpolates its trajectory at them.",
+ "archives": {
+  "kundur-raw": {
+   "file": "andes-kundur-kundur.raw",
+   "url": "https://raw.githubusercontent.com/CURENT/andes/eda5163c9ee8d19945a1dd5d1771fec5da608c27/andes/cases/kundur/kundur.raw",
+   "sha256": "1d1b8dc8d00a0c9dae8dc9fb85a27968f094f57beee9a7357720f16d7e0d2d2e"
+  },
+  "kundur-full-dyr": {
+   "file": "andes-kundur-kundur_full.dyr",
+   "url": "https://raw.githubusercontent.com/CURENT/andes/eda5163c9ee8d19945a1dd5d1771fec5da608c27/andes/cases/kundur/kundur_full.dyr",
+   "sha256": "fd6c94e99d434d37de4bbc17865465c40590690f55a1be9149b253535b1b0faa"
+  },
+  "kundur-gencls-dyr": {
+   "file": "andes-kundur-kundur_gencls.dyr",
+   "url": "https://raw.githubusercontent.com/CURENT/andes/eda5163c9ee8d19945a1dd5d1771fec5da608c27/andes/cases/kundur/kundur_gencls.dyr",
+   "sha256": "0f29f7210d62fa336278c470c8862fcea15cf2672fd5aaae108cd436cbba9c57"
+  },
+  "ieee14-raw": {
+   "file": "andes-ieee14-ieee14.raw",
+   "url": "https://raw.githubusercontent.com/CURENT/andes/eda5163c9ee8d19945a1dd5d1771fec5da608c27/andes/cases/ieee14/ieee14.raw",
+   "sha256": "de871c963e50c38d980552f138d54320a2d342a1cc8b31eb01f0fb5f0ce6c9e7"
+  },
+  "ieee14-dyr": {
+   "file": "andes-ieee14-ieee14.dyr",
+   "url": "https://raw.githubusercontent.com/CURENT/andes/eda5163c9ee8d19945a1dd5d1771fec5da608c27/andes/cases/ieee14/ieee14.dyr",
+   "sha256": "4a59b2e203a312cb6ce44b282de26963974b387064c009a71f13f17fd941d106"
+  },
+  "wecc-raw": {
+   "file": "andes-wecc-wecc.raw",
+   "url": "https://raw.githubusercontent.com/CURENT/andes/eda5163c9ee8d19945a1dd5d1771fec5da608c27/andes/cases/wecc/wecc.raw",
+   "sha256": "623ba186fc317abd3e61be456129bebfe8b1512819307e91b659ea7a299baad3"
+  },
+  "wecc-full-dyr": {
+   "file": "andes-wecc-wecc_full.dyr",
+   "url": "https://raw.githubusercontent.com/CURENT/andes/eda5163c9ee8d19945a1dd5d1771fec5da608c27/andes/cases/wecc/wecc_full.dyr",
+   "sha256": "5b51ff0e544a1c8ff7b403c4876a76d2bd1d3226214301eddfb9bcc9286eadae"
+  }
+ },
+ "cases": [
+  {
+   "name": "kundur-gencls",
+   "raw": "andes-kundur-kundur.raw",
+   "dyr": "andes-kundur-kundur_gencls.dyr",
+   "tf": 10.0,
+   "tstep": 0.00025,
+   "sample": 0.01,
+   "events": [
+    {
+     "t": 2.0,
+     "kind": "trip",
+     "target": "L-8-9-1"
+    }
+   ],
+   "about": "Kundur's two-area system with classical machines; the published event, one of the two tie lines between buses 8 and 9 switched out at 2 s.",
+   "step": 0.001
+  },
+  {
+   "name": "kundur-gencls-fault",
+   "raw": "andes-kundur-kundur.raw",
+   "dyr": "andes-kundur-kundur_gencls.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "sample": 0.01,
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "fault",
+     "target": "B8",
+     "rf": 0.0,
+     "xf": 0.0001
+    },
+    {
+     "t": 1.1,
+     "kind": "clear",
+     "target": "B8"
+    }
+   ],
+   "about": "Kundur's two-area system with classical machines; a fault at bus 8, cleared after 100 ms.",
+   "step": 0.001
+  },
+  {
+   "name": "kundur-full",
+   "raw": "andes-kundur-kundur.raw",
+   "dyr": "andes-kundur-kundur_full.dyr",
+   "tf": 10.0,
+   "tstep": 0.00025,
+   "sample": 0.01,
+   "events": [
+    {
+     "t": 2.0,
+     "kind": "trip",
+     "target": "L-8-9-1"
+    }
+   ],
+   "about": "Kundur's two-area system with GENROU machines, EXDC2 exciters and TGOV1 governors; the published event.",
+   "step": 0.001
+  },
+  {
+   "name": "kundur-full-fault",
+   "raw": "andes-kundur-kundur.raw",
+   "dyr": "andes-kundur-kundur_full.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "sample": 0.01,
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "fault",
+     "target": "B8",
+     "rf": 0.0,
+     "xf": 0.0001
+    },
+    {
+     "t": 1.1,
+     "kind": "clear",
+     "target": "B8"
+    }
+   ],
+   "about": "As kundur-full, with a fault at bus 8 cleared after 100 ms.",
+   "step": 0.001
+  },
+  {
+   "name": "ieee14",
+   "raw": "andes-ieee14-ieee14.raw",
+   "dyr": "andes-ieee14-ieee14.dyr",
+   "tf": 10.0,
+   "tstep": 0.00025,
+   "sample": 0.01,
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "trip",
+     "target": "L-1-2-1"
+    },
+    {
+     "t": 1.1,
+     "kind": "close",
+     "target": "L-1-2-1"
+    }
+   ],
+   "about": "IEEE 14-bus system with GENROU machines, ESST3A, EXST1 exciters, TGOV1, IEEEG1 governors, IEEEST and ST2CUT stabilisers; the published event, line 1-2 switched out at 1 s and back in at 1.1 s.",
+   "step": 0.001
+  },
+  {
+   "name": "ieee14-fault",
+   "raw": "andes-ieee14-ieee14.raw",
+   "dyr": "andes-ieee14-ieee14.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "sample": 0.01,
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "fault",
+     "target": "B9",
+     "rf": 0.0,
+     "xf": 0.0001
+    },
+    {
+     "t": 1.1,
+     "kind": "clear",
+     "target": "B9"
+    }
+   ],
+   "about": "As ieee14, with a fault at bus 9 cleared after 100 ms.",
+   "step": 0.001
+  },
+  {
+   "name": "wecc",
+   "raw": "andes-wecc-wecc.raw",
+   "dyr": "andes-wecc-wecc_full.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "sample": 0.01,
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "fault",
+     "target": "B3",
+     "rf": 0.0,
+     "xf": 0.0001
+    },
+    {
+     "t": 1.1,
+     "kind": "clear",
+     "target": "B3"
+    }
+   ],
+   "about": "WECC 179-bus system with GENROU machines, IEEEG1 governors, EXST1, ESST3A, ESDC2A exciters and IEEEST, ST2CUT stabilisers; a fault at bus 3 cleared after 100 ms.",
+   "overrides": [
+    {
+     "model": "ESDC2A",
+     "param": "TR",
+     "value": 0.0
+    }
+   ],
+   "step": 0.001
+  },
+  {
+   "name": "kundur-sexs",
+   "raw": "andes-kundur-kundur.raw",
+   "dyr": "andes-kundur-kundur_full.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "step": 0.001,
+   "sample": 0.01,
+   "replace": [
+    {
+     "generator": "B1-G1",
+     "model": "SEXS",
+     "values": [
+      0.4,
+      5.0,
+      20.0,
+      0.83,
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "generator": "B2-G1",
+     "model": "SEXS",
+     "values": [
+      0.4,
+      5.0,
+      20.0,
+      0.83,
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "generator": "B3-G1",
+     "model": "SEXS",
+     "values": [
+      0.4,
+      5.0,
+      20.0,
+      0.83,
+      0.0,
+      5.0
+     ]
+    },
+    {
+     "generator": "B4-G1",
+     "model": "SEXS",
+     "values": [
+      0.4,
+      5.0,
+      20.0,
+      0.83,
+      0.0,
+      5.0
+     ]
+    }
+   ],
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "fault",
+     "target": "B8",
+     "rf": 0.0,
+     "xf": 0.0001
+    },
+    {
+     "t": 1.1,
+     "kind": "clear",
+     "target": "B8"
+    }
+   ],
+   "about": "Kundur's two-area system with SEXS exciters in place of EXDC2, with the parameters of ANDES's kundur_sexs case; a fault at bus 8 cleared after 100 ms."
+  },
+  {
+   "name": "ieee14-ieeet1",
+   "raw": "andes-ieee14-ieee14.raw",
+   "dyr": "andes-ieee14-ieee14.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "step": 0.001,
+   "sample": 0.01,
+   "replace": [
+    {
+     "generator": "B8-G1",
+     "model": "IEEET1",
+     "values": [
+      0.02,
+      5.0,
+      0.04,
+      7.3,
+      -7.3,
+      1.0,
+      0.8,
+      0.1,
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      1.0,
+      1.0
+     ]
+    }
+   ],
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "fault",
+     "target": "B9",
+     "rf": 0.0,
+     "xf": 0.0001
+    },
+    {
+     "t": 1.1,
+     "kind": "clear",
+     "target": "B9"
+    }
+   ],
+   "about": "The IEEE 14-bus system with an IEEET1 exciter at bus 8, as ANDES's ieee14_ieeet1 case places it, with ANDES's typical parameters; a fault at bus 9 cleared after 100 ms."
+  },
+  {
+   "name": "ieee14-hygov",
+   "raw": "andes-ieee14-ieee14.raw",
+   "dyr": "andes-ieee14-ieee14.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "step": 0.001,
+   "sample": 0.01,
+   "replace": [
+    {
+     "generator": "B8-G1",
+     "model": "HYGOV",
+     "values": [
+      0.05,
+      1.0,
+      1.0,
+      0.05,
+      0.05,
+      0.3,
+      0.45001,
+      0.0,
+      1.0,
+      1.0,
+      0.0,
+      0.1
+     ]
+    }
+   ],
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "trip",
+     "target": "L-2-5-1"
+    }
+   ],
+   "about": "The IEEE 14-bus system with a HYGOV governor at bus 8, as ANDES's ieee14_hygov case places it, with its parameters; line 2-5 switched out at 1 s."
+  }
+ ]
+}

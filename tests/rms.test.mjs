@@ -10,7 +10,8 @@ function smib(pm = 80) {
   const doc = emptyDocument('SMIB');
   doc.elements.push(makeElement('bus', 'G', { vn: 110 }), makeElement('bus', 'I', { vn: 110 }));
   doc.elements.push(makeElement('line', 'L', { from: 'G', to: 'I', length: 50, r1: 0, x1: 0.4, b1: 0, ratedA: 1 }));
-  doc.elements.push(makeElement('gen', 'M', { bus: 'G', mode: 'PV', p: pm, vset: 1.0, sn: 100, vn: 110, xdt: 0.3, h: 4, damping: 0 }));
+  // A lossless machine (no stator resistance), as the equal-area criterion assumes.
+  doc.elements.push(makeElement('gen', 'M', { bus: 'G', mode: 'PV', p: pm, vset: 1.0, sn: 100, vn: 110, xdt: 0.3, h: 4, damping: 0, rs: 0 }));
   doc.elements.push(makeElement('extgrid', 'X', { bus: 'I', vset: 1.0, skMax: 1e12, rxMax: 0 }));
   return doc;
 }

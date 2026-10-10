@@ -367,14 +367,16 @@ pub fn parse(text: &str) -> Result<RawCase, ParseError> {
         ));
     }
     let rev = num(2, 0.0) as u32;
-    if rev != 33 && rev != 35 {
+    // Version 32 lays its records out as version 33 does, less fields at their ends (bus voltage limits, the
+    // transformer's vector group), which take their defaults.
+    if !matches!(rev, 32 | 33 | 35) {
         let shown = if rev == 0 {
             "no version".to_string()
         } else {
             format!("version {rev}")
         };
         return Err(ParseError::new(
-            format!("the file states {shown}; PowerStudio reads PSS/E RAW versions 33 and 35"),
+            format!("the file states {shown}; PowerStudio reads PSS/E RAW versions 32, 33 and 35"),
             Some(i + 1),
         ));
     }

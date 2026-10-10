@@ -43,9 +43,12 @@
  *   timing: { totalMs: number, buildMs: number, analyseMs: number, factorMs: number, analysesReused: number, analyses: number },
  *   notes: string[] }} ContingencyResult
  * @typedef {import('../core/document.js').SimEvent} SimEvent
- * @typedef {{ id: string, name: string, delta: Float32Array, speed: Float32Array, pe: Float32Array }} MachineTrace
+ * @typedef {{ id: string, name: string, delta: Float32Array, speed: Float32Array, pe: Float32Array, q: Float32Array, efd: Float32Array,
+ *   pm: Float32Array }} MachineTrace `delta` °, `speed` Hz, `pe` MW, `q` Mvar, `efd` field voltage p.u. and `pm` mechanical power MW
+ *   (both empty for an external grid).
  * @typedef {{ t: Float32Array, machines: MachineTrace[], busIds: string[], voltages: Float32Array[], events: Array<SimEvent & { applied: boolean, note: string }>,
- *   stable: boolean, lossOfSynchronism: number | null, angleReference: 'grid' | 'coi', steps: number, message: string }} RmsResult
+ *   stable: boolean, lossOfSynchronism: number | null, angleReference: 'grid' | 'coi', steps: number, notes: string[], message: string }} RmsResult
+ *   `notes`: the models' limits widened to the operating point.
  * @typedef {{ loadflow: LoadFlowResult, shortcircuit: ShortCircuitResult, contingency: ContingencyResult, rms: RmsResult }} ResultOf
  * @typedef {{ class: string, count: number, status: 'mapped' | 'used' | 'not used', detail: string }} ImportClass
  * @typedef {{ files: Array<{ name: string, profiles: string[] }>, classes: ImportClass[], notes: string[] }} ImportReport
@@ -80,7 +83,8 @@ export function adapt(kind, raw) {
     r = { ...raw, base: adaptCase(raw.base), cases: raw.cases.map(adaptCase) };
   } else {
     r = { ...raw, t: Float32Array.from(raw.t),
-      machines: raw.machines.map((/** @type {any} */ m) => ({ ...m, delta: Float32Array.from(m.delta), speed: Float32Array.from(m.speed), pe: Float32Array.from(m.pe) })),
+      machines: raw.machines.map((/** @type {any} */ m) => ({ ...m, delta: Float32Array.from(m.delta), speed: Float32Array.from(m.speed), pe: Float32Array.from(m.pe),
+        q: Float32Array.from(m.q), efd: Float32Array.from(m.efd), pm: Float32Array.from(m.pm) })),
       voltages: raw.voltages.map((/** @type {number[]} */ v) => Float32Array.from(v)) };
   }
   return /** @type {ResultOf[K]} */ (r);

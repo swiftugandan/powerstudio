@@ -10,6 +10,7 @@
 //! edit log stays valid while tables grow. Removing an element marks it deleted ([`Model::alive`]) instead of shifting
 //! indices; [`Model::compact`] drops deleted rows and renumbers references when a snapshot is written.
 
+pub mod dynamics;
 mod equipment;
 mod ops;
 mod snapshot;
@@ -17,6 +18,7 @@ pub mod study;
 mod validate;
 mod wiring;
 
+pub use dynamics::{Controller, ControllerKind, Controls, RotorModel, RoundRotor, Slot};
 pub use equipment::*;
 pub use ops::{Element, Op, OpError};
 pub use snapshot::{SNAPSHOT_MAGIC, SNAPSHOT_VERSION, SnapshotError, sha256_hex};

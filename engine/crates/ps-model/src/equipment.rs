@@ -417,16 +417,38 @@ pub struct MachineShortCircuit {
     pub earthed: bool,
 }
 
-/// The classical dynamic data a machine always carries (detailed models are assigned separately).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+/// A machine's dynamic data: inertia, damping and transient reactance, which every rotor model uses, the rotor model
+/// with its data, and the machine's controls.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineDynamics {
-    /// Transient reactance, p.u. of the rating.
+    /// Transient reactance X′d, p.u. of the rating.
     pub xdt: f64,
     /// Inertia constant, s, on the rating.
     pub h: f64,
     /// Damping, p.u. of the rating.
     pub d: f64,
+    /// How the simulation models the rotor.
+    pub rotor_model: crate::RotorModel,
+    /// Round-rotor data, used when [`Self::rotor_model`] is [`crate::RotorModel::RoundRotor`].
+    pub rotor: crate::RoundRotor,
+    /// Exciter, governor and stabiliser.
+    pub controls: crate::Controls,
+}
+
+impl MachineDynamics {
+    /// The classical model with the given transient reactance, inertia and damping, typical round-rotor data and no
+    /// controls.
+    pub const fn classical(xdt: f64, h: f64, d: f64) -> Self {
+        Self {
+            xdt,
+            h,
+            d,
+            rotor_model: crate::RotorModel::Classical,
+            rotor: crate::dynamics::TYPICAL_ROUND_ROTOR,
+            controls: crate::Controls::NONE,
+        }
+    }
 }
 
 /// A synchronous machine or other controllable generating unit.

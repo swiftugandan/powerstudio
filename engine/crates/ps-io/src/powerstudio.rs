@@ -7,11 +7,12 @@
 //! vector group's phase shift. Diagram fields stay with the document. Missing fields take the catalogue defaults
 //! (src/core/catalog.js), so a hand-written document reads the same in both.
 
+use ps_model::dynamics::TYPICAL_ROUND_ROTOR;
 use ps_model::study::StudyCase;
 use ps_model::{
-    Area, Class, CurrentLimit, ExternalGrid, FlowControl, Generator, Line, Load, MachineControl, MachineDynamics,
-    MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap, Shunt, Transformer2, VoltageControl,
-    Winding,
+    Area, Class, Controller, ControllerKind, CurrentLimit, ExternalGrid, FlowControl, Generator, Line, Load,
+    MachineControl, MachineDynamics, MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap,
+    RotorModel, RoundRotor, Shunt, Slot, Transformer2, VoltageControl, Winding,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -51,6 +52,64 @@ impl<'a> El<'a> {
     fn flag(&self, key: &str, default: bool) -> bool {
         self.0.get(key).and_then(Value::as_bool).unwrap_or(default)
     }
+}
+
+/// The document keys of a machine's controls, by slot.
+pub const CONTROL_KEYS: [(&str, Slot); 3] = [
+    ("exciter", Slot::Exciter),
+    ("governor", Slot::Governor),
+    ("stabiliser", Slot::Stabiliser),
+];
+
+/// A machine's dynamic data: the classical fields every machine has (`xdt`, `h`, `damping`), the rotor model
+/// (`machineModel`) with its round-rotor fields, and its controls, each an object naming its `model` with the
+/// parameters under their PSS/E names. A missing parameter takes its typical value; a control naming a model that is
+/// not in the library, or in another slot, is left out and reported.
+fn machine_dynamics(e: &El, id: &str, issues: &mut Vec<String>) -> MachineDynamics {
+    let mut d = MachineDynamics::classical(e.num("xdt", 0.25), e.num("h", 4.0), e.num("damping", 0.0));
+    let t = TYPICAL_ROUND_ROTOR;
+    d.rotor_model = match e.text("machineModel") {
+        "roundRotor" => RotorModel::RoundRotor,
+        _ => RotorModel::Classical,
+    };
+    d.rotor = RoundRotor {
+        xd: e.num("xd", t.xd),
+        xq: e.num("xq", t.xq),
+        xqt: e.num("xqt", t.xqt),
+        xl: e.num("xl", t.xl),
+        td0t: e.num("td0t", t.td0t),
+        td0s: e.num("td0s", t.td0s),
+        tq0t: e.num("tq0t", t.tq0t),
+        tq0s: e.num("tq0s", t.tq0s),
+        s10: e.num("s10", t.s10),
+        s12: e.num("s12", t.s12),
+    };
+    for (key, slot) in CONTROL_KEYS {
+        let Some(obj) = e.0.get(key).and_then(Value::as_object) else {
+            continue;
+        };
+        let name = obj.get("model").and_then(Value::as_str).unwrap_or("");
+        match ControllerKind::from_name(name).filter(|k| k.slot() == slot) {
+            Some(kind) => {
+                let values = kind
+                    .params()
+                    .iter()
+                    .zip(kind.defaults())
+                    .map(|(p, def)| {
+                        obj.get(*p)
+                            .and_then(Value::as_f64)
+                            .filter(|v| v.is_finite())
+                            .unwrap_or(*def)
+                    })
+                    .collect();
+                *d.controls.slot_mut(slot) = Some(Controller { kind, values });
+            }
+            None => issues.push(format!(
+                "{id}: the {key} model {name:?} is not in the library; the machine has no {key}."
+            )),
+        }
+    }
+    d
 }
 
 /// Parses a vector group such as `Dyn11` into winding connections and clock number.
@@ -398,6 +457,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     _ => sn * cos_phi,
                 };
                 let regulated_node = optional_bus(&e, "regBus", &node_of, &id, &mut issues).filter(|&r| r != nodes[0]);
+                let dynamics = machine_dynamics(&e, &id, &mut issues);
                 m.generators.push(Generator {
                     id,
                     name,
@@ -423,11 +483,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                         cos_phi,
                         earthed: false,
                     },
-                    dynamics: MachineDynamics {
-                        xdt: e.num("xdt", 0.25),
-                        h: e.num("h", 4.0),
-                        d: e.num("damping", 0.0),
-                    },
+                    dynamics,
                 });
             }
             Class::ExternalGrid => m.external_grids.push(ExternalGrid {

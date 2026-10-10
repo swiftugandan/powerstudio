@@ -4,6 +4,7 @@
 
 import { h } from './dom.js';
 import { editable, parseNumber } from './format.js';
+import { CONTROLLERS, controllerOf, completeController } from '../core/catalog.js';
 
 /** @typedef {import('../core/catalog.js').FieldSpec} FieldSpec */
 
@@ -67,6 +68,7 @@ export function elementPicker(buses, value, id, pick, optional, noun = 'busbar')
  */
 export function fieldRow(f, value, commit, ctx = {}) {
   const id = ctx.id ?? `f-${f.key}-${Math.random().toString(36).slice(2, 7)}`;
+  if (f.type === 'controller') return controllerRows(f, /** @type {Record<string, unknown> | null} */ (value), commit, id);
   const label = h('label', { for: id, text: ctx.labelOverride ?? f.label, title: f.help });
   const error = h('div', { class: 'field-error', role: 'alert', hidden: true });
   const wrap = h('div', { class: 'field' });
@@ -115,6 +117,52 @@ export function fieldRow(f, value, commit, ctx = {}) {
   return [label, wrap, error];
 }
 
+/** Which controls' parameter groups are open, by field key, for this session: an edit redraws the inspector. */
+const openControls = new Set();
+
+/**
+ * A machine's control: the model, chosen from the library's models for the field's slot (or none), and below it the
+ * model's parameters in a group that opens on demand. Changing the model starts it from its typical values.
+ * @param {FieldSpec} f @param {Record<string, unknown> | null} value @param {(v: unknown) => string} commit @param {string} id
+ * @returns {HTMLElement[]}
+ */
+function controllerRows(f, value, commit, id) {
+  const spec = value ? controllerOf(value.model) : undefined;
+  const select = h('select', { id, class: 'input' }, h('option', { value: '', text: 'None' }),
+    ...CONTROLLERS.filter(c => c.slot === f.slot).map(c => h('option', { value: c.model, text: `${c.model} · ${c.label}` })));
+  select.value = spec ? spec.model : '';
+  select.dataset.key = f.key;
+  const error = h('div', { class: 'field-error', role: 'alert', hidden: true });
+  select.addEventListener('change', () => {
+    const msg = commit(select.value ? completeController({ model: select.value }) : null);
+    error.textContent = msg;
+    error.hidden = !msg;
+  });
+  /** @type {HTMLElement[]} */
+  const out = [h('label', { for: id, text: f.label, title: f.help }), h('div', { class: 'field' }, select), error];
+  if (!spec || !value) return out;
+  const params = h('div', { class: 'props' });
+  const group = h('details', { class: 'control-params', open: openControls.has(f.key) },
+    h('summary', { text: `${spec.model} parameters (${spec.params.length})` }), params);
+  group.addEventListener('toggle', () => { if (/** @type {HTMLDetailsElement} */ (group).open) openControls.add(f.key); else openControls.delete(f.key); });
+  out.push(group);
+  for (const p of spec.params) {
+    /** @type {FieldSpec} */
+    const pf = p.choices
+      ? { key: `${f.key}.${p.key}`, label: p.label, type: 'enum', group: f.group, default: String(p.default), options: p.choices.map(([v]) => String(v)), help: p.help }
+      : { key: `${f.key}.${p.key}`, label: p.label, type: p.integer ? 'integer' : 'number', group: f.group, default: p.default, unit: p.unit, help: p.help };
+    const current = typeof value[p.key] === 'number' ? value[p.key] : p.default;
+    const rows = fieldRow(pf, p.choices ? String(current) : current, v => {
+      const x = typeof v === 'string' ? Number(v) : /** @type {number} */ (v);
+      if (!Number.isFinite(x)) return `${p.label} must be a number.`;
+      if (p.integer && !Number.isInteger(x)) return `${p.label} must be a whole number.`;
+      return commit({ ...value, [p.key]: x });
+    }, { id: `${id}-${p.key.replace(/[^\w]/g, '_')}` });
+    params.append(...rows);
+  }
+  return out;
+}
+
 /** Readable labels for enum options. @param {string} key @param {string} v */
 export function enumLabel(key, v) {
   if (key === 'fault') return /** @type {Record<string, string>} */ ({ '3ph': 'Three-phase', '2ph': 'Line to line', '1ph': 'Line to earth' })[v] ?? v;
@@ -125,6 +173,9 @@ export function enumLabel(key, v) {
   if (key === 'side') return v === 'above' ? 'Above / left' : 'Below / right';
   if (key === 'magnetising') return /** @type {Record<string, string>} */ ({ both: 'Both windings', hv: 'HV winding', lv: 'LV winding' })[v] ?? v;
   if (key === 'tapKind') return v === 'phase' ? 'Phase shift' : 'Voltage ratio';
+  if (key === 'machineModel') return v === 'roundRotor' ? 'Round rotor' : 'Classical';
+  const signal = /^(exciter|governor|stabiliser)\.MODE2?$/.test(key) ? controllerOf('IEEEST')?.params[0].choices?.find(([c]) => String(c) === v) : undefined;
+  if (signal) return signal[1];
   if (key === 'balance') return /** @type {Record<string, string>} */ ({
     reference: 'Reference machine or external grid', maxP: 'Machines, by maximum power', targetP: 'Machines, by present power',
     factor: 'Machines, by participation factor', margin: 'Machines, by remaining margin', load: 'Loads, by active power',

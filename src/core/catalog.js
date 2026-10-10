@@ -5,13 +5,16 @@
  * engineer enters them; the engine converts them to its model on import (engine/crates/ps-io/src/powerstudio.rs). */
 
 /**
- * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus'} FieldType
+ * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus' | 'controller'} FieldType
  * @typedef {'basic' | 'loadflow' | 'shortcircuit' | 'rms' | 'graphic'} FieldGroup
  * @typedef {{
  *   key: string, label: string, type: FieldType, group: FieldGroup, default: unknown,
  *   unit?: string, min?: number, max?: number, exclusiveMin?: boolean, options?: readonly string[], help?: string,
  *   symbol?: string, optional?: string, when?: (el: Record<string, unknown>) => boolean, operating?: boolean,
+ *   slot?: Slot,
  * }} FieldSpec
+ * A `controller` field holds a machine's control of one `slot`: `null`, or an object naming its `model` (a
+ * [`CONTROLLERS`] entry) with each parameter under its PSS/E name.
  * `optional` lets a busbar field be empty and names that choice ("Own busbar"); `when` shows a field only when it
  * applies to the element's other values (a control's target only while the control is on). `operating` marks a value
  * of the operating point (switching state, setpoints, loads, generation, taps), which a scenario may set; every other
@@ -40,6 +43,130 @@ export const GEN_MODES = /** @type {const} */ (['PV', 'PQ', 'Reference']);
 export const SIDES = /** @type {const} */ (['below', 'above']);
 export const MAGNETISING = /** @type {const} */ (['both', 'hv', 'lv']);
 export const TAP_KINDS = /** @type {const} */ (['ratio', 'phase']);
+export const ROTOR_MODELS = /** @type {const} */ (['classical', 'roundRotor']);
+
+/**
+ * @typedef {'exciter' | 'governor' | 'stabiliser'} Slot
+ * @typedef {{ key: string, label: string, default: number, unit?: string, integer?: boolean,
+ *   choices?: ReadonlyArray<readonly [number, string]>, help?: string }} ParamSpec
+ * @typedef {{ model: string, slot: Slot, label: string, params: readonly ParamSpec[] }} ControllerSpec
+ */
+
+/** @param {string} key @param {string} label @param {number} def @param {string} [unit] @param {Partial<ParamSpec>} [extra]
+ * @returns {ParamSpec} */
+const par = (key, label, def, unit, extra = {}) => ({ key, label, default: def, ...(unit ? { unit } : {}), ...extra });
+const S = 's', PU = 'p.u.';
+/** Saturation of a DC or AC exciter, from two points. */
+const SATURATION = [par('E1', 'Saturation point E1', 0, PU), par('SE1', 'Saturation at E1', 0), par('E2', 'Saturation point E2', 1, PU), par('SE2', 'Saturation at E2', 1)];
+/** A stabiliser's input signals (PSS/E ICS); 2 and 6 are not modelled yet. */
+const SIGNALS = /** @type {const} */ ([[0, 'None'], [1, 'Speed deviation'], [3, 'Electrical power'], [4, 'Mechanical power deviation'], [5, 'Terminal voltage']]);
+const REMOTE = { integer: true, help: 'A remote busbar\u2019s number; only 0, the machine\u2019s own busbar, is modelled.' };
+
+/** The control models of the dynamic library, with their parameters in PSS/E DYR order (ICONs first) and typical values.
+ * The engine holds the same lists (ControllerKind in engine/crates/ps-model/src/dynamics.rs); a test keeps them equal.
+ * @type {readonly ControllerSpec[]} */
+export const CONTROLLERS = [
+  { model: 'SEXS', slot: 'exciter', label: 'Simplified excitation system', params: [
+    par('TA/TB', 'Lead-lag ratio TA/TB', 0.4), par('TB', 'Lag time constant TB', 5, S), par('K', 'Gain K', 20),
+    par('TE', 'Exciter time constant TE', 0.83, S), par('EMIN', 'Minimum field voltage', 0, PU), par('EMAX', 'Maximum field voltage', 5, PU)] },
+  { model: 'IEEET1', slot: 'exciter', label: 'IEEE type 1', params: [
+    par('TR', 'Transducer time constant TR', 0.02, S), par('KA', 'Regulator gain KA', 5), par('TA', 'Regulator time constant TA', 0.04, S),
+    par('VRMAX', 'Regulator maximum VRMAX', 7.3, PU, { help: 'Zero means no upper limit.' }), par('VRMIN', 'Regulator minimum VRMIN', -7.3, PU),
+    par('KE', 'Exciter constant KE', 1), par('TE', 'Exciter time constant TE', 0.8, S), par('KF', 'Rate feedback gain KF', 0.1),
+    par('TF', 'Rate feedback time constant TF', 1, S), par('SWITCH', 'Switch', 0, undefined, { help: 'Not used by the model.' }), ...SATURATION] },
+  { model: 'EXDC2', slot: 'exciter', label: 'IEEE type DC2, 1981', params: [
+    par('TR', 'Transducer time constant TR', 0.02, S), par('KA', 'Regulator gain KA', 20), par('TA', 'Regulator time constant TA', 0.02, S),
+    par('TB', 'Lead-lag lag TB', 1, S), par('TC', 'Lead-lag lead TC', 1, S), par('VRMAX', 'Regulator maximum VRMAX', 5.2, PU),
+    par('VRMIN', 'Regulator minimum VRMIN', -4.16, PU), par('KE', 'Exciter constant KE', 1), par('TE', 'Exciter time constant TE', 0.83, S),
+    par('KF', 'Rate feedback gain KF', 0.0754), par('TF1', 'Rate feedback time constant TF1', 1.246, S),
+    par('SWITCH', 'Switch', 0, undefined, { help: 'Not used by the model.' }), ...SATURATION] },
+  { model: 'ESDC2A', slot: 'exciter', label: 'IEEE 421.5 type DC2A', params: [
+    par('TR', 'Transducer time constant TR', 0.02, S), par('KA', 'Regulator gain KA', 50), par('TA', 'Regulator time constant TA', 0.05, S),
+    par('TB', 'Lead-lag lag TB', 0.02, S), par('TC', 'Lead-lag lead TC', 0, S),
+    par('VRMAX', 'Regulator maximum VRMAX', 0, PU, { help: 'Times the terminal voltage; zero means no upper limit.' }),
+    par('VRMIN', 'Regulator minimum VRMIN', -3, PU, { help: 'Times the terminal voltage.' }), par('KE', 'Exciter constant KE', 0),
+    par('TE', 'Exciter time constant TE', 0.512, S), par('KF', 'Rate feedback gain KF', 0.07), par('TF1', 'Rate feedback time constant TF1', 1.3, S),
+    par('SWITCH', 'Switch', 0, undefined, { help: 'Not used by the model.' }),
+    par('E1', 'Saturation point E1', 3.9825, PU), par('SE1', 'Saturation at E1', 0.5), par('E2', 'Saturation point E2', 5.31, PU), par('SE2', 'Saturation at E2', 1.049)] },
+  { model: 'EXST1', slot: 'exciter', label: 'IEEE type ST1, 1981', params: [
+    par('TR', 'Transducer time constant TR', 0.02, S), par('VIMAX', 'Input maximum VIMAX', 99, PU), par('VIMIN', 'Input minimum VIMIN', -99, PU),
+    par('TC', 'Lead-lag lead TC', 0, S), par('TB', 'Lead-lag lag TB', 0.02, S), par('KA', 'Regulator gain KA', 50), par('TA', 'Regulator time constant TA', 0.02, S),
+    par('VRMAX', 'Output maximum VRMAX', 9999, PU), par('VRMIN', 'Output minimum VRMIN', -9999, PU), par('KC', 'Rectifier loading factor KC', 0),
+    par('KF', 'Rate feedback gain KF', 0.01), par('TF', 'Rate feedback time constant TF', 1, S)] },
+  { model: 'ESST3A', slot: 'exciter', label: 'IEEE 421.5 type ST3A', params: [
+    par('TR', 'Transducer time constant TR', 0.02, S), par('VIMAX', 'Input maximum VIMAX', 0.2, PU), par('VIMIN', 'Input minimum VIMIN', -0.2, PU),
+    par('KM', 'Inner regulator gain KM', 8), par('TC', 'Lead-lag lead TC', 1, S), par('TB', 'Lead-lag lag TB', 5, S), par('KA', 'Regulator gain KA', 20),
+    par('TA', 'Regulator time constant TA', 0, S), par('VRMAX', 'Regulator maximum VRMAX', 99, PU), par('VRMIN', 'Regulator minimum VRMIN', -99, PU),
+    par('KG', 'Field voltage feedback gain KG', 1), par('KP', 'Potential circuit gain KP', 3.67), par('KI', 'Current circuit gain KI', 0.435),
+    par('VBMAX', 'Source voltage maximum VBMAX', 5.48, PU), par('KC', 'Rectifier loading factor KC', 0.01), par('XL', 'Potential source reactance XL', 0.0098, PU),
+    par('VGMAX', 'Feedback maximum VGMAX', 3.86, PU), par('THETAP', 'Potential circuit angle θP', 3.33, '°'),
+    par('TM', 'Inner regulator time constant TM', 0.4, S), par('VMMAX', 'Inner regulator maximum VMMAX', 99, PU), par('VMMIN', 'Inner regulator minimum VMMIN', 0, PU)] },
+  { model: 'TGOV1', slot: 'governor', label: 'Steam turbine governor', params: [
+    par('R', 'Droop R', 0.05, PU), par('T1', 'Valve time constant T1', 0.49, S), par('VMAX', 'Valve maximum VMAX', 33, PU), par('VMIN', 'Valve minimum VMIN', 0.4, PU),
+    par('T2', 'Reheater lead T2', 2.1, S), par('T3', 'Reheater lag T3', 7, S), par('DT', 'Turbine damping Dt', 0, PU)] },
+  { model: 'IEEEG1', slot: 'governor', label: 'IEEE type 1 speed governor', params: [
+    par('IBUS', 'Low-pressure machine\u2019s busbar', 0, undefined, { integer: true, help: 'A cross-compound unit\u2019s second machine; only 0, none, is modelled.' }),
+    par('IM', 'Low-pressure machine', 0, undefined, { integer: true, help: 'Only 0, none, is modelled.' }),
+    par('K', 'Governor gain K', 20), par('T1', 'Governor lag T1', 0.1, S), par('T2', 'Governor lead T2', 0, S), par('T3', 'Servo time constant T3', 0.2, S),
+    par('UO', 'Valve opening rate UO', 1, 'p.u./s'), par('UC', 'Valve closing rate UC', -1, 'p.u./s'), par('PMAX', 'Maximum power PMAX', 0.95, PU),
+    par('PMIN', 'Minimum power PMIN', 0, PU), par('T4', 'Steam chest time constant T4', 0.1, S),
+    par('K1', 'High-pressure fraction K1', 0), par('K2', 'Low-pressure fraction K2', 0), par('T5', 'Reheater time constant T5', 0, S),
+    par('K3', 'High-pressure fraction K3', 0), par('K4', 'Low-pressure fraction K4', 0), par('T6', 'Crossover time constant T6', 0, S),
+    par('K5', 'High-pressure fraction K5', 0.3), par('K6', 'Low-pressure fraction K6', 0), par('T7', 'Second reheater time constant T7', 8.72, S),
+    par('K7', 'High-pressure fraction K7', 0.7), par('K8', 'Low-pressure fraction K8', 0)] },
+  { model: 'HYGOV', slot: 'governor', label: 'Hydro turbine governor', params: [
+    par('R', 'Permanent droop R', 0.05, PU), par('r', 'Temporary droop r', 1, PU), par('TR', 'Governor time constant Tr', 1, S),
+    par('TF', 'Filter time constant Tf', 0.05, S), par('TG', 'Servo time constant Tg', 0.05, S), par('VELM', 'Gate velocity limit VELM', 0.3, 'p.u./s'),
+    par('GMAX', 'Maximum gate GMAX', 0.45001, PU), par('GMIN', 'Minimum gate GMIN', 0, PU), par('TW', 'Water time constant Tw', 1, S),
+    par('AT', 'Turbine gain At', 1), par('DTURB', 'Turbine damping Dturb', 0, PU), par('QNL', 'No-load flow qNL', 0.1, PU)] },
+  { model: 'IEEEST', slot: 'stabiliser', label: 'IEEE stabiliser', params: [
+    par('MODE', 'Input signal', 3, undefined, { integer: true, choices: SIGNALS }), par('BUSR', 'Remote busbar', 0, undefined, REMOTE),
+    par('A1', 'Filter coefficient A1', 0, S), par('A2', 'Filter coefficient A2', 0, 's²'), par('A3', 'Filter coefficient A3', 0, S),
+    par('A4', 'Filter coefficient A4', 0, 's²'), par('A5', 'Filter coefficient A5', 0, S), par('A6', 'Filter coefficient A6', 0, 's²'),
+    par('T1', 'First lead T1', 0, S), par('T2', 'First lag T2', 0, S), par('T3', 'Second lead T3', 0, S), par('T4', 'Second lag T4', 0.75, S),
+    par('T5', 'Washout gain T5', 1, S), par('T6', 'Washout time constant T6', 4.2, S), par('KS', 'Gain KS', -2),
+    par('LSMAX', 'Output maximum LSMAX', 0.1, PU), par('LSMIN', 'Output minimum LSMIN', -0.1, PU),
+    par('VCU', 'Cut-off voltage maximum VCU', 0, PU, { help: 'Zero means none.' }), par('VCL', 'Cut-off voltage minimum VCL', 0, PU, { help: 'Zero means none.' })] },
+  { model: 'ST2CUT', slot: 'stabiliser', label: 'Dual-input stabiliser', params: [
+    par('MODE', 'First input signal', 1, undefined, { integer: true, choices: SIGNALS }), par('BUSR', 'First input\u2019s remote busbar', 0, undefined, REMOTE),
+    par('MODE2', 'Second input signal', 0, undefined, { integer: true, choices: SIGNALS }), par('BUSR2', 'Second input\u2019s remote busbar', 0, undefined, REMOTE),
+    par('K1', 'First input gain K1', 10), par('K2', 'Second input gain K2', 0), par('T1', 'First input time constant T1', 0, S),
+    par('T2', 'Second input time constant T2', 0, S), par('T3', 'Washout gain T3', 3, S), par('T4', 'Washout time constant T4', 3, S),
+    par('T5', 'First lead T5', 0.15, S), par('T6', 'First lag T6', 0.05, S), par('T7', 'Second lead T7', 0.15, S), par('T8', 'Second lag T8', 0.05, S),
+    par('T9', 'Third lead T9', 0.15, S), par('T10', 'Third lag T10', 0.05, S), par('LSMAX', 'Output maximum LSMAX', 0.05, PU),
+    par('LSMIN', 'Output minimum LSMIN', -0.05, PU), par('VCU', 'Cut-off band above VCU', 0, PU, { help: 'Above the initial voltage; zero means none.' }),
+    par('VCL', 'Cut-off band below VCL', 0, PU, { help: 'Below the initial voltage (negative); zero means none.' })] },
+];
+
+/** The control model with a name, or undefined. @param {unknown} model */
+export const controllerOf = model => CONTROLLERS.find(c => c.model === model);
+
+/** A control's value with every parameter of its model, missing ones at their typical values.
+ * @param {Record<string, unknown>} value @returns {Record<string, unknown>} */
+export function completeController(value) {
+  const spec = controllerOf(value.model);
+  if (!spec) return value;
+  /** @type {Record<string, unknown>} */
+  const out = { model: spec.model };
+  for (const p of spec.params) out[p.key] = typeof value[p.key] === 'number' ? value[p.key] : p.default;
+  return out;
+}
+
+/** @param {Record<string, unknown>} el */
+const isRoundRotor = el => el.machineModel === 'roundRotor';
+/** Round-rotor data (PSS/E GENROU); the engine's typical values (TYPICAL_ROUND_ROTOR) are the defaults. */
+const ROUND_ROTOR = /** @type {FieldSpec[]} */ ([
+  num('xd', 'Synchronous reactance xd', 1.8, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'rms' }),
+  num('xq', 'Synchronous reactance xq', 1.7, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'rms' }),
+  num('xqt', 'Transient reactance xq′', 0.55, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'rms' }),
+  num('xl', 'Leakage reactance xl', 0.15, { unit: 'p.u.', min: 0, group: 'rms' }),
+  num('td0t', 'Transient time constant T′d0', 6.5, { unit: 's', min: 0, exclusiveMin: true, group: 'rms' }),
+  num('td0s', 'Subtransient time constant T″d0', 0.03, { unit: 's', min: 0, exclusiveMin: true, group: 'rms' }),
+  num('tq0t', 'Transient time constant T′q0', 0.4, { unit: 's', min: 0, exclusiveMin: true, group: 'rms' }),
+  num('tq0s', 'Subtransient time constant T″q0', 0.05, { unit: 's', min: 0, exclusiveMin: true, group: 'rms' }),
+  num('s10', 'Saturation S(1.0)', 0, { min: 0, group: 'rms' }),
+  num('s12', 'Saturation S(1.2)', 0, { min: 0, group: 'rms' }),
+]);
 
 /** @type {Readonly<Record<ElementClass, ClassSpec>>} */
 export const CLASSES = {
@@ -141,9 +268,16 @@ export const CLASSES = {
       num('cosphi', 'Rated power factor', 0.85, { min: 0, max: 1, exclusiveMin: true, symbol: 'cos φrG' }),
       num('xdss', 'Subtransient reactance xd″', 0.16, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'shortcircuit' }),
       num('rs', 'Stator resistance', 0.0024, { unit: 'p.u.', min: 0, group: 'shortcircuit' }),
-      num('xdt', 'Transient reactance xd′', 0.25, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'rms' }),
+      { key: 'machineModel', label: 'Rotor model', type: 'enum', group: 'rms', default: 'classical', options: ROTOR_MODELS,
+        help: 'Classical (PSS/E GENCLS): a voltage behind the transient reactance. Round rotor (PSS/E GENROU): transient and subtransient circuits on both axes with saturation, using the subtransient reactance and stator resistance of the short-circuit data.' },
       num('h', 'Inertia constant', 4, { unit: 's', min: 0, exclusiveMin: true, group: 'rms', symbol: 'H' }),
       num('damping', 'Damping', 0, { unit: 'p.u.', min: 0, group: 'rms', symbol: 'D' }),
+      num('xdt', 'Transient reactance xd′', 0.25, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'rms' }),
+      ...ROUND_ROTOR.map(f => ({ ...f, when: isRoundRotor })),
+      { key: 'exciter', label: 'Exciter', type: 'controller', slot: 'exciter', group: 'rms', default: null },
+      { key: 'governor', label: 'Governor', type: 'controller', slot: 'governor', group: 'rms', default: null },
+      { key: 'stabiliser', label: 'Stabiliser', type: 'controller', slot: 'stabiliser', group: 'rms', default: null,
+        help: 'A stabiliser acts through the exciter; without an exciter it has no effect.' },
       attach('pos', 'Connection'),
       { key: 'side', label: 'Side', type: 'enum', group: 'graphic', default: 'above', options: SIDES },
     ],
@@ -234,5 +368,18 @@ export function checkValue(f, v) {
     case 'string': case 'bus': return typeof v === 'string' ? '' : `${f.label} must be text.`;
     case 'bool': return typeof v === 'boolean' ? '' : `${f.label} must be true or false.`;
     case 'enum': return f.options?.includes(/** @type {string} */ (v)) ? '' : `${f.label} must be one of ${f.options?.join(', ')}.`;
+    case 'controller': {
+      if (v === null) return '';
+      if (!v || typeof v !== 'object') return `${f.label} must be a model with its parameters, or none.`;
+      const c = /** @type {Record<string, unknown>} */ (v), spec = controllerOf(c.model);
+      if (!spec || spec.slot !== f.slot) return `${f.label}: "${String(c.model)}" is not ${f.slot === 'exciter' ? 'an' : 'a'} ${f.slot} model of the library.`;
+      for (const p of spec.params) {
+        const x = c[p.key];
+        if (x === undefined) continue;
+        if (typeof x !== 'number' || !Number.isFinite(x)) return `${f.label}: ${p.label} must be a number.`;
+        if (p.integer && !Number.isInteger(x)) return `${f.label}: ${p.label} must be a whole number.`;
+      }
+      return '';
+    }
   }
 }

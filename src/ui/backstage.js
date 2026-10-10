@@ -63,7 +63,7 @@ async function render(app, page, close) {
       h('div', { class: 'cards' },
         card('PowerStudio file or project', 'A .powerstudio.json network or a .powerstudio-project.json project exported from this app.', 'open', () => app.importFile('.json,application/json')),
         card('CGMES model', 'CGMES 2.4.15 or 3.0: the EQ, TP, SSH and SV files with the boundary set, as XML files or ZIP archives. Select them together.', 'import', () => app.importFile('.xml,.zip')),
-        card('PSS/E RAW file', 'A RAW file of version 33 or 35, bus-branch or node-breaker.', 'import', () => app.importFile('.raw')),
+        card('PSS/E RAW and DYR files', 'A RAW file of version 32, 33 or 35, bus-branch or node-breaker. Select its DYR file with it to bring the machines\u2019 dynamic models.', 'import', () => app.importFile('.raw,.dyr')),
         card('MATPOWER case', 'A MATPOWER version 2 .m case file.', 'import', () => app.importFile('.m,text/plain'))),
       h('p', { class: 'note', text: 'PowerStudio shows what it read, what the diagram simplifies and how closely the result matches before the network opens. Diagrams are laid out automatically.' })];
   }

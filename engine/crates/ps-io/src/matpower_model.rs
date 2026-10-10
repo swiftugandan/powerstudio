@@ -283,8 +283,4 @@ pub const TYPICAL_SC: MachineShortCircuit = MachineShortCircuit {
     earthed: false,
 };
 /// Typical classical dynamic data for machines whose source gives none.
-pub const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics {
-    xdt: 0.25,
-    h: 4.0,
-    d: 0.0,
-};
+pub const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics::classical(0.25, 4.0, 0.0);

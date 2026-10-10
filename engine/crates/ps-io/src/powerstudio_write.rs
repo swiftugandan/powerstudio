@@ -702,19 +702,16 @@ fn injections(d: &mut Doc) {
             d.count("voltage set point(s) outside 0.5 to 1.5 p.u. limited to that range");
         }
         let positive = |x: f64, def: f64| if x > 0.0 && x.is_finite() { x } else { def };
-        d.push(
-            "gen",
-            &g.id,
-            &g.name,
-            json!({
-                "bus": bus.0, "inService": g.in_service, "mode": mode, "p": g.p, "q": g.q, "vset": vset, "angle": g.angle,
-                "qmin": clamp_q(g.q_min), "qmax": clamp_q(g.q_max), "sn": positive(g.rated_mva, d.sb),
-                "vn": positive(g.rated_kv, bus.1), "cosphi": g.sc.cos_phi.clamp(0.01, 1.0), "xdss": positive(g.sc.xdss, 0.2),
-                "rs": g.sc.rs.max(0.0), "xdt": positive(g.dynamics.xdt, 0.3), "h": positive(g.dynamics.h, 4.0),
-                "damping": g.dynamics.d.max(0.0), "regBus": reg_bus, "pmin": g.p_min, "pmax": g.p_max.max(0.0),
-                "participation": g.participation.max(0.0),
-            }),
-        );
+        let mut fields = json!({
+            "bus": bus.0, "inService": g.in_service, "mode": mode, "p": g.p, "q": g.q, "vset": vset, "angle": g.angle,
+            "qmin": clamp_q(g.q_min), "qmax": clamp_q(g.q_max), "sn": positive(g.rated_mva, d.sb),
+            "vn": positive(g.rated_kv, bus.1), "cosphi": g.sc.cos_phi.clamp(0.01, 1.0), "xdss": positive(g.sc.xdss, 0.2),
+            "rs": g.sc.rs.max(0.0), "xdt": positive(g.dynamics.xdt, 0.3), "h": positive(g.dynamics.h, 4.0),
+            "damping": g.dynamics.d.max(0.0), "regBus": reg_bus, "pmin": g.p_min, "pmax": g.p_max.max(0.0),
+            "participation": g.participation.max(0.0),
+        });
+        dynamics_fields(&g.dynamics, &mut fields);
+        d.push("gen", &g.id, &g.name, fields);
     }
     for (k, c) in m.svcs.iter().enumerate() {
         if !m.alive(Class::Svc, k) {
@@ -832,5 +829,41 @@ fn injections(d: &mut Doc) {
         d.count("shunt(s) with uneven sections written at their present admittance, without their control");
         let y = shunt_admittance(s).scale(bus.1 * bus.1 / d.sb);
         d.shunt(&s.id, &s.name, &bus.0.clone(), bus.1, y, s.in_service);
+    }
+}
+
+/// Adds a machine's rotor model with its round-rotor data, and its controls, to its document fields. A classical
+/// machine without controls adds nothing, so documents of 0.1 machines stay as they were.
+pub fn dynamics_fields(dy: &ps_model::MachineDynamics, fields: &mut serde_json::Value) {
+    let Some(obj) = fields.as_object_mut() else {
+        return;
+    };
+    if dy.rotor_model == ps_model::RotorModel::RoundRotor {
+        let r = &dy.rotor;
+        obj.insert("machineModel".into(), json!("roundRotor"));
+        for (k, v) in [
+            ("xd", r.xd),
+            ("xq", r.xq),
+            ("xqt", r.xqt),
+            ("xl", r.xl),
+            ("td0t", r.td0t),
+            ("td0s", r.td0s),
+            ("tq0t", r.tq0t),
+            ("tq0s", r.tq0s),
+            ("s10", r.s10),
+            ("s12", r.s12),
+        ] {
+            obj.insert(k.into(), json!(v));
+        }
+    }
+    for (key, slot) in crate::powerstudio::CONTROL_KEYS {
+        if let Some(c) = dy.controls.slot(slot) {
+            let mut control = serde_json::Map::new();
+            control.insert("model".into(), json!(c.kind.name()));
+            for (p, v) in c.kind.params().iter().zip(&c.values) {
+                control.insert((*p).into(), json!(v));
+            }
+            obj.insert(key.into(), serde_json::Value::Object(control));
+        }
     }
 }

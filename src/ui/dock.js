@@ -503,8 +503,10 @@ export class Dock {
   renderRms() {
     const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').RmsResult, ms: number }} */ (app.results.rms);
     const pill = r.stable ? h('span', { class: 'pill ok', html: `${icon('check', 13)}${esc(r.message)}` }) : h('span', { class: 'pill bad', html: `${icon('warning', 13)}${esc(r.message)}` });
-    const vars = /** @type {Array<[string, string]>} */ ([['delta', 'Rotor angle'], ['speed', 'Speed'], ['pe', 'Electrical power'], ['v', 'Busbar voltage']]);
-    const seg = this.segmented(vars, this.rmsVar, v => { this.rmsVar = v; });
+    const quantity = RMS_QUANTITIES.find(q => q.key === this.rmsVar) ?? RMS_QUANTITIES[0];
+    const seg = h('select', { class: 'input rms-quantity', 'aria-label': 'Quantity shown' }, ...RMS_QUANTITIES.map(q => h('option', { value: q.key, text: q.label })));
+    seg.value = quantity.key;
+    seg.addEventListener('change', () => { this.rmsVar = seg.value; this.renderRms(); });
     const summary = h('div', { class: 'summary', html: `<span>Angles against <b>${r.angleReference === 'grid' ? 'the external grid' : 'the centre of inertia'}</b></span><span>Steps <b>${r.steps}</b></span><span>Time <b>${duration(ms)}</b></span>` });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), seg);
     const wrap = h('div', { class: 'plot-wrap' });
@@ -516,14 +518,15 @@ export class Dock {
     const dark = effectiveTheme() === 'dark';
     /** @type {Array<{ id: string, name: string, data: Float32Array }>} */
     let source;
-    let unit;
-    if (this.rmsVar === 'v') { source = r.busIds.map((id, k) => ({ id, name: this.nameOf(id), data: r.voltages[k] })); unit = 'p.u.'; }
+    const unit = quantity.unit;
+    if (quantity.key === 'v') source = r.busIds.map((id, k) => ({ id, name: this.nameOf(id), data: r.voltages[k] }));
     else {
-      const machines = r.machines.filter(m => this.rmsVar !== 'delta' || app.store.get(m.id)?.cls === 'gen' || r.angleReference === 'grid');
-      source = machines.filter(m => this.rmsVar === 'delta' || app.store.get(m.id)?.cls === 'gen').map(m => ({ id: m.id, name: m.name, data: this.rmsVar === 'delta' ? m.delta : this.rmsVar === 'speed' ? m.speed : m.pe }));
-      unit = this.rmsVar === 'delta' ? '°' : this.rmsVar === 'speed' ? 'Hz' : 'MW';
+      // External grids have an angle and powers but no field or turbine; their angle is the reference when there is one.
+      const key = /** @type {'delta' | 'speed' | 'pe' | 'q' | 'efd' | 'pm'} */ (quantity.key);
+      source = r.machines.filter(m => m[key].length && (key !== 'delta' || app.store.get(m.id)?.cls === 'gen' || r.angleReference === 'grid'))
+        .map(m => ({ id: m.id, name: m.name || m.id, data: m[key] }));
     }
-    side.append(h('h4', { text: this.rmsVar === 'v' ? 'Busbars' : 'Machines' }));
+    side.append(h('h4', { text: quantity.key === 'v' ? 'Busbars' : 'Machines' }));
     source.forEach((s, i) => {
       const cb = h('input', { type: 'checkbox' });
       cb.checked = !this.rmsHidden.has(s.id);
@@ -532,14 +535,18 @@ export class Dock {
     });
     side.append(h('h4', { text: 'Events' }));
     for (const e of r.events) side.append(h('div', { style: 'padding:3px 12px;color:var(--text-2)', html: `<b style="font-variant-numeric:tabular-nums">${fixed(e.t, 3)} s</b> ${esc(e.note)}` }));
+    if (r.notes?.length) {
+      side.append(h('h4', { text: 'Notes' }));
+      for (const n of r.notes) side.append(h('div', { class: 'plot-note', text: n }));
+    }
     this.plot = new Plot(plotHost);
     this.plot.onCursor = i => app.setRmsIndex(i);
     this.plot.set({
-      t: r.t, unit, label: /** @type {Record<string, string>} */ ({ delta: 'Rotor angle', speed: 'Speed', pe: 'Electrical power', v: 'Voltage' })[this.rmsVar], events: r.events.filter(e => e.applied).map(e => e.t), cursor: app.rmsIndex < 0 ? r.t.length - 1 : app.rmsIndex,
+      t: r.t, unit, label: quantity.label, events: r.events.filter(e => e.applied).map(e => e.t), cursor: app.rmsIndex < 0 ? r.t.length - 1 : app.rmsIndex,
       series: source.map((s, i) => ({ name: s.name, color: seriesColor(i, dark), data: s.data })).filter((_, i) => !this.rmsHidden.has(source[i].id)),
     });
     const rows = source.map(s => ({ id: s.id, name: s.name, min: minOf(s.data), max: maxOf(s.data), end: s.data[s.data.length - 1] }));
-    this.current = { name: `stability-${this.rmsVar}`, rows: [...r.t].map((t, i) => ({ t, ...Object.fromEntries(source.map(s => [s.name, s.data[i]])) })),
+    this.current = { name: `stability-${quantity.key}`, rows: [...r.t].map((t, i) => ({ t, ...Object.fromEntries(source.map(s => [s.name, s.data[i]])) })),
       columns: [{ key: 't', label: 'Time', unit: 's', value: (/** @type {any} */ x) => x.t }, ...source.map(s => ({ key: s.name, label: s.name, unit, value: (/** @type {any} */ x) => x[s.name] }))] };
     void rows;
   }
@@ -551,6 +558,14 @@ export class Dock {
     return { name: this.current.name, text: toCSV(this.current.columns, this.current.rows) };
   }
 }
+
+/** What the stability view can plot. */
+const RMS_QUANTITIES = /** @type {const} */ ([
+  { key: 'delta', label: 'Rotor angle', unit: '°' }, { key: 'speed', label: 'Speed', unit: 'Hz' },
+  { key: 'pe', label: 'Active power', unit: 'MW' }, { key: 'q', label: 'Reactive power', unit: 'Mvar' },
+  { key: 'efd', label: 'Field voltage', unit: 'p.u.' }, { key: 'pm', label: 'Mechanical power', unit: 'MW' },
+  { key: 'v', label: 'Busbar voltage', unit: 'p.u.' },
+]);
 
 /** A difference with its sign, or a dash when one run lacks the element. @param {number} v @param {number} digits */
 function signed(v, digits) {

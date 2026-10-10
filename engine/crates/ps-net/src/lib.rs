@@ -234,6 +234,17 @@ pub fn two_port(z: C64, y_from: C64, y_to: C64, ratio: f64, shift: f64) -> (C64,
     )
 }
 
+/// A machine's per-unit impedance, given on its rating (`rated_mva`, `rated_kv`), on the system base `base_mva` at
+/// a bus of `base_kv`.
+pub fn machine_z_pu(z: f64, rated_mva: f64, rated_kv: f64, base_mva: f64, base_kv: f64) -> f64 {
+    z * (base_mva / rated_mva) * (rated_kv / base_kv).powi(2)
+}
+
+/// An impedance in ohms at a bus of `base_kv`, per unit on `base_mva`.
+pub fn ohms_pu(ohm: f64, base_kv: f64, base_mva: f64) -> f64 {
+    ohm * base_mva / (base_kv * base_kv)
+}
+
 /// Admittance of a shunt's sections in service, S at its nominal voltage: the per-section value times the sections,
 /// or for a non-linear bank the sum of its first sections.
 pub fn shunt_admittance(s: &ps_model::Shunt) -> C64 {

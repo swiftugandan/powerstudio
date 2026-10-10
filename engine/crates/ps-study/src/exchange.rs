@@ -319,7 +319,7 @@ pub fn import_for_editor(files: Vec<ps_io::files::File>) -> Result<ForEditor, St
             .rsplit_once('.')
             .map(|(_, e)| e.to_ascii_lowercase())
             .unwrap_or_default();
-        if matches!(by_name.as_str(), "raw" | "m" | "xml") {
+        if matches!(by_name.as_str(), "raw" | "m" | "xml" | "dyr") {
             return by_name;
         }
         let head = String::from_utf8_lossy(&f.data[..f.data.len().min(4096)]).into_owned();
@@ -354,7 +354,19 @@ pub fn import_for_editor(files: Vec<ps_io::files::File>) -> Result<ForEditor, St
         let f = single("raw")?;
         let imp = ps_io::psse_model::import(&ps_io::psse::decode(&f.data), &f.name)
             .map_err(|e| format!("{}: {e}", f.name))?;
-        ("psse", imp.model, imp.report)
+        let (mut model, mut report) = (imp.model, imp.report);
+        // Dynamic data for the same case.
+        if files.iter().any(|f| ext(f) == "dyr") {
+            let d = single("dyr")?;
+            let applied = ps_io::dyr::apply(&mut model, &ps_io::psse::decode(&d.data));
+            report.files.push(FileReport {
+                name: d.name.clone(),
+                profiles: vec!["PSS/E dynamic data".into()],
+            });
+            report.classes.extend(applied.classes);
+            report.notes.extend(applied.notes);
+        }
+        ("psse", model, report)
     } else if files.iter().any(|f| ext(f) == "m") {
         let f = single("m")?;
         let text = std::str::from_utf8(&f.data).map_err(|_| format!("{} is not text", f.name))?;
@@ -374,7 +386,7 @@ pub fn import_for_editor(files: Vec<ps_io::files::File>) -> Result<ForEditor, St
         ("cgmes", imp.model, imp.report)
     } else {
         return Err(
-            "PowerStudio opens CGMES models (XML files or ZIP archives), PSS/E RAW files (.raw) and MATPOWER cases (.m)"
+            "PowerStudio opens CGMES models (XML files or ZIP archives), PSS/E RAW files (.raw, with a .dyr file of their dynamic data) and MATPOWER cases (.m)"
                 .into(),
         );
     };

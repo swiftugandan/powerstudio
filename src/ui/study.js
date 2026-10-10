@@ -8,7 +8,7 @@ import { STUDY_FIELDS, EVENT_KINDS } from '../core/document.js';
 import { parseNumber } from './format.js';
 
 const TITLES = /** @type {Record<string, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'Contingency analysis', rms: 'Stability simulation' });
-const EVENT_LABEL = /** @type {Record<string, string>} */ ({ fault: 'Three-phase fault at', clear: 'Clear fault at', trip: 'Switch out', loadstep: 'Set load to (% of initial)' });
+const EVENT_LABEL = /** @type {Record<string, string>} */ ({ fault: 'Three-phase fault at', clear: 'Clear fault at', trip: 'Switch out', close: 'Switch in', loadstep: 'Set load to (% of initial)' });
 
 /** @param {import('../app.js').App} app @param {string} [focusSection] */
 export async function openStudyDialog(app, focusSection) {
@@ -122,7 +122,7 @@ function eventEditor(app, rms) {
     return list;
   };
   const render = () => {
-    table.replaceChildren(h('thead', {}, h('tr', {}, h('th', { text: 'Time (s)' }), h('th', { text: 'Event' }), h('th', { text: 'Element' }), h('th', { text: 'Value' }), h('th'))));
+    table.replaceChildren(h('thead', {}, h('tr', {}, h('th', { text: 'Time (s)' }), h('th', { text: 'Event' }), h('th', { text: 'Element' }), h('th', { text: 'Value', title: 'A load step\u2019s level, or a fault\u2019s resistance and reactance in Ω (empty: a bolted fault)' }), h('th'))));
     const body = h('tbody');
     rms.events.forEach((ev, i) => {
       const t = h('input', { class: 'input', value: String(ev.t), 'aria-label': 'Event time', style: 'width:80px;text-align:right' });
@@ -144,8 +144,27 @@ function eventEditor(app, rms) {
         select.addEventListener('change', () => { ev.target = select.value; });
         target = select;
       }
-      const value = h('input', { class: 'input', 'aria-label': 'Event value', style: 'width:72px;text-align:right', value: ev.kind === 'loadstep' ? String(ev.value ?? 100) : '', disabled: ev.kind !== 'loadstep' });
-      value.addEventListener('change', () => { ev.value = parseNumber(value.value); });
+      /** @type {HTMLElement} */
+      let value;
+      if (ev.kind === 'fault') {
+        // The fault's impedance, R + jX in ohms; empty is a bolted fault.
+        const part = (/** @type {'r' | 'x'} */ k, /** @type {string} */ label) => {
+          const input = h('input', { class: 'input', 'aria-label': label, placeholder: k === 'r' ? 'R Ω' : 'X Ω', style: 'width:56px;text-align:right', value: ev[k] === undefined ? '' : String(ev[k]) });
+          input.addEventListener('change', () => {
+            const x = input.value.trim() === '' ? undefined : parseNumber(input.value);
+            const bad = x !== undefined && !(x >= 0);
+            input.classList.toggle('invalid', bad);
+            if (bad) return;
+            if (x === undefined) delete ev[k]; else ev[k] = x;
+          });
+          return input;
+        };
+        value = h('span', { class: 'fault-z' }, part('r', 'Fault resistance'), part('x', 'Fault reactance'));
+      } else {
+        const input = h('input', { class: 'input', 'aria-label': 'Event value', style: 'width:72px;text-align:right', value: ev.kind === 'loadstep' ? String(ev.value ?? 100) : '', disabled: ev.kind !== 'loadstep' });
+        input.addEventListener('change', () => { ev.value = parseNumber(input.value); });
+        value = input;
+      }
       const del = h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Remove event', html: icon('delete', 15), onclick: () => { rms.events.splice(i, 1); render(); } });
       body.append(h('tr', {}, h('td', {}, t), h('td', {}, kind), h('td', {}, target), h('td', {}, value), h('td', {}, del)));
     });

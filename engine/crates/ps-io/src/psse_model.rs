@@ -45,11 +45,7 @@ const TYPICAL_SC: MachineShortCircuit = MachineShortCircuit {
     cos_phi: 0.85,
     earthed: false,
 };
-const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics {
-    xdt: 0.3,
-    h: 4.0,
-    d: 0.0,
-};
+const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics::classical(0.3, 4.0, 0.0);
 
 /// Field positions that differ between versions 33 and 35.
 struct Layout {
@@ -216,7 +212,8 @@ fn not_used(s: Section) -> &'static str {
     }
 }
 
-fn id_part(s: &str) -> String {
+/// A RAW record's identifier as PowerStudio's element identifiers use it.
+pub(crate) fn id_part(s: &str) -> String {
     s.trim().to_string()
 }
 

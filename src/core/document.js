@@ -4,14 +4,15 @@
  * is the one gate every document passes on the way in: it fills defaults, drops unknown keys, checks every value
  * against the catalogue and reports what it fixed or rejected. */
 
-import { CLASSES, checkValue, endsOf, isClass, makeElement } from './catalog.js';
+import { CLASSES, checkValue, endsOf, isClass, makeElement, completeController } from './catalog.js';
 import { checkContingencies } from './contingencies.js';
 
 /**
  * @typedef {import('./catalog.js').Element} Element
  * @typedef {import('./catalog.js').ElementClass} ElementClass
  * @typedef {import('./catalog.js').FieldSpec} FieldSpec
- * @typedef {{ t: number, kind: 'fault' | 'clear' | 'trip' | 'loadstep', target: string, value?: number }} SimEvent
+ * @typedef {{ t: number, kind: 'fault' | 'clear' | 'trip' | 'close' | 'loadstep', target: string, value?: number, r?: number, x?: number }} SimEvent
+ *   `value`: a load step's level, %; `r` and `x`: a fault's resistance and reactance, Ω (none: a bolted fault).
  * @typedef {{ zone: string, export: number, tolerance: number, slack: string }} AreaTarget A zone's interchange: net export
  *   target and tolerance in MW, and the busbar whose machines hold it ('' for none).
  * @typedef {{
@@ -84,7 +85,7 @@ export const STUDY_FIELDS = {
   ],
 };
 
-export const EVENT_KINDS = /** @type {const} */ (['fault', 'clear', 'trip', 'loadstep']);
+export const EVENT_KINDS = /** @type {const} */ (['fault', 'clear', 'trip', 'close', 'loadstep']);
 
 /** @returns {Study} */
 export function defaultStudy() {
@@ -182,6 +183,7 @@ export function* normalizeSteps(input) {
       if (!(f.key in r)) continue;
       const err = checkValue(f, r[f.key]);
       if (err) issues.push(`${id}: ${err} Using ${JSON.stringify(f.default)}.`);
+      else if (f.type === 'controller' && r[f.key]) el[f.key] = completeController(/** @type {Record<string, unknown>} */ (r[f.key]));
       else el[f.key] = r[f.key];
     }
     elements.push(el);
@@ -253,6 +255,7 @@ export function* normalizeSteps(input) {
     /** @type {SimEvent} */
     const out = { t: e.t, kind: /** @type {SimEvent['kind']} */ (e.kind), target: e.target };
     if (typeof e.value === 'number') out.value = e.value;
+    for (const k of /** @type {const} */ (['r', 'x'])) if (typeof e[k] === 'number' && Number.isFinite(e[k]) && /** @type {number} */ (e[k]) >= 0) out[k] = /** @type {number} */ (e[k]);
     doc.study.rms.events.push(out);
   }
   doc.study.rms.events.sort((a, b) => a.t - b.t);

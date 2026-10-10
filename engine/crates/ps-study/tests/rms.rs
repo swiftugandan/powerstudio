@@ -42,11 +42,7 @@ fn smib(pm: f64) -> Model {
         q_max: 1e3,
         rated_mva: 100.0,
         rated_kv: 110.0,
-        dynamics: MachineDynamics {
-            xdt: 0.3,
-            h: 4.0,
-            d: 0.0,
-        },
+        dynamics: MachineDynamics::classical(0.3, 4.0, 0.0),
         ..Default::default()
     });
     m.external_grids.push(ExternalGrid {
@@ -97,12 +93,16 @@ fn fault_at_g(clear: f64) -> Vec<SimEvent> {
             kind: EventKind::Fault,
             target: "G".into(),
             value: None,
+            r: None,
+            x: None,
         },
         SimEvent {
             t: clear,
             kind: EventKind::Clear,
             target: "G".into(),
             value: None,
+            r: None,
+            x: None,
         },
     ]
 }

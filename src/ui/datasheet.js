@@ -226,6 +226,7 @@ export class DataSheet {
     if (c.type === 'bool') return v ? 'Yes' : 'No';
     if (c.type === 'enum') return enumLabel(c.key, String(v));
     if (c.type === 'bus') return v ? (this.app.store.get(String(v))?.name || String(v)) : (c.optional ?? '');
+    if (c.type === 'controller') return v && typeof v === 'object' ? String(/** @type {Record<string, unknown>} */ (v).model) : 'None';
     return String(v ?? '');
   }
 
@@ -233,6 +234,7 @@ export class DataSheet {
    * @param {FieldSpec} c @param {string} text */
   parse(c, text) {
     const t = text.trim();
+    if (c.type === 'controller') throw new Error(`${c.label} is edited in the inspector, with its parameters.`);
     if (c.type === 'number' || c.type === 'integer') {
       const v = parseNumber(t);
       if (!Number.isFinite(v)) throw new Error(`${c.label} must be a number.`);
@@ -284,6 +286,7 @@ export class DataSheet {
   edit(id, key, typed) {
     const c = this.columns.find(x => x.key === key), el = this.app.store.get(id);
     if (!c || c === ID || !el || (c.when && !c.when(el))) return;
+    if (c.type === 'controller') { this.app.log('info', 'A machine\u2019s controls are edited in the inspector, with their parameters.'); return; }
     if (c.type === 'bool') { this.write(c, this.targets(id), !el[key]); return; }
     const td = /** @type {HTMLElement | null} */ (this.table?.querySelector(`tr[data-id="${CSS.escape(id)}"] td[data-key="${CSS.escape(key)}"]`));
     if (!td) return;

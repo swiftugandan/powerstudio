@@ -316,6 +316,8 @@ pub enum EventKind {
     Clear,
     /// Switches out a machine, branch or load.
     Trip,
+    /// Switches a branch or load back in.
+    Close,
     /// Sets a load to a percentage of its initial power.
     Loadstep,
 }
@@ -333,6 +335,12 @@ pub struct SimEvent {
     /// Load step value, %.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<f64>,
+    /// Fault resistance, Ω; a fault without resistance and reactance is bolted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r: Option<f64>,
+    /// Fault reactance, Ω.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<f64>,
 }
 
 /// Stability (RMS) settings.

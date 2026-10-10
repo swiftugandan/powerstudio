@@ -185,6 +185,30 @@ impl Engine {
             .ok_or("the request has no op")?;
         match op {
             "version" => Ok(ok(json!({ "engine": env!("CARGO_PKG_VERSION") }), Vec::new())),
+            // The dynamic model library: each control model's parameters in DYR order and their typical values, and the
+            // typical round-rotor data.
+            "library" => {
+                let controllers: Vec<Value> = ps_model::ControllerKind::ALL
+                    .iter()
+                    .map(|k| {
+                        json!({
+                            "model": k.name(),
+                            "slot": match k.slot() {
+                                ps_model::Slot::Exciter => "exciter",
+                                ps_model::Slot::Governor => "governor",
+                                ps_model::Slot::Stabiliser => "stabiliser",
+                            },
+                            "params": k.params(),
+                            "integers": k.integer_params(),
+                            "defaults": k.defaults(),
+                        })
+                    })
+                    .collect();
+                Ok(ok(
+                    json!({ "controllers": controllers, "roundRotor": ps_model::dynamics::TYPICAL_ROUND_ROTOR }),
+                    Vec::new(),
+                ))
+            }
             "study" => {
                 let kind = req
                     .header

@@ -1,9 +1,9 @@
-//! Stability study: a load flow for the initial state, then the classical-model simulation.
+//! Stability study: a load flow for the initial state, then the simulation of the machines and their controls.
 
 use ps_model::Model;
 use ps_model::study::{RmsSettings, StudyCase};
 
-pub use ps_dyn::classical::{AppliedEvent, MachineTrace, RmsReport};
+pub use ps_dyn::{AppliedEvent, EventSteps, MachineTrace, Options, RmsReport, Trajectory};
 
 use crate::loadflow::{self, LoadFlowRun};
 use crate::progress::Progress;
@@ -19,6 +19,18 @@ pub fn run(
     max_samples: usize,
     progress: &mut dyn Progress,
 ) -> Result<RmsReport, String> {
+    run_detailed(model, study, rms, max_samples, Options::default(), progress).map(|(r, _)| r)
+}
+
+/// [`run`], with solver options and the full-precision trajectory at the report's samples.
+pub fn run_detailed(
+    model: &Model,
+    study: &StudyCase,
+    rms: &RmsSettings,
+    max_samples: usize,
+    options: Options,
+    progress: &mut dyn Progress,
+) -> Result<(RmsReport, Trajectory), String> {
     let (mut calc, sol, report) = loadflow::solve(
         model,
         &LoadFlowRun {
@@ -36,7 +48,7 @@ pub fn run(
         l.p = p;
         l.q = q;
     }
-    ps_dyn::classical::simulate(model, &calc, &sol, rms, max_samples, &mut |t, end| {
+    ps_dyn::simulate_detailed(model, &calc, &sol, rms, max_samples, options, &mut |t, end| {
         progress.report(t, end)
     })
 }
