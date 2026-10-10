@@ -40,3 +40,14 @@ export function download(blob, filename) {
 
 /** A file name from a document name. @param {string} name @param {string} ext */
 export const fileName = (name, ext) => `${(name || 'network').replace(/[^\p{L}\p{N}\- _.]+/gu, '').trim().replace(/\s+/g, '-') || 'network'}${ext}`;
+
+/** Lets the browser handle input and draw a frame before the caller goes on. Animation frames stop in hidden tabs,
+ * so a timer stands in after 100 ms. @returns {Promise<void>} */
+export function yieldToBrowser() {
+  return new Promise(resolve => {
+    let done = false;
+    const go = () => { if (!done) { done = true; resolve(); } };
+    requestAnimationFrame(() => setTimeout(go, 0));
+    setTimeout(go, 100);
+  });
+}

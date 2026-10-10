@@ -2,7 +2,7 @@
  * keeps the ribbon, model tree, viewport, inspector, results dock and status bar in step. */
 
 import { DocumentStore } from './core/store.js';
-import { emptyDocument, nextId, normalizeDocument, validateForCalculation, busesOf } from './core/document.js';
+import { emptyDocument, nextId, normalizeSteps, validateForCalculation, busesOf } from './core/document.js';
 import { makeElement, CLASSES } from './core/catalog.js';
 import { autoLayout, snap } from './core/layout.js';
 import { SAMPLES } from './samples/index.js';
@@ -13,7 +13,7 @@ import { Inspector } from './ui/inspector.js';
 import { Dock } from './ui/dock.js';
 import { Viewport } from './ui/viewport.js';
 import { EngineClient, CancelledError } from './ui/engine-client.js';
-import { savePrefs, newDocId } from './ui/persistence.js';
+import { savePrefs, newDocId, serialise } from './ui/persistence.js';
 import { applyTheme, readPalette } from './ui/theme.js';
 import { buildOverlay } from './ui/overlay.js';
 import { openPalette } from './ui/palette.js';
@@ -23,7 +23,7 @@ import { openContingencyDialog } from './ui/contingency-editor.js';
 import { importDialog } from './ui/import-dialog.js';
 import { IMPORT_TYPES } from './engine/exchange.js';
 import { toast, contextMenu } from './ui/feedback.js';
-import { h, byId, download, fileName } from './ui/dom.js';
+import { h, byId, download, fileName, yieldToBrowser } from './ui/dom.js';
 import { icon, logo } from './ui/icons.js';
 import { kbd, isMac } from './ui/keys.js';
 import { fixed, duration } from './ui/format.js';
@@ -65,6 +65,8 @@ export class App {
     this.networkRevision = 0;
     /** @type {CalcKind | ''} */
     this.running = '';
+    /** An edit came during a calculation: recalculate the load flow once it ends. */
+    this.autoPending = false;
     /** @type {{ elements: Element[] } | null} */
     this.clipboard = null;
     this.saveTimer = 0;
@@ -194,12 +196,25 @@ export class App {
     if (!opt.quiet) this.log('info', `Opened the sample “${s.title}”. It is a copy; the original is always available from File.`);
   }
 
+  /** The import gate (`normalizeDocument`), run in slices of about 25 ms so a national network does not hold the page.
+   * @param {unknown} input @returns {Promise<{ doc: import('./core/document.js').PowerDocument, issues: string[] }>} */
+  async normalize(input) {
+    const steps = normalizeSteps(input);
+    for (;;) {
+      const t0 = performance.now();
+      let r = steps.next();
+      while (!r.done && performance.now() - t0 < 25) r = steps.next();
+      if (r.done) return r.value;
+      await yieldToBrowser();
+    }
+  }
+
   /** @param {string} id @param {{ quiet?: boolean }} [opt] */
   async openStored(id, opt = {}) {
     try {
       const rec = await this.library.get(id);
       if (!rec) return false;
-      const { doc, issues } = normalizeDocument(rec.doc);
+      const { doc, issues } = await this.normalize(rec.doc);
       this.load(doc, id);
       for (const i of issues) this.log('warn', i);
       if (!opt.quiet) this.log('info', `Opened “${doc.name}”.`);
@@ -219,12 +234,17 @@ export class App {
     }
   }
 
-  async save() {
+  /** Saves the document. A national network serialises over several tasks, and starts again if it changes meanwhile;
+   * `now` serialises at once (the page is closing). @param {{ now?: boolean }} [opt] */
+  async save(opt = {}) {
     clearTimeout(this.saveTimer);
     this.saveTimer = 0;
+    const doc = this.store.doc, revision = this.store.revision, id = this.docId;
     try {
-      await this.library.put(this.docId, this.store.doc);
-      this.markSaved();
+      const json = opt.now ? JSON.stringify(doc) : await serialise(doc, () => this.store.doc === doc && this.store.revision === revision, yieldToBrowser);
+      if (json === null) return;
+      await this.library.put(id, doc.name, doc.elements.length, json);
+      if (this.store.revision === revision) this.markSaved();
     } catch (error) {
       this.setSaveState('pending', 'Not saved');
       this.log('error', `Saving in this browser failed: ${error instanceof Error ? error.message : error}. Export the network to keep it.`);
@@ -237,7 +257,7 @@ export class App {
     this.saveTimer = window.setTimeout(() => this.save(), 400);
   }
 
-  flushSave() { if (this.saveTimer) this.save(); }
+  flushSave() { if (this.saveTimer) this.save({ now: true }); }
 
   markSaved() { this.setSaveState('saved', this.library.persistent ? 'Saved in this browser' : 'Kept for this session'); }
 
@@ -270,7 +290,7 @@ export class App {
       if (files.length === 1 && (/\.json$/i.test(files[0].name) || head.startsWith('{'))) {
         let json;
         try { json = JSON.parse(await files[0].text()); } catch { throw new Error('The file is not valid JSON.'); }
-        const { doc, issues } = normalizeDocument(json);
+        const { doc, issues } = await this.normalize(json);
         this.load(doc, newDocId());
         await this.save();
         this.log('ok', `Imported “${label}” as “${doc.name}” with ${doc.elements.length} elements.`);
@@ -284,13 +304,13 @@ export class App {
       this.setStatusMessage('');
       if (!(await importDialog(summary, files.map(f => f.name)))) { this.log('info', `Import of “${label}” cancelled.`); return; }
       // The engine's document passes the same gate as any file; it should need no changes.
-      const { doc, issues } = normalizeDocument(raw);
+      const { doc, issues } = await this.normalize(raw);
       this.load(doc, newDocId());
       this.start = summary.fidelity.start.busIds.length ? summary.fidelity.start : null;
       await this.save();
       const z = summary.size;
       this.log('ok', `Imported “${label}” as “${doc.name}”: ${z.nodes} nodes and ${z.branches} branches as ${doc.elements.length} elements.`);
-      for (const n of [...summary.report.notes, ...summary.conversion]) this.log('info', n);
+      for (const n of [...summary.study, ...summary.report.notes, ...summary.conversion]) this.log('info', n);
       for (const v of summary.validation) this.log(v.severity === 'error' ? 'error' : 'warn', `${v.id}: ${v.message}`);
       for (const i of issues) this.log('warn', i);
       toast('ok', `${doc.elements.length.toLocaleString('en-GB')} elements. The import notes are in the Output panel.`, { title: `Imported ${label}` });
@@ -344,7 +364,9 @@ export class App {
   }
 
   maybeAutoLoadFlow() {
-    if (!this.prefs.autoLoadFlow || !this.results.loadflow || this.running) return;
+    if (!this.prefs.autoLoadFlow || !this.results.loadflow) return;
+    // An edit during a calculation recalculates once that calculation ends.
+    if (this.running) { this.autoPending = true; return; }
     clearTimeout(this.autoTimer);
     // A calculation the user starts within the delay must not be replaced by this one.
     this.autoTimer = window.setTimeout(() => { if (!this.running) this.calc('loadflow', { auto: true }); }, 250);
@@ -575,8 +597,13 @@ export class App {
       this.results[kind] = { result, ms, revision };
       this.report(kind, result, ms, !!opt.auto);
       if (kind === 'rms') this.rmsIndex = result.t.length - 1;
+      // The result's colours, its table and the panels each take their own task, so a national network's result
+      // does not hold the page in one.
+      await yieldToBrowser();
       if (!opt.auto || this.overlayKind === kind || this.overlayKind === 'none') this.setOverlay(kind);
+      await yieldToBrowser();
       if (!opt.auto) this.dock.show(kind); else if (this.dock.tab === kind) this.dock.render(); else this.dock.renderTabs();
+      await yieldToBrowser();
       this.inspector.schedule();
       this.tree.render();
     } catch (error) {
@@ -591,6 +618,7 @@ export class App {
       this.hideProgress();
       this.commands.changed();
       this.updateStatus();
+      if (this.autoPending) { this.autoPending = false; if (this.resultsStale('loadflow')) this.maybeAutoLoadFlow(); }
     }
   }
 

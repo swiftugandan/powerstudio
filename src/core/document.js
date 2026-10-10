@@ -139,6 +139,20 @@ export const labelOf = el => el.name || el.id;
  * @param {unknown} input @returns {{ doc: PowerDocument, issues: string[] }}
  */
 export function normalizeDocument(input) {
+  const steps = normalizeSteps(input);
+  let r = steps.next();
+  while (!r.done) r = steps.next();
+  return r.value;
+}
+
+/** Elements checked between two pauses of `normalizeSteps`. */
+const CHECKED = 8192;
+
+/**
+ * `normalizeDocument` in steps: it pauses after every few thousand elements, so opening a national network can let
+ * the page draw in between. @param {unknown} input @returns {Generator<void, { doc: PowerDocument, issues: string[] }, void>}
+ */
+export function* normalizeSteps(input) {
   /** @type {string[]} */
   const issues = [];
   if (!input || typeof input !== 'object') throw new Error('The file does not contain a PowerStudio document.');
@@ -153,7 +167,9 @@ export function normalizeDocument(input) {
   const seen = new Set();
   /** @type {Element[]} */
   const elements = [];
+  let n = 0;
   for (const item of Array.isArray(raw.elements) ? raw.elements : []) {
+    if (++n % CHECKED === 0) yield;
     if (!item || typeof item !== 'object') { issues.push('Skipped an element that is not an object.'); continue; }
     const r = /** @type {Record<string, unknown>} */ (item);
     const cls = String(r.cls);
@@ -172,6 +188,7 @@ export function normalizeDocument(input) {
   }
   const buses = new Set(elements.filter(e => e.cls === 'bus').map(e => e.id));
   for (const el of elements) {
+    if (++n % CHECKED === 0) yield;
     for (const f of CLASSES[el.cls].fields) {
       if (f.type === 'bus' && f.optional !== undefined && el[f.key] !== '' && !buses.has(/** @type {string} */ (el[f.key]))) {
         issues.push(`${el.id}: ${f.label.toLowerCase()} "${String(el[f.key])}" does not exist. Using ${f.optional.toLowerCase()}.`);
@@ -179,13 +196,15 @@ export function normalizeDocument(input) {
       }
     }
   }
-  doc.elements = elements.filter(el => {
-    if (el.cls === 'bus') return true;
-    const missing = busesOf(el).filter(b => !buses.has(b));
-    if (missing.length) issues.push(`${el.id}: removed, it connects to a missing busbar.`);
-    else if (new Set(busesOf(el)).size < busesOf(el).length) { issues.push(`${el.id}: removed, both ends are on the same busbar.`); return false; }
-    return missing.length === 0;
-  });
+  doc.elements = [];
+  for (const el of elements) {
+    if (++n % CHECKED === 0) yield;
+    if (el.cls === 'bus') { doc.elements.push(el); continue; }
+    const ends = busesOf(el);
+    if (ends.some(b => !buses.has(b))) issues.push(`${el.id}: removed, it connects to a missing busbar.`);
+    else if (new Set(ends).size < ends.length) issues.push(`${el.id}: removed, both ends are on the same busbar.`);
+    else doc.elements.push(el);
+  }
 
   const study = raw.study && typeof raw.study === 'object' ? /** @type {Record<string, Record<string, unknown>>} */ (raw.study) : {};
   for (const [section, fields] of Object.entries(STUDY_FIELDS)) {
