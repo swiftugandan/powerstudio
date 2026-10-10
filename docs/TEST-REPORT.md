@@ -13,7 +13,19 @@ they have not been pushed, so CI has not run them). The sections after it record
 | Documents saved by 1.0.0 (its samples, written by its code at commit 220c95c, with the voltages pandapower gave them) | Open with nothing to report, keep every value and solve to those voltages (1e-8 p.u.) |
 
 Found on the way: the renderer removed the first canvas in the diagram's area when it started, which with the
-overview map present was the map's; both places now name the diagram's canvas.
+overview map present was the map's; both places now name the diagram's canvas. "Lay out diagram" now makes every
+route automatic again (routes shaped for the old positions would not fit), and compares the fields it sends to the
+layout worker by content, so it no longer writes the unchanged `labels` and `route` of every element. A stored
+overview setting was never read back (its default is unset, which the type check refused), and a stored grid step
+outside 10, 20 and 40 is now replaced by the default. The accessibility audit covers the Arrange tab, a selected
+route's handles and the overview map.
+
+A session on the real ACTIVSg70k grid in Chromium with WebGPU, measured as the longest gap between animation frames:
+import and open 117 ms, the load flow and its 448,402 labels 433 ms, zooming in to read the results, panning and
+the overview map 17 ms. The same session on 1.0.0, built from its commit, gives 117 ms and 433 ms: the long frame
+comes when the load flow's result arrives (decoding it, about 40 ms; the results table, about 110 ms; the diagram's
+colours, about 45 ms, in one task), not from label placement, whose steps stay short. Phase 4's "no frame over
+100 ms" does not hold under this measurement; splitting that task is the next piece of work at national scale.
 
 ## Routing, CAD phase C3 (2026-10-10, local, branch `cad`)
 
@@ -447,7 +459,7 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Live site in a browser | Opened https://swiftugandan.github.io/powerstudio/ in local Chromium: the website showed the build-time figures (13.393 MW, 27.35 kA, 10 of 20, stays in step); its "Open PowerStudio" button opened `/app/`, which drew with WebGPU (Apple, metal-3) and converged the IEEE 14 load flow in 3 iterations, with no page errors |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
-## Not verified (as of phase 7)
+## Not verified (as of release 1.1)
 
 - Safari itself, and any browser on Windows; WebGPU on Linux with a real GPU. (Playwright's Firefox and WebKit builds
   run every browser test on macOS.)

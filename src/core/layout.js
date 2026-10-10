@@ -373,7 +373,8 @@ function isotonic(t) {
 export function arrangeConnections(doc) {
   const byId = new Map(doc.elements.map(e => [e.id, e]));
   for (const [id, key, value] of connectionPlaces(doc)) /** @type {Element} */ (byId.get(id))[key] = value;
-  for (const el of doc.elements) if (el.cls === 'line' || el.cls === 'trafo') el.bend = 0;
+  // A fresh layout makes every route automatic again: bends and corners from the old positions would not fit.
+  for (const el of doc.elements) if (el.cls === 'line' || el.cls === 'trafo') { el.bend = 0; el.route = []; }
 }
 
 /**

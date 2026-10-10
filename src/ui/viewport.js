@@ -257,8 +257,10 @@ export class Viewport {
 
   // ----- Camera -----
 
+  /** Fits the whole drawing in the window: with its labels as placed when the diagram on screen is current. */
   fit() {
-    this.camera.fit(bounds(this.app.store.doc.elements));
+    const current = !this.sceneDirty && !this.job && this.lastList;
+    this.camera.fit(current ? this.extent(current) : bounds(this.app.store.doc.elements));
     this.invalidate('view');
   }
 

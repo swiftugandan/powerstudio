@@ -50,6 +50,16 @@ for (const theme of /** @type {const} */ (['light', 'dark'])) {
       await audit(page, 'workspace');
     });
 
+    test('the Arrange tab, a selected route with its handles, and the overview map', async ({ page }) => {
+      await open(page);
+      await page.getByRole('tab', { name: 'Arrange', exact: true }).click();
+      await page.locator('.tree-row[data-id="T2"]').click();
+      await page.locator('#viewport canvas.viewport-canvas').focus();
+      await page.keyboard.press('M');
+      await expect(page.locator('.vp-overview')).toBeVisible();
+      await audit(page, 'arrange');
+    });
+
     test('short-circuit results and the data sheet', async ({ page }) => {
       await open(page);
       await page.keyboard.press('Alt+S');

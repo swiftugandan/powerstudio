@@ -865,7 +865,8 @@ export class App {
       this.store.transact('Lay out diagram', tx => {
         for (const d of drawing) {
           const el = this.store.get(/** @type {string} */ (d.id));
-          if (el) for (const [k, v] of Object.entries(d)) if (k !== 'id' && el[k] !== v) tx.set(el.id, k, v);
+          // Values come back from the worker as copies: lists and maps are compared by content.
+          if (el) for (const [k, v] of Object.entries(d)) if (k !== 'id' && !sameValue(el[k], v)) tx.set(el.id, k, v);
         }
       });
       this.viewport.fit();
@@ -1526,3 +1527,10 @@ async function sha256(text) {
     return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
   } catch { return ''; }
 }
+
+/** Whether two drawing values are equal: numbers and text by value, lists and maps by content. @param {unknown} a @param {unknown} b */
+function sameValue(a, b) {
+  if (a === b) return true;
+  return typeof a === 'object' && typeof b === 'object' && a !== null && b !== null && JSON.stringify(a) === JSON.stringify(b);
+}
+

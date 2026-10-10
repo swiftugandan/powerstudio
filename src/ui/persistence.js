@@ -11,6 +11,8 @@
  * Chromium refuses it to pages opened from a file, which PowerStudio supports; IndexedDB keeps large values as files and
  * works from both. */
 
+import { GRIDS } from './snap.js';
+
 const DB = 'powerstudio', STORE = 'documents', META = 'meta', PARTS = 'parts', RUNS = 'runs', RESULTS = 'results', VERSION = 4;
 
 /** @typedef {import('../core/document.js').PowerDocument} PowerDocument */
@@ -276,6 +278,9 @@ export function loadPrefs() {
     /** @type {Record<string, unknown>} */
     const out = { ...DEFAULTS };
     for (const k of Object.keys(DEFAULTS)) if (k in raw && typeof raw[k] === typeof (/** @type {Record<string, unknown>} */ (DEFAULTS))[k]) out[k] = raw[k];
+    // The overview map's setting is unset (null: shown on large diagrams) or on or off; the grid is one of the steps.
+    if (typeof raw.overview === 'boolean') out.overview = raw.overview;
+    if (!GRIDS.includes(/** @type {number} */ (out.grid))) out.grid = DEFAULTS.grid;
     return /** @type {Prefs} */ (out);
   } catch {
     return { ...DEFAULTS };

@@ -254,10 +254,12 @@ test('drags a result box to a place of its own, undoes it, and lets the diagram 
   await loadFlow(page);
   await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('F');
-  await page.keyboard.press('=');
-  await page.keyboard.press('=');
+  // Close enough that result boxes show (their text 6.5 px or more): about 100 %.
   /** @param {number} x @param {number} y */
   const at = (x, y) => page.evaluate(([px, py]) => /** @type {any} */ (window).powerstudio.toPage(px, py), [x, y]);
+  // The camera's zoom, read from where two diagram points land (the readout follows a frame later).
+  const zoom = async () => ((await at(100, 0)).x - (await at(0, 0)).x) / 100;
+  while (await zoom() < 0.9) await page.keyboard.press('=');
   const box = async () => /** @type {NonNullable<Awaited<ReturnType<typeof labelsOf>>[number]>} */ ((await labelsOf(page)).find(l => l.owner === 'B4' && l.slot === 'box'));
   await expect.poll(async () => !!(await box())).toBe(true);
   const before = await box();
@@ -268,13 +270,14 @@ test('drags a result box to a place of its own, undoes it, and lets the diagram 
   await page.mouse.up();
   // Pressing the label selected its busbar; the inspector says the label was placed by hand.
   await expect(page.locator('#inspector-panel')).toContainText('1 placed by hand');
-  await expect.poll(async () => Math.round((await box()).x0 - before.x0)).toBe(60);
-  expect(Math.round((await box()).y0 - before.y0)).toBe(80);
+  // Moved with the pointer, to within a pixel's rounding at this zoom.
+  await expect.poll(async () => Math.abs((await box()).x0 - before.x0 - 60)).toBeLessThanOrEqual(2);
+  expect(Math.abs((await box()).y0 - before.y0 - 80)).toBeLessThanOrEqual(2);
   expect(overlapping(await labelsOf(page))).toEqual([]);
   await page.keyboard.press('ControlOrMeta+Z');
   await expect.poll(async () => (await box()).x0).toBe(before.x0);
   await page.keyboard.press('ControlOrMeta+Shift+Z');
-  await expect.poll(async () => Math.round((await box()).x0 - before.x0)).toBe(60);
+  await expect.poll(async () => Math.abs((await box()).x0 - before.x0 - 60)).toBeLessThanOrEqual(2);
   await palette(page, 'Reset label positions');
   await expect.poll(async () => (await box()).x0).toBe(before.x0);
   await expect(page.locator('#inspector-panel')).toContainText('Placed automatically');
@@ -324,7 +327,9 @@ test('snaps a dragged busbar into line with another, places it freely with Alt, 
   await page.keyboard.down('Alt');
   await drag(await at(-400, 360), await at(-608, 360));
   await page.keyboard.up('Alt');
-  await expect(field('x')).toHaveValue('-628');
+  // Free: where the pointer let go, to the unit (a pixel covers a little over a unit at this zoom), not snapped.
+  await expect.poll(async () => Math.abs(Number(await field('x').inputValue()) + 628)).toBeLessThanOrEqual(2);
+  expect(Number(await field('x').inputValue()) % 10).not.toBe(0);
   await page.keyboard.press('ControlOrMeta+Z');
   // Escape during a drag puts the busbar back and leaves nothing to redo.
   await drag(await at(-400, 360), await at(-300, 420), async () => { await page.keyboard.press('Escape'); });
@@ -402,6 +407,10 @@ test('shapes a route by dragging a segment, straightens it, and routes a new lin
   await page.keyboard.press('Escape');
   await page.locator('#inspector-panel summary', { hasText: 'Diagram' }).click();
   await expect(routeRow).toContainText('Shaped by hand');
+  // A fresh layout makes every route automatic again, in one step.
+  await palette(page, 'Lay out diagram');
+  await expect(page.locator('#app')).toContainText('Laid out the diagram.');
+  await expect(routeRow).toContainText('Automatic');
 });
 
 test('the overview map shows the whole diagram and moves the view; zoom to selection frames the selection', async ({ page }) => {

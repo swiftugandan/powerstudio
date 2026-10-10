@@ -373,6 +373,9 @@ What this release has (phase 4):
   the highest as the view comes closer, keep violations visible at every zoom, and show labels and symbols once they
   are legible.
 
+Release 1.1 brought the diagram's editing to the standard of a professional CAD tool (label placement, snapping and
+arranging, routes shaped by hand or around obstacles, an overview map): docs/design/CAD.md.
+
 Deferred by ADR 12: substation single-line diagrams generated from the node-breaker model (busbar sections, bays,
 breakers, disconnectors), several diagrams per project, and CGMES DL and GL layouts. The persistent GPU buffers updated
 per element and the tiled Canvas 2D cache this section first planned were not needed: the stepped rebuild and the
