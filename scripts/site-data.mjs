@@ -105,7 +105,8 @@ export function agreement() {
     let w = 0;
     for (const n of ['ieee14', 'riverside']) for (const fault of faults) for (const mode of /** @type {const} */ (['max', 'min'])) {
       const ref = golden(n).shortcircuit[`${fault}-${mode}`];
-      for (const b of engine.shortcircuit(input(n), { fault, mode, kappa: 'C', lvTolerance: '10', location: '' }).buses) {
+      // The oracle's conditions: a 1 s fault and lines at 20 °C (scripts/oracle/oracle.py).
+      for (const b of engine.shortcircuit(input(n), { fault, mode, kappa: 'C', lvTolerance: '10', location: '', tK: 1, lineTemperature: 20 }).buses) {
         for (const k of /** @type {const} */ (['ikss', 'ip', 'ith'])) {
           const want = ref[b.id][k];
           if (want === null || Math.abs(want) < 1e-3) continue;
@@ -115,5 +116,9 @@ export function agreement() {
     }
     return w;
   };
-  return { matpower: mp, pandapowerLf: pp, scSymmetric: scWorst(['3ph', '2ph']), scEarth: scWorst(['1ph']) };
+  const agreement = { matpower: mp, pandapowerLf: pp, scSymmetric: scWorst(['3ph', '2ph']), scEarth: scWorst(['1ph']) };
+  // The page publishes these; the tests require far less (1e-9 and below), so a larger figure means the comparison here
+  // has drifted from the tests' conditions, and the build stops rather than publish it.
+  for (const [k, v] of Object.entries(agreement)) if (!(v < 1e-6)) throw new Error(`site-data: the agreement "${k}" is ${v}, beyond what the tests allow; the site's comparison no longer matches them.`);
+  return agreement;
 }

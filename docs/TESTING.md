@@ -72,6 +72,10 @@ The CGMES goldens come from PowSyBl through pypowsybl (same environment):
 .venv/bin/python scripts/oracle/sensitivity.py      # DC power transfer distribution factors
 ```
 
+The key derivation for encrypted projects has its own golden: `.venv/bin/python scripts/oracle/kdf.py` writes
+`tests/oracle/golden/kdf.json` from Argon2's reference C implementation (argon2-cffi), which
+`engine/crates/ps-study/tests/kdf.rs` and `tests/sealed.test.mjs` check.
+
 Both use the OpenLoadFlow settings in `scripts/oracle/olf.py`: a plain Newton-Raphson with every control off, so the
 comparison tests the network model rather than control strategies. Where PowSyBl's import departs from the format's
 definition, the script corrects PowSyBl's network and records the correction in the golden (`removed` for CGMES,

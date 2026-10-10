@@ -7,9 +7,10 @@ exactly what each calculation computes; the README lists what PowerStudio does n
 
 ## Starting
 
-Open `PowerStudio.html` (the single file from a release, or the hosted app). The File page opens with three ways in:
-an empty network, the IEEE 14-bus sample (a 132/33/11 kV transmission benchmark) and the Riverside sample (a
-110/20/0.4 kV distribution network with a cable ring and a CHP unit). Recent networks are listed below them.
+Open `PowerStudio.html` (the single file from a release, or the hosted app). The first time, it opens the IEEE
+14-bus sample (a 132/33/11 kV transmission benchmark), ready to calculate; after that, the network you last worked on.
+The File tab's page starts something else: an empty network, the IEEE 14-bus sample again, or the Riverside sample (a
+110/20/0.4 kV distribution network with a cable ring and a CHP unit), with your recent networks below them.
 
 Your work is saved in this browser as you go; the title bar shows "Saved". To keep a copy elsewhere or move it to
 another machine, export it (see [Saving, exporting and printing](#saving-exporting-and-printing)).

@@ -162,8 +162,8 @@ footer a:hover { text-decoration: underline; }
       </div>
       <ul class="facts">
         <li>Drawn with WebGPU, with a Canvas 2D fallback</li>
-        <li>Checked against MATPOWER and pandapower</li>
-        <li>Opens MATPOWER case files</li>
+        <li>Checked against MATPOWER, pandapower, PowSyBl and ANDES</li>
+        <li>Opens CGMES, PSS/E and MATPOWER files</li>
       </ul>
       <figure class="stage">
         <div class="stage-bar"><strong>IEEE 14-bus system</strong><span>Newton-Raphson load flow</span><span class="pill">Converged in {{lfIterations}} iterations</span></div>
@@ -183,25 +183,25 @@ footer a:hover { text-decoration: underline; }
       <article class="study">
         <div class="icon">{{iconLoadflow}}</div>
         <h3>Load flow</h3>
-        <p>Newton-Raphson with reference, PV and PQ busbars, transformer taps and phase shifts, reactive power limits and a DC start.</p>
+        <p>Newton-Raphson on sparse matrices, with regulating tap changers, phase shifters and switched shunts, remote voltage control, reactive limits, distributed slack and area interchange.</p>
         <div class="figure"><b>{{lfLosses}} MW</b><span>losses, converged in {{lfIterations}} iterations</span></div>
       </article>
       <article class="study">
         <div class="icon">{{iconShortcircuit}}</div>
         <h3>Short circuit</h3>
-        <p>IEC 60909-style three-phase, line-to-line and earth faults, maximum and minimum, with peak and thermal currents and branch contributions.</p>
+        <p>IEC 60909-style three-phase, line-to-line and earth faults, maximum and minimum, with peak, breaking and thermal currents, power station units, motors and converter-fed sources.</p>
         <div class="figure"><b>{{scIkss}} kA</b><span>highest Ik″, at {{scBus}}</span></div>
       </article>
       <article class="study">
         <div class="icon">{{iconContingency}}</div>
         <h3>N-1 contingency</h3>
-        <p>Every line, transformer or machine out in turn, ranked by the loading and voltage limits it breaks.</p>
+        <p>Every line, transformer or machine out in turn, plus your own multi-element contingencies and remedial actions, ranked by the limits they break.</p>
         <div class="figure"><b>{{n1Bad}} of {{n1Total}}</b><span>outages break a limit; losing {{n1Outage}} loads {{n1Loaded}} to {{n1Loading}} %</span></div>
       </article>
       <article class="study">
         <div class="icon">{{iconRms}}</div>
         <h3>Stability</h3>
-        <p>Electromechanical simulation with the classical machine model: faults, clearing, tripping and load steps, plotted over time.</p>
+        <p>Electromechanical simulation with round-rotor machines, exciters, governors and stabilisers: faults, clearing, tripping and load steps, plotted over time.</p>
         <div class="figure"><b>{{rmsVerdict}}</b><span>{{rmsDetail}}</span></div>
       </article>
     </div>
@@ -222,7 +222,8 @@ footer a:hover { text-decoration: underline; }
         <li><strong>Edit on the diagram.</strong> Place and connect elements, drag busbars, resize bars, reroute and reconnect branches, select with a marquee.</li>
         <li><strong>Results where you look.</strong> Loading and voltage colours, result boxes, sortable tables, CSV export, and results marked stale after an edit.</li>
         <li><strong>Fast to drive.</strong> A command palette, keyboard shortcuts for every study, undo and redo for every change, light and dark themes.</li>
-        <li><strong>Your files.</strong> Import PowerStudio files or MATPOWER cases; export JSON, SVG, PNG and CSV.</li>
+        <li><strong>Projects.</strong> Study cases, scenarios and variants, a run log with the hashes of every result, and a spreadsheet for every element class.</li>
+        <li><strong>Your files.</strong> Open CGMES, PSS/E RAW with DYR, and MATPOWER files; export projects (encrypted if you like), the operating point as CGMES, a study report, SVG, PNG and CSV.</li>
       </ul>
     </div>
   </div>
@@ -232,7 +233,7 @@ footer a:hover { text-decoration: underline; }
   <div class="wrap">
     <p class="kicker">Verification</p>
     <h2>Checked against independent solvers, not against itself</h2>
-    <p class="intro">The engine's tests compare its results with two other programs on the same networks. The largest differences, recomputed when this page was built:</p>
+    <p class="intro">The engine's tests compare its results with independent programs and published references on the same networks. The first rows are recomputed when this page was built; the others give the tolerance the tests require.</p>
     <table class="checks">
       <thead><tr><th scope="col">What</th><th scope="col">Reference</th><th scope="col">Largest difference</th></tr></thead>
       <tbody>
@@ -240,7 +241,9 @@ footer a:hover { text-decoration: underline; }
         <tr><td>Load flow on both samples, with and without reactive limits<small>Voltages, branch flows and machine outputs</small></td><td>pandapower</td><td class="num">{{agreeLf}} p.u.</td></tr>
         <tr><td>Short circuit, three-phase and line-to-line, maximum and minimum<small>Ik″, ip and Ith at every busbar</small></td><td>pandapower's IEC 60909</td><td class="num">{{agreeScSym}} relative</td></tr>
         <tr><td>Short circuit, line-to-earth, maximum and minimum<small>Ik″ at every busbar</small></td><td>pandapower's IEC 60909</td><td class="num">{{agreeScEarth}} relative</td></tr>
-        <tr><td>Stability on a single machine against an infinite bus<small>Clearing 2 % before and after the critical time</small></td><td>Equal-area criterion</td><td class="num">stable / unstable</td></tr>
+        <tr><td>Short circuit on the IEC TR 60909-4 example network<small>Ik″, ip and Sk″, power station units and earth faults included</small></td><td>The report's values</td><td class="num">within 0.001 kA</td></tr>
+        <tr><td>CGMES and PSS/E imports and their load flows<small>12 CGMES configurations, 23 RAW files</small></td><td>PowSyBl</td><td class="num">within 1e-6 p.u.</td></tr>
+        <tr><td>Stability with machine controls<small>Rotor angles on ANDES's published cases</small></td><td>ANDES</td><td class="num">within 2e-3 rad</td></tr>
       </tbody>
     </table>
     <p class="note">The short-circuit calculation follows the method of IEC 60909-0 as pandapower implements it; it is not certified against the standard. The full test report, with environments and every number, is in <a href="{{repo}}/blob/main/docs/TEST-REPORT.md">docs/TEST-REPORT.md</a>.</p>
@@ -266,11 +269,11 @@ footer a:hover { text-decoration: underline; }
     <p class="intro">PowerStudio is a capable study tool, not a validated engineering product. Check results that matter with a validated tool.</p>
     <ul class="limits">
       <li><strong>Balanced networks.</strong> Positive-sequence load flow; no unbalanced three-phase studies.</li>
-      <li><strong>Classical stability model.</strong> No exciters, governors or stabilisers; no electromagnetic transients.</li>
-      <li><strong>Single outages.</strong> N-1 only, with no remedial actions.</li>
-      <li><strong>No tap-changer control or switches.</strong> Elements are switched in or out of service; taps are fixed.</li>
-      <li><strong>A few hundred busbars.</strong> The dense solver is fast up to that size; larger networks are slow.</li>
-      <li><strong>Tested in Chromium.</strong> WebGPU was verified on macOS; Firefox, Safari and Windows were not tested.</li>
+      <li><strong>Short circuit not certified.</strong> It follows IEC 60909-0 and meets the TR 60909-4 example, but it is not certified, and the steady-state current and DC component are not computed.</li>
+      <li><strong>Stability, first wave.</strong> No salient-pole machines and no renewable, HVDC or SVC dynamics; no electromagnetic transients.</li>
+      <li><strong>Contingencies by hand.</strong> N-1 is automatic; multi-element contingencies are listed, not enumerated, and there is no optimal power flow.</li>
+      <li><strong>Diagrams of large networks are dense.</strong> Networks of tens of thousands of busbars open and solve, but there are no substation diagrams yet.</li>
+      <li><strong>Tested on macOS.</strong> Chromium (WebGPU and Canvas 2D), Firefox and WebKit pass every test; Safari itself and Windows were not tried.</li>
     </ul>
     <p class="note">The full list is in the <a href="{{repo}}#scope-and-boundaries">Scope and boundaries</a> section of the README.</p>
   </div>
