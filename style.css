@@ -358,6 +358,10 @@ kbd {
 .viewport[data-tool="place"] .viewport-canvas { cursor: crosshair; }
 .viewport[data-hover="handle"] .viewport-canvas { cursor: move; }
 .viewport[data-hover="element"] .viewport-canvas { cursor: pointer; }
+.vp-overview { position: absolute; right: 54px; bottom: 46px; width: 220px; height: 140px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-1); overflow: hidden; cursor: pointer; touch-action: none; }
+.vp-overview-map { width: 220px; height: 140px; display: block; }
+.vp-overview-view { position: absolute; border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); border-radius: 2px; pointer-events: none; }
+@media (max-width: 720px) { .vp-overview { display: none; } }
 .vp-tools { position: absolute; right: 12px; bottom: 12px; display: flex; flex-direction: column; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-1); overflow: hidden; }
 .vp-tools .icon-btn { border-radius: 0; width: 32px; height: 32px; }
 .vp-tools .icon-btn + .icon-btn { border-top: 1px solid var(--border); }

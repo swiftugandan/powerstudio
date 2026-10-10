@@ -60,6 +60,8 @@ const PATHS = {
   selectLevel: 'M3 7h18M3 12h12M3 17h6',
   straighten: 'M4 18V6M20 18V6M4 12h16',
   routeAround: 'M4 20v-6h5V6h11M14 10h4v4h-4z',
+  zoomSelection: 'M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM20 20l-4.8-4.8M8 8.5h5v4H8z',
+  overview: 'M3 5h18v14H3zM12 11h7v6h-7z',
   grid: 'M4 4h.01M12 4h.01M20 4h.01M4 12h.01M12 12h.01M20 12h.01M4 20h.01M12 20h.01M20 20h.01',
   info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5h.01',
   warning: 'M12 3 2 20h20zM12 10v4M12 17h.01',

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /** Times the diagram build in Chromium the way the viewport runs it: in steps, with the browser's own garbage
  * collector. The diagram is a synthetic national grid with a load flow's result boxes on every busbar and branch,
- * so it needs no reference files. Prints the total time, the number of steps and the longest step; the scale bar is
- * no frame over 100 ms.
+ * so it needs no reference files. Prints the total time, the number of steps and the longest step, and the time to
+ * draw the overview map from the result; the scale bar is no frame over 100 ms.
  * Usage: node scripts/scene-bench.mjs [--side n] [--fixed] [--repeat n]
  * --side sets the grid's side (default 265: 70,225 busbars); --fixed switches label placement off. */
 import { chromium } from '@playwright/test';
@@ -44,15 +44,27 @@ for (let run = 0; run < repeat; run++) {
     const t0 = performance.now();
     let t = t0, longest = 0, n = 0, done = false;
     // The viewport gives a build a few milliseconds a frame; here each step is timed alone, with a frame between.
+    let built = null;
     while (!done) {
       const s = performance.now();
-      done = !!steps.next().done;
+      const r = steps.next();
+      done = !!r.done;
+      if (r.done) built = r.value;
       longest = Math.max(longest, performance.now() - s);
       n++;
       if (n % 16 === 0) await new Promise(requestAnimationFrame);
       t = performance.now();
     }
-    return { elements: elements.length, steps: n, longestMs: Math.round(longest), totalMs: Math.round(t - t0) };
+    // The overview map is drawn from the finished diagram, in one go.
+    const { Overview } = await import('/src/ui/overview.js');
+    const { bounds } = await import('/src/render/geometry.js');
+    const camera = { width: 1, height: 1, toWorld: () => ({ x: 0, y: 0 }) };
+    const overview = new Overview(/** @type {any} */ ({ camera, invalidate() {} }));
+    overview.show(true);
+    const t1 = performance.now();
+    if (built) overview.draw(built, bounds(elements), [1, 1, 1, 1]);
+    const overviewMs = performance.now() - t1;
+    return { elements: elements.length, steps: n, longestMs: Math.round(longest), totalMs: Math.round(t - t0), overviewMs: Math.round(overviewMs) };
   }, { side, disentangle });
   console.log(JSON.stringify(r));
 }

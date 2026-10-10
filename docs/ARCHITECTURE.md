@@ -152,6 +152,10 @@ then A* over the orthogonal visibility graph of the padded busbars and symbols n
 units of length. Obstacles become index ranges on the graph's grid, so a route takes about a tenth of a
 millisecond; 500 take about 60 ms.
 
+**Overview map (`ui/overview.js`).** After each diagram build, the busbars and routes of the display list are
+rasterised into a small bitmap in their own colours (orthogonal segments are runs of pixels: about 10 ms at 70,000
+busbars); moving the view moves only a rectangle over it. It shows from 200 busbars unless the user says otherwise.
+
 **Diagram input (`src/ui/tools/`).** The viewport owns the camera, the frames and the renderer, and hands pointer
 input to the active tool as normalised events (world and screen position, modifiers). A tool (`select.js`, `place.js`)
 decides what a press does and returns a gesture (`gestures.js`: pan, marquee, move, slide, resize, bend, reconnect,

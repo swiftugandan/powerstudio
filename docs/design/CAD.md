@@ -1,6 +1,8 @@
 # Diagram editing to professional CAD standard
 
-Status: approved 2026-10-10; C0 to C3 done locally on branch `cad` (docs/TEST-REPORT.md), C4 to follow.
+Status: approved 2026-10-10; all five phases done locally on branch `cad`, for release 1.1.0 (docs/TEST-REPORT.md).
+Where the build departed from this text it says so: the Arrange commands have their own tab (6.3), and clicking again
+cycles through stacked elements in place of Tab (6.2).
 Follows release 1.0.0 (docs/design/NATIONAL-GRADE.md); planned as release 1.1.
 
 ## 1. Summary

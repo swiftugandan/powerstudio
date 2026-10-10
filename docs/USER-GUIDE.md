@@ -66,6 +66,10 @@ Route around obstacles finds, for each selected branch, the route with the fewes
 symbol, and Straighten route makes routes automatic again. A line or transformer you draw whose automatic route
 would cross a busbar or symbol is routed around it from the start.
 
+**Finding your way.** On a large diagram, the overview map in the corner (View tab, M; shown from 200 busbars)
+draws the whole network with the view as a rectangle: click or drag in it to move the view there. Zoom to selection
+(Shift+F) fits the selection in the window, and Fit (F) the whole diagram.
+
 Selected elements can be cut, copied, pasted, duplicated, deleted, moved a grid step at a time with the arrow keys
 (five steps with Shift) and switched in or out of service (Shift+O). Every change can be undone (Ctrl+Z) and redone
 (Ctrl+Shift+Z).
@@ -188,7 +192,8 @@ Press ? (or open Help, Keyboard shortcuts) for the full list. The ones used most
 | Ctrl+, | Study case |
 | Ctrl+Z, Ctrl+Shift+Z | Undo, redo |
 | Ctrl+O, Ctrl+Shift+O, Ctrl+Shift+S | Open, import, export |
-| F | Fit the diagram |
+| F, Shift+F | Fit the diagram, zoom to the selection |
+| M | Overview map |
 | Shift+T | Switch light and dark |
 | R, X | Rotate the selected busbars, flip the selected elements' side |
 | Shift+L | Disentangle labels on or off |

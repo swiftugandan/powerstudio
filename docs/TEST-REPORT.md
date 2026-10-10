@@ -4,6 +4,17 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## Navigation, CAD phase C4, and release 1.1.0 (2026-10-10, local, branch `cad`)
+
+| Check | Result |
+| --- | --- |
+| Browser: the overview map hidden on a small diagram, shown with M, drawn (not blank), moving the view on a click; zoom to selection frames Bus 8 | Passed in all four projects |
+| Overview map drawn from a 70,000-busbar diagram, Chromium 156 (`scripts/scene-bench.mjs`) | 7 to 11 ms |
+| Documents saved by 1.0.0 (its samples, written by its code at commit 220c95c, with the voltages pandapower gave them) | Open with nothing to report, keep every value and solve to those voltages (1e-8 p.u.) |
+
+Found on the way: the renderer removed the first canvas in the diagram's area when it started, which with the
+overview map present was the map's; both places now name the diagram's canvas.
+
 ## Routing, CAD phase C3 (2026-10-10, local, branch `cad`)
 
 | Check | Result |

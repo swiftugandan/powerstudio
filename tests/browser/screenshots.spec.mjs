@@ -37,7 +37,7 @@ async function shot(page, name, caption) {
 
 /** Zooms around the centre of the viewport. @param {import('@playwright/test').Page} page @param {number} steps */
 async function zoom(page, steps) {
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('F');
   for (let i = 0; i < steps; i++) await page.keyboard.press('=');
 }

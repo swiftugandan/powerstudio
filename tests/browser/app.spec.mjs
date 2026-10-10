@@ -79,7 +79,7 @@ test('edits a value in the inspector, recalculates, and undo and redo restore it
   // Recalculate on edit refreshes the load flow by itself.
   await expect(page.locator('.dock-toolbar .summary')).not.toContainText('Load 259.00 MW');
   await expect(page.locator('.dock-toolbar .summary')).toContainText('Load 274.10 MW');
-  await page.locator('#viewport canvas').click({ position: { x: 20, y: 20 } });
+  await page.locator('#viewport canvas.viewport-canvas').click({ position: { x: 20, y: 20 } });
   await page.keyboard.press('ControlOrMeta+Z');
   await expect(page.locator('.dock-toolbar .summary')).toContainText('Load 259.00 MW');
   await page.keyboard.press('ControlOrMeta+Shift+Z');
@@ -93,7 +93,7 @@ test('draws a network from scratch with the insert tools and solves it', async (
   const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await page.locator('#viewport').boundingBox());
   const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
   const a = { x: c.x - 160, y: c.y }, b = { x: c.x + 160, y: c.y };
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('B');
   await page.mouse.click(a.x, a.y);
   await page.mouse.click(b.x, b.y);
@@ -116,7 +116,7 @@ test('draws a network from scratch with the insert tools and solves it', async (
 test('copies, pastes, switches out of service, nudges and selects with a marquee', async ({ page }) => {
   await open(page);
   await loadFlow(page);
-  const canvas = page.locator('#viewport canvas');
+  const canvas = page.locator('#viewport canvas.viewport-canvas');
   // Marquee over the whole view selects the network.
   const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await page.locator('#viewport').boundingBox());
   await page.mouse.move(box.x + 4, box.y + 4);
@@ -162,7 +162,7 @@ test('arranges the diagram in the worker as one undoable step', async ({ page })
   await palette(page, 'Lay out diagram');
   await expect(page.locator('#app')).toContainText('Laid out the diagram.');
   await expect(x).not.toHaveValue('-280');
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('ControlOrMeta+Z');
   await expect(x).toHaveValue('-280');
 });
@@ -173,14 +173,14 @@ test('resizes, reroutes and reconnects with the diagram handles', async ({ page 
   const at = (x, y) => page.evaluate(([px, py]) => /** @type {any} */ (window).powerstudio.toPage(px, py), [x, y]);
   /** @param {{ x: number, y: number }} from @param {{ x: number, y: number }} to */
   const drag = async (from, to) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps: 6 }); await page.mouse.up(); };
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('F');
   await page.keyboard.press('=');
   await page.keyboard.press('=');
   const diagram = page.locator('#inspector-panel summary', { hasText: 'Diagram' });
   // Bus 4 sits at (-280, 140) with length 240: drag its right end 60 units further.
   await page.locator('.tree-row[data-id="B4"]').click();
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await diagram.click();
   await drag(await at(-160, 140), await at(-100, 140));
   await expect(page.locator('#inspector-panel input[data-key="len"]')).toHaveValue('300');
@@ -224,7 +224,7 @@ test('places names and result boxes clear of each other in the browser\'s fonts,
     expect(overlapping(await labelsOf(page))).toEqual([]);
   }
   // Switched off, every label sits in its default place.
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('Shift+L');
   await expect.poll(async () => (await labelsOf(page)).every(l => l.x0 === l.defX && l.y0 === l.defY)).toBe(true);
   await page.keyboard.press('Shift+L');
@@ -252,7 +252,7 @@ test('the widths used where no fonts are (tests, the website) are never narrower
 test('drags a result box to a place of its own, undoes it, and lets the diagram place it again', async ({ page }) => {
   await open(page);
   await loadFlow(page);
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('F');
   await page.keyboard.press('=');
   await page.keyboard.press('=');
@@ -294,7 +294,7 @@ test('shows every row and label of the ribbon on every tab', async ({ page }) =>
  * @param {import('@playwright/test').Page} page */
 async function onDiagram(page) {
   await open(page);
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('F');
   await page.keyboard.press('=');
   /** @param {number} x @param {number} y */
@@ -352,12 +352,12 @@ test('aligns and distributes busbars from the Arrange tab, each as one undoable 
   await select('B4');
   await expect(field('y')).toHaveValue('100');
   // Rotate turns it vertical; the grid step sets how far the arrow keys move it.
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('R');
   await expect(page.locator('#inspector-panel select[data-key="orient"]')).toHaveValue('v');
   await page.getByRole('tab', { name: 'View', exact: true }).click();
   await page.locator('[data-cmd="view.grid40"]').click();
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('ArrowRight');
   await expect(field('x')).toHaveValue('-240');
 });
@@ -394,7 +394,7 @@ test('shapes a route by dragging a segment, straightens it, and routes a new lin
   await routeRow.getByRole('button', { name: 'Straighten' }).click();
   await expect(routeRow).toContainText('Automatic');
   // A line from Bus 5 down to Bus 3 would cross Bus 4 on the way: it is drawn around it.
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('L');
   const from = await at(-250, -160), to = await at(-350, 360);
   await page.mouse.click(from.x, from.y);
@@ -402,6 +402,38 @@ test('shapes a route by dragging a segment, straightens it, and routes a new lin
   await page.keyboard.press('Escape');
   await page.locator('#inspector-panel summary', { hasText: 'Diagram' }).click();
   await expect(routeRow).toContainText('Shaped by hand');
+});
+
+test('the overview map shows the whole diagram and moves the view; zoom to selection frames the selection', async ({ page }) => {
+  const { at } = await onDiagram(page);
+  const map = page.locator('.vp-overview');
+  // Fourteen busbars fit on screen, so the map starts hidden; M shows it.
+  await expect(map).toBeHidden();
+  await page.keyboard.press('M');
+  await expect(map).toBeVisible();
+  // It shows the busbars and routes: the map is not blank.
+  const inked = await page.evaluate(() => {
+    const c = /** @type {HTMLCanvasElement} */ (document.querySelector('.vp-overview-map')), d = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d')).getImageData(0, 0, c.width, c.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] !== d[0] || d[i + 1] !== d[1] || d[i + 2] !== d[2]) n++;
+    return n / (d.length / 4);
+  });
+  expect(inked).toBeGreaterThan(0.01);
+  // Clicking the map's top-left corner moves the view there.
+  const point = await at(0, 0), box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await map.boundingBox());
+  await page.mouse.click(box.x + 20, box.y + 20);
+  await expect.poll(async () => (await at(0, 0)).x).not.toBe(point.x);
+  // Zoom to selection fits Bus 8 (100 units long) closer than the whole diagram.
+  const zoom = async () => Number((await page.locator('.vp-zoom').textContent())?.replace(/[^0-9]/g, ''));
+  const fitted = await zoom();
+  await page.locator('.tree-row[data-id="B8"]').click();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
+  await page.keyboard.press('Shift+F');
+  await expect.poll(zoom).toBeGreaterThan(fitted);
+  const centre = await at(360, 140), vp = /** @type {{ x: number, y: number, width: number, height: number }} */ (await page.locator('#viewport').boundingBox());
+  expect(Math.abs(centre.x - (vp.x + vp.width / 2))).toBeLessThan(vp.width * 0.1);
+  await page.keyboard.press('M');
+  await expect(map).toBeHidden();
 });
 
 test('keeps work in the browser across a reload', async ({ page }) => {
@@ -562,7 +594,7 @@ test('a machine and its transformer made a power station unit change the short-c
   const unit = page.locator('#inspector-panel select[data-key="unitTrafo"]');
   await expect(unit.locator('option')).toHaveText(['None', 'CHP unit transformer']);
   await unit.selectOption('T3');
-  await page.locator('#viewport canvas').click({ position: { x: 20, y: 20 } });
+  await page.locator('#viewport canvas.viewport-canvas').click({ position: { x: 20, y: 20 } });
   await page.keyboard.press('Alt+S');
   await expect(hilltop).toContainText('3.912');
   await expect(hilltop.locator('td').nth(4)).toHaveText('3.651');
@@ -829,7 +861,7 @@ test('exports an encrypted project that opens only with its passphrase', async (
 
 test('switches theme and redraws the diagram in the dark palette', async ({ page }) => {
   await open(page);
-  await page.locator('#viewport canvas').focus();
+  await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('Shift+T');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await page.waitForTimeout(200);

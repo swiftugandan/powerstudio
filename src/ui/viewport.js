@@ -17,6 +17,7 @@ import { kbd } from './keys.js';
 import { minOf, maxOf } from '../core/extent.js';
 import { canvasMeasure } from '../render/metrics.js';
 import { Snapper, busesIn } from './snap.js';
+import { Overview, OVERVIEW_FROM } from './overview.js';
 
 /**
  * @typedef {import('../core/catalog.js').Element} Element
@@ -84,7 +85,10 @@ export class Viewport {
       h('button', { type: 'button', class: 'icon-btn', 'data-cmd': 'view.zoomIn', title: 'Zoom in', 'aria-label': 'Zoom in', html: icon('plus', 16) }),
       h('button', { type: 'button', class: 'icon-btn', 'data-cmd': 'view.zoomOut', title: 'Zoom out', 'aria-label': 'Zoom out', html: icon('minus', 16) }),
       h('button', { type: 'button', class: 'icon-btn', 'data-cmd': 'view.fit', title: 'Fit diagram', 'aria-label': 'Fit diagram', html: icon('fit', 16) }));
-    host.append(this.legend, this.hint, this.badge, this.zoomLabel, tools);
+    this.overview = new Overview(this);
+    /** The last diagram built, for the overview map when it is switched on. @type {import('../render/displaylist.js').DisplayList | null} */
+    this.lastList = null;
+    host.append(this.legend, this.hint, this.badge, this.zoomLabel, tools, this.overview.el);
   }
 
   /** Creates the renderer. @param {'auto' | 'webgpu' | 'canvas'} preference */
@@ -112,7 +116,7 @@ export class Viewport {
     if (this.renderer?.backend !== 'webgpu') return;
     this.app.log('warn', `The WebGPU device was lost (${reason}). Drawing continues with Canvas 2D.`);
     this.renderer?.destroy();
-    this.host.querySelector('canvas')?.remove();
+    this.host.querySelector('canvas.viewport-canvas')?.remove();
     const canvas = h('canvas', { class: 'viewport-canvas', tabindex: '0', 'aria-label': 'Single-line diagram' });
     this.host.prepend(canvas);
     const fallback = new Canvas2DRenderer(canvas);
@@ -180,6 +184,7 @@ export class Viewport {
     this.frames++;
     this.host.dataset.frames = String(this.frames);
     this.zoomLabel.textContent = `${Math.round(this.camera.zoom * 100)} %`;
+    this.overview.place();
     if (this.camera.zoom !== this.legendZoom) this.showLevels();
   }
 
@@ -206,6 +211,8 @@ export class Viewport {
     const list = yield* sceneSteps(this.sceneInput());
     this.levels = list.levels;
     this.labelIndex = list.labels;
+    this.lastList = list;
+    this.updateOverview();
     this.showLevels();
     if (r instanceof Canvas2DRenderer) r.commit('base', yield* r.packSteps(list));
     else r.commit('base', yield* r.packSteps(list));
@@ -261,8 +268,31 @@ export class Viewport {
     this.invalidate('view');
   }
 
-  /** Brings elements into view, zooming out if needed. @param {string[]} ids */
-  reveal(ids) {
+  /** Whether the overview map shows: as the user set it, or by default from OVERVIEW_FROM busbars. */
+  get overviewOn() {
+    const set = this.app.prefs.overview;
+    return set ?? this.app.store.doc.elements.filter(e => e.cls === 'bus').length >= OVERVIEW_FROM;
+  }
+
+  /** Shows or hides the overview map, and draws it from the last diagram built. */
+  updateOverview() {
+    const on = this.overviewOn;
+    this.overview.show(on);
+    if (on && this.lastList) this.overview.draw(this.lastList, bounds(this.app.store.doc.elements), this.app.palette.bg);
+  }
+
+  /** Fits elements in the window with a margin, zooming in as far as 250 %. @param {string[]} ids */
+  zoomTo(ids) {
+    const box = this.extentOf(ids);
+    if (!box) return;
+    const pad = 80 / Math.max(this.camera.zoom, 0.05);
+    this.camera.fit({ x0: box.x0 - pad, y0: box.y0 - pad, x1: box.x1 + pad, y1: box.y1 + pad });
+    this.camera.zoom = Math.min(this.camera.zoom, 2.5);
+    this.invalidate('view');
+  }
+
+  /** The extent of elements' geometry, or null for none. @param {string[]} ids */
+  extentOf(ids) {
     const els = ids.map(id => this.app.store.get(id)).filter(e => !!e);
     const pts = [];
     for (const el of els) {
@@ -275,9 +305,15 @@ export class Viewport {
         if (b) pts.push({ x: /** @type {number} */ (b.x), y: /** @type {number} */ (b.y) + (el.side === 'above' ? -70 : 70) });
       }
     }
-    if (!pts.length) return;
+    if (!pts.length) return null;
     const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-    const box = { x0: minOf(xs), y0: minOf(ys), x1: maxOf(xs), y1: maxOf(ys) };
+    return { x0: minOf(xs), y0: minOf(ys), x1: maxOf(xs), y1: maxOf(ys) };
+  }
+
+  /** Brings elements into view, zooming out if needed. @param {string[]} ids */
+  reveal(ids) {
+    const box = this.extentOf(ids);
+    if (!box) return;
     const c = this.camera, tl = c.toScreen(box.x0, box.y0), br = c.toScreen(box.x1, box.y1);
     const inside = tl.x > 40 && tl.y > 40 && br.x < c.width - 40 && br.y < c.height - 40;
     if (inside) return;

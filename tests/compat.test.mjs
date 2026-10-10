@@ -11,7 +11,7 @@ const root = new URL('./fixtures/', import.meta.url);
 const releases = readdirSync(root).filter(d => /^v\d+\.\d+\.\d+$/.test(d));
 
 test('every released version has fixtures', () => {
-  assert.ok(releases.includes('v0.1.0'), releases.join(', '));
+  for (const v of ['v0.1.0', 'v1.0.0']) assert.ok(releases.includes(v), releases.join(', '));
 });
 
 for (const release of releases) {

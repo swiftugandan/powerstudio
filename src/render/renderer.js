@@ -13,7 +13,7 @@ import { Canvas2DRenderer } from './canvas2d.js';
  * @returns {Promise<{ renderer: Renderer, fallbackReason: string }>}
  */
 export async function createRenderer(host, preference) {
-  host.querySelector('canvas')?.remove();
+  host.querySelector('canvas.viewport-canvas')?.remove();
   let fallbackReason = '';
   if (preference !== 'canvas') {
     const canvas = makeCanvas(host);

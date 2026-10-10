@@ -1436,6 +1436,10 @@ export class App {
     c.add({ id: 'view.fit', label: 'Fit', icon: 'fit', keys: ['F'], group: 'View', hint: 'Fit the diagram in the window', run: () => this.viewport.fit() });
     c.add({ id: 'view.zoomIn', label: 'Zoom in', icon: 'zoomIn', keys: ['+', '='], group: 'View', run: () => this.viewport.zoomBy(1.25) });
     c.add({ id: 'view.zoomOut', label: 'Zoom out', icon: 'zoomOut', keys: ['-'], group: 'View', run: () => this.viewport.zoomBy(0.8) });
+    c.add({ id: 'view.zoomSelection', label: 'Zoom to selection', icon: 'zoomSelection', keys: ['Shift+F'], group: 'View', hint: 'Fit the selection in the window',
+      enabled: sel, run: () => this.viewport.zoomTo([...this.selection]) });
+    c.add({ id: 'view.overview', label: 'Overview map', icon: 'overview', keys: ['M'], group: 'View', hint: 'A map of the whole diagram; click it to move the view',
+      pressed: () => this.viewport.overviewOn, run: () => { this.prefs.overview = !this.viewport.overviewOn; this.savePrefs(); this.viewport.updateOverview(); } });
     const pref = (/** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ ic, /** @type {'boxes' | 'names' | 'branchNames' | 'disentangle'} */ key, /** @type {string[]} */ keys = []) =>
       c.add({ id, label, icon: ic, keys, group: 'View', pressed: () => this.prefs[key], run: () => { this.prefs[key] = !this.prefs[key]; this.savePrefs(); this.viewport.invalidate(); } });
     pref('view.boxes', 'Result boxes', 'boxes', 'boxes', ['Shift+R']);

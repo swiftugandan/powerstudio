@@ -263,11 +263,11 @@ const PREFS = 'powerstudio.prefs';
 
 /** @typedef {{ theme: 'system' | 'light' | 'dark', renderer: 'auto' | 'canvas', lastDoc: string, leftW: number, rightW: number,
  *   dockH: number, left: boolean, right: boolean, dock: boolean, names: boolean, branchNames: boolean, boxes: boolean,
- *   disentangle: boolean, grid: number, colouring: 'results' | 'voltage', autoLoadFlow: boolean, lastKV: number, dockTab: string, ribbonTab: string, welcomed: boolean }} Prefs */
+ *   disentangle: boolean, grid: number, overview: boolean | null, colouring: 'results' | 'voltage', autoLoadFlow: boolean, lastKV: number, dockTab: string, ribbonTab: string, welcomed: boolean }} Prefs */
 
 /** @type {Prefs} */
 const DEFAULTS = { theme: 'system', renderer: 'auto', lastDoc: '', leftW: 248, rightW: 304, dockH: 210, left: true, right: true, dock: true,
-  names: true, branchNames: false, boxes: true, disentangle: true, grid: 20, colouring: 'results', autoLoadFlow: true, lastKV: 20, dockTab: 'output', ribbonTab: 'home', welcomed: false };
+  names: true, branchNames: false, boxes: true, disentangle: true, grid: 20, overview: null, colouring: 'results', autoLoadFlow: true, lastKV: 20, dockTab: 'output', ribbonTab: 'home', welcomed: false };
 
 /** @returns {Prefs} */
 export function loadPrefs() {
