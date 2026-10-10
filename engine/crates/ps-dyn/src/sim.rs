@@ -45,6 +45,10 @@ const MAX_ITER: usize = 25;
 const LOCK: usize = 4;
 /// How many times a step may be halved.
 const HALVINGS: usize = 6;
+/// Values the report may hold in all (samples times traces), and the samples each trace keeps at least: a 10,000-bus
+/// network keeps a few hundred samples of every voltage rather than a report too large to send.
+const VALUE_BUDGET: usize = 6_000_000;
+const MIN_SAMPLES: usize = 300;
 
 /// Traces of one machine or grid.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -310,7 +314,9 @@ impl<'a> System<'a> {
     }
 
     /// Updates the anti-windup holds for the iterate's right-hand sides and pins held variables to their limits.
-    fn hold(&mut self, z: &mut [f64], e: &Eval, iter: usize) {
+    /// Returns whether a variable moved.
+    fn hold(&mut self, z: &mut [f64], e: &Eval, iter: usize) -> bool {
+        let mut moved = false;
         for k in 0..self.nx {
             let Some((lo, hi)) = e.lim[k] else {
                 self.held[k] = 0;
@@ -329,12 +335,15 @@ impl<'a> System<'a> {
             } else {
                 now
             };
-            match self.held[k] {
-                1 => z[k] = hi,
-                -1 => z[k] = lo,
-                _ => {}
-            }
+            let pin = match self.held[k] {
+                1 => hi,
+                -1 => lo,
+                _ => continue,
+            };
+            moved |= z[k] != pin;
+            z[k] = pin;
         }
+        moved
     }
 
     /// The residual of a step of length `h` from `(z0, f0)`, or of the algebraic equations alone when `h` is `None`
@@ -437,8 +446,9 @@ impl<'a> System<'a> {
         let mut fresh = false;
         for iter in 0..MAX_ITER {
             self.eval(z, e);
-            self.hold(z, e, iter);
-            self.eval(z, e);
+            if self.hold(z, e, iter) {
+                self.eval(z, e);
+            }
             let stale = self.factored_for.0 != h || self.factored_for.1 != self.held;
             if !self.factored || stale || (iter >= SLOW && !fresh) {
                 self.factor(z, h)?;
@@ -699,7 +709,8 @@ impl Recorder {
     }
 }
 
-/// Simulates the settings' events from a solved load flow of `calc`. `max_samples` bounds the samples kept;
+/// Simulates the settings' events from a solved load flow of `calc`. `max_samples` bounds the samples kept, as does
+/// the report's budget of values on a large network;
 /// `progress` receives (simulated time, end time). Returns the report and the full-precision trajectory at the same
 /// samples.
 pub fn simulate_detailed(
@@ -943,10 +954,11 @@ pub fn simulate_detailed(
         .collect();
     events.sort_by(|a, b| a.event.t.partial_cmp(&b.event.t).unwrap_or(std::cmp::Ordering::Equal));
     let steps_planned = (t_end / dt - 1e-9).ceil().max(1.0) as usize;
-    let every = (steps_planned + 1 + 2 * events.len())
-        .div_ceil(max_samples.max(1))
-        .max(1);
     let n_units = sys.units.len() + sys.grids.len();
+    // Each machine and grid has six traces, each bus one.
+    let traces = nb + 6 * n_units;
+    let samples = max_samples.min((VALUE_BUDGET / traces.max(1)).max(MIN_SAMPLES)).max(1);
+    let every = (steps_planned + 1 + 2 * events.len()).div_ceil(samples).max(1);
     let mut rec = Recorder {
         every,
         traj: Trajectory {

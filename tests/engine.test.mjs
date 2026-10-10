@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { root, engine, wasmPath, cgmesCase } from './helpers.mjs';
 import { EngineHost, jsonPayload, textPayload } from '../src/engine/host.js';
+import { completeController } from '../src/core/catalog.js';
 import { request, requestOpen, openDocument, editDocument, study } from '../src/engine/studies.js';
 import { createHash } from 'node:crypto';
 import { applyOp } from '../src/core/store.js';
@@ -91,9 +92,16 @@ test('a document held open and edited in the engine gives the same results as th
     openDocument(held, text);
     const loads = doc.elements.filter(e => e.cls === 'load');
     const [first, second] = loads;
+    // A machine given a round rotor and controls: object-valued fields travel as operations too.
+    const gen = /** @type {import('../src/core/catalog.js').Element} */ (doc.elements.find(e => e.cls === 'gen'));
     /** @type {import('../src/core/store.js').Op[]} */
     const ops = [
       { type: 'set', id: first.id, key: 'p', before: first.p, after: Number(first.p) * 1.1 },
+      { type: 'set', id: gen.id, key: 'machineModel', before: gen.machineModel, after: 'roundRotor' },
+      // Below X″d, as the round rotor needs.
+      { type: 'set', id: gen.id, key: 'xl', before: gen.xl, after: Number(gen.xdss) * 0.5 },
+      { type: 'set', id: gen.id, key: 'exciter', before: gen.exciter, after: completeController({ model: 'SEXS', K: 50 }) },
+      { type: 'set', id: gen.id, key: 'governor', before: gen.governor, after: completeController({ model: 'TGOV1' }) },
       { type: 'remove', el: second },
       { type: 'add', index: doc.elements.length - 1, el: { ...second, id: `${second.id}-new` } },
       { type: 'study', section: 'loadflow', key: 'tolerance', before: doc.study.loadflow.tolerance, after: 1e-4 },

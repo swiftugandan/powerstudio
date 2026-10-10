@@ -138,6 +138,22 @@ export const CONTROLLERS = [
     par('VCL', 'Cut-off band below VCL', 0, PU, { help: 'Below the initial voltage (negative); zero means none.' })] },
 ];
 
+/** Why a round-rotor machine's data cannot be simulated, or '' when they can: the reactances must fall in order,
+ * Xd ≥ X′d ≥ X″d > Xl and Xq ≥ X′q > Xl (X″d is the short-circuit subtransient reactance).
+ * @param {Record<string, unknown>} el */
+export function rotorIssue(el) {
+  if (el.cls !== 'gen' || el.machineModel !== 'roundRotor') return '';
+  const n = (/** @type {string} */ k) => /** @type {number} */ (el[k]);
+  const order = [['xd', 'Xd'], ['xdt', 'X′d'], ['xdss', 'X″d']];
+  for (let i = 1; i < order.length; i++) {
+    if (n(order[i][0]) > n(order[i - 1][0])) return `${order[i][1]} (${n(order[i][0])} p.u.) is above ${order[i - 1][1]} (${n(order[i - 1][0])} p.u.).`;
+  }
+  if (n('xdss') <= n('xl')) return `The leakage reactance Xl (${n('xl')} p.u.) must be below X″d (${n('xdss')} p.u.).`;
+  if (n('xqt') > n('xq')) return `X′q (${n('xqt')} p.u.) is above Xq (${n('xq')} p.u.).`;
+  if (n('xqt') <= n('xl')) return `The leakage reactance Xl (${n('xl')} p.u.) must be below X′q (${n('xqt')} p.u.).`;
+  return '';
+}
+
 /** The control model with a name, or undefined. @param {unknown} model */
 export const controllerOf = model => CONTROLLERS.find(c => c.model === model);
 

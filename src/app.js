@@ -768,7 +768,7 @@ export class App {
   /** @param {CalcKind} kind @param {{ auto?: boolean }} [opt] */
   async calc(kind, opt = {}) {
     const doc = this.store.doc;
-    const problems = validateForCalculation(doc);
+    const problems = validateForCalculation(doc, kind);
     if (problems.length) {
       for (const p of problems) this.log('error', p);
       if (!opt.auto) toast('error', problems[0], { title: `${CALC_LABEL[kind]} cannot run` });

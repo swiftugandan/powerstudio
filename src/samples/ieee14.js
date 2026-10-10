@@ -87,7 +87,7 @@ export function ieee14() {
   doc.elements.push(makeElement('shunt', 'S9', { name: 'Capacitor 9', bus: 'B9', q: 19, p: 0, vn: LV, side: 'below' }));
   placeConnections(doc);
   doc.study.loadflow.tolerance = 0.001;
-  doc.study.rms = { tEnd: 3, dt: 0.001, events: [
+  doc.study.rms = { tEnd: 3, dt: 0.005, events: [
     { t: 0.1, kind: 'fault', target: 'B4' },
     { t: 0.18, kind: 'clear', target: 'B4' },
     { t: 0.18, kind: 'trip', target: 'L7' },

@@ -359,7 +359,7 @@ impl Default for RmsSettings {
     fn default() -> Self {
         Self {
             t_end: 3.0,
-            dt: 0.001,
+            dt: 0.005,
             events: Vec::new(),
         }
     }

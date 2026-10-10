@@ -5,7 +5,7 @@ import { h, esc } from './dom.js';
 import { icon } from './icons.js';
 import { fieldRow } from './fields.js';
 import { fixed } from './format.js';
-import { CLASSES, CLASS_ORDER } from '../core/catalog.js';
+import { CLASSES, CLASS_ORDER, rotorIssue } from '../core/catalog.js';
 import { CLASS_ICON } from './tree.js';
 import { minOf, maxOf } from '../core/extent.js';
 
@@ -113,7 +113,10 @@ export class Inspector {
         if (f.when && !f.when(el)) continue;
         props.append(...fieldRow(f, el[f.key], v => app.tryEdit(`Edit ${f.label.toLowerCase()}`, () => app.store.transact(`Edit ${f.label.toLowerCase()}`, tx => tx.set(el.id, f.key, f.key === 'name' ? String(v).trim() : v), { coalesce: `field-${el.id}-${f.key}` })), { buses }));
       }
-      out.push(this.section(group, label, [props]));
+      // Round-rotor data that cannot be simulated, said where they are edited.
+      const issue = group === 'rms' ? rotorIssue(el) : '';
+      const warning = issue ? h('div', { class: 'stale', role: 'status', html: `${icon('warning', 14)}<span>${esc(issue)}</span>` }) : null;
+      out.push(this.section(group, label, warning ? [warning, props] : [props]));
     }
     return out;
   }

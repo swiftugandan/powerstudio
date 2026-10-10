@@ -489,6 +489,52 @@ test('imports a CGMES model, edits its operating point and exports it as SSH and
   await expect(page.locator('.log')).toContainText('1 changed value in SSH');
 });
 
+/** ANDES's published IEEE 14-bus RAW and DYR files from `.cache/reference`, or null when they have not been fetched. */
+function ieee14Dynamic() {
+  const cases = JSON.parse(readFileSync(new URL('../oracle/dyn-cases.json', import.meta.url), 'utf8'));
+  const c = cases.cases.find((/** @type {any} */ x) => x.name === 'ieee14');
+  try {
+    return ['raw', 'dyr'].map(k => ({ name: `ieee14.${k}`, mimeType: 'text/plain', buffer: readFileSync(new URL(`../../.cache/reference/${c[k]}`, import.meta.url)) }));
+  } catch {
+    return null;
+  }
+}
+
+for (const width of [1440, 390]) {
+  test(`opens RAW and DYR files, edits a machine's exciter and simulates it (${width} px)`, async ({ page }) => {
+    const files = ieee14Dynamic();
+    test.skip(!files, 'ANDES\u2019s IEEE 14-bus files are not in .cache/reference');
+    await page.setViewportSize({ width, height: width > 600 ? 900 : 844 });
+    await open(page);
+    const chooser = page.waitForEvent('filechooser');
+    await page.keyboard.press('ControlOrMeta+Shift+O');
+    await (await chooser).setFiles(/** @type {any} */ (files));
+    await page.locator('.dialog .btn.primary', { hasText: 'Open network' }).click();
+    await expect(page.locator('#app')).toContainText('Imported');
+    await page.locator('.toast').evaluateAll(ts => ts.forEach(t => t.remove()));
+    if (width < 600) await page.locator('[data-cmd="view.sheetLeft"]').click();
+    await page.locator('.tree-row', { hasText: 'B3-G1' }).click().catch(async () => {
+      // The machines' group starts closed on a large tree: open it first.
+      await page.locator('.tree-row[data-cls="gen"]').click();
+      await page.locator('.tree-row', { hasText: 'B3-G1' }).click();
+    });
+    if (width < 600) await page.locator('[data-cmd="view.sheetRight"]').click();
+    const exciter = page.locator('#inspector-panel select[data-key="exciter"]');
+    await expect(exciter).toHaveValue('ESST3A');
+    await expect(page.locator('#inspector-panel select[data-key="stabiliser"]')).toHaveValue('IEEEST');
+    await page.locator('#inspector-panel .control-params summary', { hasText: 'ESST3A' }).click();
+    const km = page.locator('#inspector-panel input[data-key="exciter.KM"]');
+    await km.fill('9');
+    await km.press('Enter');
+    await expect(page.locator('#inspector-panel input[data-key="exciter.KM"]')).toHaveValue('9');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.keyboard.press('Alt+R');
+    await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('synchronism');
+    await page.locator('.rms-quantity').selectOption('efd');
+    await expect(page.locator('.plot-side')).toContainText('B3-G1');
+  });
+}
+
 test('prints a study report with the run records and each result', async ({ page }) => {
   await open(page);
   await loadFlow(page);

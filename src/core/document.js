@@ -4,7 +4,7 @@
  * is the one gate every document passes on the way in: it fills defaults, drops unknown keys, checks every value
  * against the catalogue and reports what it fixed or rejected. */
 
-import { CLASSES, checkValue, endsOf, isClass, makeElement, completeController } from './catalog.js';
+import { CLASSES, checkValue, endsOf, isClass, makeElement, completeController, rotorIssue } from './catalog.js';
 import { checkContingencies } from './contingencies.js';
 
 /**
@@ -81,7 +81,8 @@ export const STUDY_FIELDS = {
   ],
   rms: [
     { key: 'tEnd', label: 'Simulation time', type: 'number', group: 'rms', default: 3, unit: 's', min: 0.01, max: 120 },
-    { key: 'dt', label: 'Step size', type: 'number', group: 'rms', default: 0.001, unit: 's', min: 1e-5, max: 0.05 },
+    { key: 'dt', label: 'Step size', type: 'number', group: 'rms', default: 0.005, unit: 's', min: 1e-5, max: 0.05,
+      help: 'The integration step. The method is implicit, so 5 ms follows electromechanical swings and exciters closely; shorten it to resolve fast controls in more detail.' },
   ],
 };
 
@@ -262,11 +263,16 @@ export function* normalizeSteps(input) {
   return { doc, issues };
 }
 
-/** Structural problems that stop a calculation, as messages. @param {PowerDocument} doc @returns {string[]} */
-export function validateForCalculation(doc) {
+/** Structural problems that stop a calculation, as messages; a simulation also needs consistent round-rotor data.
+ * @param {PowerDocument} doc @param {string} [kind] the calculation @returns {string[]} */
+export function validateForCalculation(doc, kind) {
   const out = [];
   const byId = new Map(doc.elements.map(e => [e.id, e]));
   for (const el of doc.elements) {
+    if (kind === 'rms' && el.inService !== false) {
+      const issue = rotorIssue(el);
+      if (issue) out.push(`${labelOf(el)}: ${issue} Correct its round-rotor data or simulate it with the classical model.`);
+    }
     if (el.cls === 'line') {
       const a = byId.get(/** @type {string} */ (el.from)), b = byId.get(/** @type {string} */ (el.to));
       if (a && b && Math.abs(/** @type {number} */ (a.vn) - /** @type {number} */ (b.vn)) > 1e-9 * /** @type {number} */ (a.vn)) {
