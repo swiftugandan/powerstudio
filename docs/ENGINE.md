@@ -305,20 +305,78 @@ the decoupled voltage model (B″). Both take a branch outage as a low-rank corr
 
 ## Stability (RMS simulation)
 
-`ps-dyn` runs an electromechanical simulation with the classical model: every machine is a constant voltage E′
-behind x′d whose angle follows the swing equation 2H·dω/dt = Pm − Pe − D·(ω − 1), dδ/dt = ωs·(ω − 1), on the system
-base. E′ and δ0 come from the load flow; loads become constant admittances; external grids are constant voltages
-behind their short-circuit impedance. The network is solved on its factorised sparse admittance matrix at every
-stage of a fourth-order Runge-Kutta step (1 ms by default), and refactorised only when an event changes it. Events
-at given times apply a three-phase fault at a node (1e6 p.u. to earth), clear it, switch out a branch, machine or
-load, or scale a load. Angles are reported against the external grid when there is one, otherwise against the centre
-of inertia, and net of transformer phase shifts. A machine more than 180° from another is reported as loss of
-synchronism.
+`ps-dyn` simulates the electromechanical response of the network to events: every machine with its rotor model and
+controls, solved together with the network as one system of differential-algebraic equations.
 
-**Checked by** `engine/crates/ps-study/tests/rms.rs` and `tests/rms.test.mjs`: on a single machine against an
-infinite bus, clearing 2 % before the equal-area critical clearing time stays in step and 2 % after it does not;
-small oscillations follow the linearised swing frequency within 1 %; undisturbed operation stays at its load-flow
-equilibrium.
+**Models.** Each synchronous machine is a *classical* model (PSS/E GENCLS: a voltage behind X′d, the stator
+resistance in series) or a *round rotor* (PSS/E GENROU: transient and subtransient circuits on both axes, X″d = X″q,
+quadratic saturation of the air-gap flux), written on the system base in the machine's own d-q frame; the stator is
+algebraic and neglects the speed's effect on its voltages, and the swing equation is 2H·dω/dt = Tm − Te − D·(ω − 1)
+with dδ/dt = ωb·(ω − 1). A machine may carry an exciter (SEXS, IEEET1, EXDC2, ESDC2A, EXST1, ESST3A), a governor
+(TGOV1, IEEEG1, HYGOV) and a stabiliser (IEEEST, ST2CUT), each with the parameters of the PSS/E model library on the
+machine's base; `ps-model/src/dynamics.rs` lists them in DYR order with their typical values. Controls start in
+equilibrium: their voltage and load references are set from the load flow, and a limit the operating point lies
+beyond is widened to it, with a note in the report, as PSS/E and ANDES do. External grids are constant voltages behind
+their short-circuit impedance; loads become constant admittances at their load-flow voltage; static var compensators
+and converter stations hold the susceptance of their load-flow output.
+
+Where a published form leaves a choice open, the models follow ANDES, the reference they are tested against: EXDC2
+multiplies its output by the speed, a VRMAX of zero is no upper limit for ESDC2A and IEEET1, ESDC2A's regulator limits
+scale with the terminal voltage, IEEEG1's turbine fractions are normalised to their sum (the low-pressure share of a
+cross-compound unit has no second machine, so it does not reach this one), and blocks whose lag is zero pass their
+input through. Three choices differ from ANDES because ANDES's own form departs from the PSS/E definition: ESST3A's
+compound source reads the stator current on the machine's base, IEEEG1's valve rate limits are on the machine's base,
+and ESDC2A's voltage transducer is in the loop. The ANDES comparison corrects or sets these aside (TESTING.md).
+HYGOV's gate integrator has the time constant r·Tr of the PSS/E diagram. Stabiliser signals from a remote busbar,
+bus frequency (MODE 2) and the voltage's derivative (MODE 6) are not modelled; a stabiliser or governor that names one
+is refused with that reason.
+
+**Method.** The unknowns are every unit variable and the real and imaginary voltage of every bus. A variable with a
+time constant T follows T·dx/dt = f(x); one with T = 0 is algebraic, f(x) = 0, so a lag without a time constant
+becomes its gain. The network adds the current balance I(x, V) − Y·V = 0 per bus. Each step of the implicit
+trapezoidal rule solves T·(x − x₀) − h/2·(f(x) + f(x₀)) = 0 by Newton's method on a sparse Jacobian. Every model writes
+its equations once over a scalar type; evaluated with dual numbers they give their own derivatives exactly, so no
+model has a hand-written Jacobian (a test compares each with finite differences). The Jacobian's pattern stays fixed
+for the whole simulation, a switched-out branch keeping its entries at zero, so the sparse LU is ordered once; the
+factorisation is reused while Newton's method converges in a few iterations and rebuilt when it slows, when the step
+length or a held limit changes, and after events. A step that fails is halved, up to six times.
+
+Anti-windup limits act on the iterate as ANDES applies them: a variable at its limit whose right-hand side pushes it
+further is held there, its equation replaced by x = limit, until the right-hand side turns back; after four iterations
+a held limit stays held for the step, so the iteration cannot chatter. Output limits are clamps.
+
+**Events.** At its time an event applies a three-phase fault at a busbar through R + jX Ω (bolted, 1e6 p.u. to earth,
+when none is given), clears it, switches a branch, load, external grid or machine out, switches a branch, load or grid
+back in, or sets a load to a percentage of its initial power. The states keep their values, the algebraic variables
+are solved again at the new network, and the next step starts from there. (`Options::event_steps` can instead step
+across events as ANDES 2.0 does, for comparison only.)
+
+**Report.** Per machine the rotor angle, speed, active and reactive power, field voltage and mechanical power; per
+busbar the voltage. Angles are against the external grid when there is one, otherwise against the centre of inertia,
+net of transformer phase shifts; a machine more than 180° from another is reported as loss of synchronism. The step
+is 5 ms by default: at 5 ms the engine stays within 0.13° and 1.4e-3 p.u. of field voltage of ANDES at a quarter
+millisecond on the reference cases, and at 10 ms within 0.35°. A report keeps up to 4,000 samples a trace and at most
+six million values in all (at least 300 samples a trace); the times of events are kept either side of each event.
+ACTIVSg2000 simulates 5 s in 2.8 s at a 1 ms step and 0.9 s at 5 ms; ACTIVSg10k in 11.6 s and 3.1 s (Node, one
+WebAssembly engine, Apple M5 Pro).
+
+**Checked by**
+
+- `engine/crates/ps-study/tests/dynamics.rs` against ANDES 2.0.0 on its published PSS/E cases (TESTING.md has the
+  procedure and docs/TEST-REPORT.md the figures): Kundur's two-area system with classical machines, and with GENROU,
+  EXDC2 and TGOV1, each with its published line trip and with a fault; the IEEE 14-bus system with GENROU, ESST3A,
+  EXST1, TGOV1, IEEEG1, IEEEST and ST2CUT, with its published trip and reclosure and with a fault; the WECC 179-bus
+  system with a fault; and SEXS, IEEET1 and HYGOV placed in those cases. Every machine's angle, speed, powers, field
+  voltage and mechanical power and the bus voltages agree to 2e-3 rad, 3e-6 p.u., 1e-3 p.u. (100 MVA), 2e-3 p.u. and
+  5e-5 p.u. The same test checks that every published case rests in equilibrium without events.
+- `engine/crates/ps-dyn/src/unit.rs`: each model's dual-number Jacobian against central differences, and its initial
+  state for equilibrium.
+- `engine/crates/ps-study/tests/rms.rs` and `tests/rms.test.mjs`: on a single machine against an infinite bus,
+  clearing 2 % before the equal-area critical clearing time stays in step and 2 % after it does not; small
+  oscillations follow the linearised swing frequency within 1 %; undisturbed operation stays at its load-flow
+  equilibrium.
+- `tests/dynamics.test.mjs`: the catalogue's control models equal the engine's library; a RAW file with its DYR file
+  opens in the app with every machine's models and simulates.
 
 ## MATPOWER import
 
@@ -354,7 +412,7 @@ flows to 1e-3 MW. The worst case agrees to 1e-11 p.u. and 2e-8 MW.
 
 ## PSS/E RAW import
 
-`ps-io` reads RAW files of versions 33 and 35, bus-branch and node-breaker. Fields may be separated by commas or
+`ps-io` reads RAW files of versions 32, 33 and 35, bus-branch and node-breaker; version 32 lays its records out as version 33, less fields at their ends that take their defaults. Fields may be separated by commas or
 blanks; the section terminators' comments name the next section, which copes with files that leave sections out.
 What maps:
 
@@ -382,6 +440,20 @@ versions 33 and 35, up to the 500-bus South Carolina synthetic grid: imported se
 tap changers, and the load flow at every bus and equipment terminal. Every case that can be solved agrees to 1e-10
 p.u. or better, IEEE 300 with its HVDC links to 3e-9 p.u.; `docs/research/sources.md` lists the corrections the comparison makes to
 PowSyBl's network and why.
+
+## PSS/E DYR import
+
+`ps-io` (`dyr.rs`) applies a DYR file to the model of its RAW file. Each record `BUS 'MODEL' ID values… /` sets one
+model of the machine `B<bus>-G<id>`: GENCLS and GENROU its rotor model, the exciters, governors and stabilisers of the
+library its controls, with the parameters in DYR order. GENCLS takes its transient reactance from the RAW file's
+source reactance (ZSORCE), as PSS/E does; GENROU's X″d replaces the source reactance, which PSS/E requires to equal
+it, and the report counts the machines where the two differed. A record of a model outside the library is reported as
+not used, with the machines it concerns, which keep their classical model; a record for a machine the RAW file does
+not have, or with too few values, is skipped and reported. In the app, select the RAW file and its DYR file together.
+
+**Checked by** the ANDES comparison above, which reads every case from its RAW and DYR files; the replacement cases
+write their records in DYR form for ANDES, so the parameter order of SEXS, IEEET1 and HYGOV is checked against
+ANDES's reader too.
 
 ## CGMES state variables export
 

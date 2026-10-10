@@ -1,8 +1,54 @@
 # Test report
 
 Numbers are copied from the runs; nothing here is estimated. Re-run the commands in [TESTING.md](TESTING.md) to
-reproduce them. The first four sections cover phases 4, 3, 2 and 1 (local runs only: they have not
+reproduce them. The first sections cover phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only: they have not
 been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+
+## Dynamics, phase 5 wave D1 (2026-10-10, local)
+
+Same environment as phases 1 to 4. Local runs only. The suite figures are those of phase 4 plus the dynamics tests:
+engine tests 89, Node tests 90, browser tests 50 passed (16 screenshot captures skipped), lints clean.
+
+Agreement with ANDES 2.0.0 (`engine/crates/ps-study/tests/dynamics.rs`, ANDES at 0.25 ms, the engine at 1 ms). Worst
+difference per quantity over every machine, bus and sample: rotor angle δ (rad), speed ω, active and reactive power
+(p.u. on 100 MVA), field voltage vf and mechanical power Pm (p.u.), bus voltage |V| (p.u.). With ANDES's way across
+events, compared everywhere but within 2 ms of an event:
+
+| Case | δ | ω | P | Q | vf | Pm | \|V\| |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Kundur, classical, published line trip | 7.4e-5 | 8.0e-8 | 3.5e-5 | 1.2e-5 | 1.4e-7 | 5.4e-6 | 4.9e-7 |
+| Kundur, classical, fault at bus 8 | 1.9e-5 | 3.8e-8 | 2.3e-5 | 8.7e-6 | 1.4e-7 | 5.4e-6 | 3.3e-7 |
+| Kundur, GENROU EXDC2 TGOV1, published line trip | 2.7e-5 | 2.9e-8 | 1.0e-5 | 7.8e-6 | 1.6e-6 | 7.1e-6 | 4.4e-7 |
+| Kundur, GENROU EXDC2 TGOV1, fault at bus 8 | 1.0e-3 | 1.3e-6 | 2.5e-4 | 3.1e-4 | 8.0e-4 | 8.7e-5 | 2.2e-5 |
+| IEEE 14, published trip and reclosure | 1.9e-4 | 2.3e-7 | 9.5e-6 | 8.3e-6 | 2.8e-4 | 3.6e-6 | 9.4e-7 |
+| IEEE 14, fault at bus 9 | 2.1e-5 | 6.4e-8 | 6.7e-6 | 1.2e-5 | 1.1e-3 | 6.4e-7 | 2.9e-6 |
+| WECC 179, fault at bus 3 | 2.4e-5 | 2.3e-7 | 3.7e-4 | 2.3e-4 | 7.1e-4 | 3.6e-4 | 4.0e-6 |
+| Kundur with SEXS, fault at bus 8 | 2.7e-5 | 4.3e-8 | 2.1e-5 | 7.7e-5 | 1.5e-6 | 7.4e-6 | 2.3e-6 |
+| IEEE 14 with IEEET1 at bus 8, fault at bus 9 | 1.9e-5 | 6.2e-8 | 6.7e-6 | 1.2e-5 | 1.1e-3 | 6.3e-7 | 2.9e-6 |
+| IEEE 14 with HYGOV at bus 8, line trip | 1.5e-6 | 3.2e-9 | 7.1e-7 | 2.5e-7 | 4.2e-5 | 2.3e-8 | 5.1e-8 |
+| Tolerance | 2e-3 | 3e-6 | 1e-3 | 1e-3 | 2e-3 | 1e-3 | 5e-5 |
+
+With the engine's own way across events (the app's), compared from 0.3 s after each event, the worst are 1.0e-3 rad,
+2.1e-6, 2.1e-3 p.u. power (WECC's slack machine), 4.2e-4 p.u. field voltage and 1.8e-5 p.u. voltage, within three
+times the tolerance. The load flows agree to 5.4e-9 p.u. (IEEE 14), 2.5e-7 (Kundur) and 1.8e-6 (WECC). The four
+largest figures have measured causes (docs/TESTING.md): ANDES's anti-windup error in Kundur's fault (at 1 ms ANDES is
+8.5e-3 rad from the engine, at 0.25 ms 1.0e-3), the engine's 1 ms step on EXST1 during a fault (7e-5 at 0.25 ms),
+WECC's load flow difference at its slack machine, and IEEE 14's machine at bus 6, whose TGOV1 valve starts exactly at
+its lower limit, so whether the limit holds after the trip depends on rounding.
+
+Other checks: every model's dual-number Jacobian equals central differences to 1e-6 relative; every model and every
+published case starts and stays in equilibrium (5 s without events, drift under 1e-7); the classical model meets the
+equal-area critical clearing time within 2 % and the linearised swing frequency within 1 %; a RAW and DYR import,
+an exciter edit and a simulation pass in the browser at 1440 and 390 px.
+
+Speed (Node, one WebAssembly engine): ACTIVSg2000 with classical machines and a fault, 5 s simulated in 2.8 s at a
+1 ms step and 0.9 s at 5 ms; ACTIVSg10k in 11.6 s and 3.1 s.
+
+Not verified by the comparison: HYGOV's conversion between machine and system bases and its r·Tr integrator (the
+case has a machine rated at the system base and r = Tr = 1); ESDC2A's transducer (set aside in both programs);
+saturation of GENROU with S(1.2) = 0 and S(1.0) ≠ 0, which ANDES reads differently; stabiliser signals from remote
+busbars, bus frequency and the voltage's derivative, which the engine refuses; machines rated off the system base for
+SEXS, IEEET1 and HYGOV (only WECC has such machines, with other models).
 
 ## Workspace at scale, phase 4 (commit `bc56afe`, 2026-10-10, local)
 

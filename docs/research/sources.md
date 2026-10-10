@@ -207,3 +207,28 @@ The classical machine model and the equal-area criterion used by `tests/rms.test
 clearing angle δcr = arccos[(π − 2δ0)·sin δ0 − cos δ0] and the clearing time t = √(4H(δcr − δ0)/(ωs·Pm)) for a
 fault at the machine terminals, and the small-signal frequency f = √(ωs·Ks/2H)/2π, then checks the simulation
 against them.
+
+The stability goldens (`tests/oracle/golden/dyn-*.json`) were written by `scripts/oracle/andes_dyn.py` on 2026-10-10
+with ANDES 2.0.0 (H. Cui, F. Li and K. Tomsovic, "Hybrid symbolic-numeric framework for power system modeling and
+analysis", IEEE Transactions on Power Systems 36(2), 2021; https://github.com/CURENT/andes), GPL-3.0. They are ANDES's
+computed trajectories, not copies of its code or data. The cases are ANDES's published PSS/E files at commit
+`eda5163c9ee8d19945a1dd5d1771fec5da608c27` (tag v2.0.0): `kundur/kundur.raw` with `kundur_full.dyr` and
+`kundur_gencls.dyr`, `ieee14/ieee14.raw` with `ieee14.dyr`, and `wecc/wecc.raw` with `wecc_full.dyr`.
+`scripts/fetch-reference.mjs` downloads them by their pinned SHA-256 into `.cache/reference`; they are never copied
+into the repository. The Kundur RAW file's title calls it a "modified Kundur's two-area test system, distributed with
+ANDES" (after P. Kundur, *Power System Stability and Control*, 1994); the IEEE 14-bus system's dynamic data and the WECC
+179-bus case are as ANDES publishes them.
+
+The model equations follow the PSS/E model library's block diagrams and IEEE Std 421.5 (excitation systems), written
+in ANDES's conventions where a published form leaves a choice open (docs/ENGINE.md, "Stability", lists them); the
+round rotor's initial state uses the closed form of OpenIPSL's GENROU (https://github.com/OpenIPSL/OpenIPSL, BSD-3),
+which ANDES uses too. The code is PowerStudio's own. Three departures of ANDES from the PSS/E definition are corrected
+in the reference or set aside in both programs (docs/TESTING.md, "Stability against ANDES").
+
+Numeric data copied from ANDES's published case files, as typical values: the controls' default parameters in
+`ControllerKind::defaults` (engine/crates/ps-model/src/dynamics.rs) and `CONTROLLERS` (src/core/catalog.js) are
+the records of EXDC2 and TGOV1 in `kundur_full.dyr`, ESDC2A (bus 10) in `wecc_full.dyr`, EXST1, ESST3A, IEEEG1,
+IEEEST and ST2CUT (bus 2) in `ieee14.dyr`, SEXS in `kundur/kundur_sexs.xlsx`, and IEEET1 and HYGOV as ANDES loads
+`ieee14/ieee14_ieeet1.xlsx` and `ieee14_hygov.xlsx` (its defaults where the sheet is blank). The `replace` entries
+of `tests/oracle/dyn-cases.json` use the same values. The round rotor's typical data (`TYPICAL_ROUND_ROTOR`) are
+round values of the kind those records hold, chosen for this app.

@@ -1,8 +1,8 @@
 # PowerStudio: notes for agents
 
 PowerStudio is a browser-based power system analysis workbench: a single-line diagram editor with load flow,
-IEC 60909-style short circuit, N-1 contingency and classical-model stability. Read README.md for features and limits,
-docs/ARCHITECTURE.md for the structure and docs/ENGINE.md for what every calculation computes.
+IEC 60909-style short circuit, N-1 contingency and stability simulation with machine controls. Read README.md for
+features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md for what every calculation computes.
 
 ## Commands
 
@@ -35,6 +35,11 @@ docs/ARCHITECTURE.md for the structure and docs/ENGINE.md for what every calcula
   docs/research/sources.md.
 - The short-circuit calculation is "IEC 60909-style". Do not call it compliant or certified anywhere.
 - Element fields are defined once, in `src/core/catalog.js`; the inspector and the import gate read them from there.
+  The control models (`CONTROLLERS`) mirror `ControllerKind` in `engine/crates/ps-model/src/dynamics.rs`: names,
+  parameter order and typical values; `tests/dynamics.test.mjs` keeps them equal through the engine's `library` op.
+- A new dynamic model is written once over `ps_dyn::scalar::Scalar` (its Jacobian comes from dual numbers) and is
+  validated against ANDES before it ships: a case in `tests/oracle/dyn-cases.json`, `scripts/oracle/andes_dyn.py`,
+  then `engine/crates/ps-study/tests/dynamics.rs` (docs/TESTING.md).
   The engine's document writer (`ps-io/src/powerstudio_write.rs`) mirrors `VECTOR_GROUPS`; a test keeps them equal.
 - Other tools' files (CGMES, PSS/E RAW, MATPOWER) open through the engine (`src/engine/exchange.js`); there is no
   importer in JavaScript.

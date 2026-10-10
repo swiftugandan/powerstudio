@@ -1,4 +1,4 @@
-//! PSS/E RAW (versions 33 and 35) → canonical model.
+//! PSS/E RAW (versions 32, 33 and 35) → canonical model.
 //!
 //! RAW data is per unit on the system base and each bus's base voltage; the model stores engineering values. The
 //! conversion is exact for what the load flow uses:

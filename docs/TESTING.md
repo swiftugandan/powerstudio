@@ -102,6 +102,49 @@ a load flow, which is the quickest way to look at a case that fails.
 `tests/oracle.test.mjs` fails when the committed inputs no longer match the samples, so a sample cannot drift away
 from its goldens unnoticed. Moving a busbar on the diagram changes the inputs but not the goldens.
 
+## Stability against ANDES
+
+The stability goldens (`tests/oracle/golden/dyn-*.json`) come from ANDES 2.0.0 (GPL-3.0), run on its own published
+PSS/E RAW and DYR files, which `node scripts/fetch-reference.mjs` downloads from ANDES's repository at a pinned commit
+into `.cache/reference` (they are never copied into the repository). `tests/oracle/dyn-cases.json` lists the cases:
+the files, the events, ANDES's step (`tstep`), the engine's (`step`), the sampling, and for models no published DYR case
+uses, a `replace` entry giving a machine another control. ANDES is in the oracle environment
+(`scripts/oracle/requirements.txt`):
+
+```sh
+.venv/bin/python scripts/oracle/andes_dyn.py                 # every case → tests/oracle/golden/dyn-*.json
+.venv/bin/python scripts/oracle/andes_dyn.py ieee14-fault    # one case
+.venv/bin/python scripts/oracle/andes_dyn.py --tstep 0.0005 --out /tmp/half   # ANDES at another step, elsewhere
+cd engine && PS_DYN_REPORT=1 cargo test --release -p ps-study --test dynamics -- --nocapture
+```
+
+The script removes ANDES's own `Toggle` records from the DYR files, adds the case's events, runs ANDES's load flow to
+1e-12 and its fixed-step trapezoidal simulation to a Newton tolerance of 1e-10, and records ANDES's load flow, every
+model's variables after initialisation, and the traces at the steps nearest the sample times. It corrects ANDES in two
+places where its per-unit handling departs from the PSS/E library (ESST3A's terminal current and IEEEG1's valve rate
+limits are left on the system base; KI and XL, and UO and UC, are rescaled so ANDES computes them on the machine's
+base), and the WECC case sets ESDC2A's TR to zero in both programs because ANDES computes ESDC2A's transducer but does
+not use it. The golden records what was changed.
+
+The test runs each case twice and compares at ANDES's time points, the engine's trajectory interpolated there. The
+tolerances come from measurements, not choice:
+
+- **Event stepping.** ANDES lands steps 0.1 ms before and after each event, and its first step after an event averages
+  the new derivatives with those before it. That first-order error decays with the subtransient time constants and, on
+  WECC, excites swings that last seconds. The first run uses ANDES's stepping (`EventSteps::Andes`) and is compared
+  everywhere except within two steps of an event; the second uses the engine's own and is compared from 0.3 s after
+  each event, to three times the tolerance.
+- **Anti-windup limits.** Where every exciter reaches its ceiling (Kundur with a fault), ANDES's trajectory depends on
+  its step: from 1 ms to 0.5 ms to 0.25 ms its rotor angles move from 8.5e-3 to 5.1e-3 to 1.0e-3 rad away from the
+  engine's, towards them. ANDES therefore runs at 0.25 ms and the engine at 1 ms; ANDES at 1 ms is further from ANDES
+  at 0.25 ms than the engine is.
+- **The engine's own step.** The IEEE 14-bus system's EXST1 exciter (KA = 50, TA = 20 ms) differs by 1e-3 p.u. in field
+  voltage during a fault at 1 ms and by 7e-5 at 0.25 ms.
+- **Load flow.** The WECC load flows differ by up to 1.8e-6 p.u. in voltage, which moves the slack machine's power by
+  3.7e-4 p.u. throughout.
+
+`PS_DYN_DUMP=<folder>` writes every compared value with ANDES's as CSV; `PS_DYN_STEP` runs the engine at another step.
+
 ## WebGPU in other environments
 
 `node scripts/webgpu-probe.mjs` (after `node build.mjs`) opens the built app in Chromium with several flag sets and

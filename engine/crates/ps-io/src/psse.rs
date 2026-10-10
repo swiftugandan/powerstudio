@@ -1,4 +1,4 @@
-//! PSS/E RAW files, versions 33 and 35: the records as written, in the file's own units and conventions.
+//! PSS/E RAW files, versions 32, 33 and 35: the records as written, in the file's own units and conventions.
 //!
 //! A RAW file is a header of three lines followed by sections of records, each section ended by a record that is just
 //! `0` (the whole file by `Q`). Fields are separated by commas or blanks, strings are quoted, and anything after a `/`

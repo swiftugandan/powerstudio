@@ -244,7 +244,7 @@ benchmark kit (section 9.4).
   (limiters, relays) are located by zero-crossing detection.
 - **Models:** each dynamic model is a Rust type implementing a `DynModel` trait that contributes residuals and their
   Jacobian. Every hand-written Jacobian is checked against finite differences in CI.
-- **Library, delivered in waves**, each model validated against an open reference simulator (ANDES or Dynawo) on a
+- **Library, delivered in waves** (wave D1 as ADR 13 revises it), each model validated against an open reference simulator (ANDES or Dynawo) on a
   published case before it ships:
 
 | Wave | Models (PSS/E naming) |
@@ -467,6 +467,7 @@ writes a difference report. The design's own verification makes this comparison 
 | 10 | The WebAssembly boundary is one exported function, `ps_call`, taking and returning an envelope (u32 header length, JSON header, binary payload), plus `ps_alloc` and `ps_free`; no generated bindings | `wasm-bindgen`: generated glue tied to a tool version, many exports that grow with the engine. A single entry point keeps the boundary stable and the build free of extra tools |
 | 11 | Model classes are tables of records addressed by identifier, not columns of fields | Columnar storage: the solvers never read the model directly (they read the per-unit network), so columns would add bookkeeping to every import and edit without a measured benefit |
 | 12 | The workspace stays on the editor's bus-branch document for release 1. The canonical model serves node-breaker where calculations need it: imports, topology processing, per-unit conversion, busbar faults, the model hash. The editor expresses switching as in-service states, which scenarios hold, and as busbar contingencies; substation diagrams wait. A move to the canonical model is a later major version, once the catalogue has switch and terminal classes, a substation layout exists, and documents migrate | Moving the workspace in phase 4: everything validated sits on the editor document (the catalogue, the store's operations and the project router, the import gate, the data manager, the layout, the oracle inputs) and version 0.1 documents are deployed, so the move would re-derive all of it and take phases 5 to 7. Drawing substations from a retained import snapshot: a model the user's edits never reach, two truths in one project |
+| 13 | Dynamics wave D1 is the library ANDES can validate: GENCLS and GENROU; SEXS, IEEET1, EXDC2, ESDC2A, EXST1 and ESST3A; TGOV1, IEEEG1 and HYGOV; IEEEST and ST2CUT; constant-impedance loads. GENSAL and PSS2A wait for an open reference (ANDES has neither), and ESST1A until its DYR parameter order is settled from a citable source. Models are Rust types whose equations are written once over a scalar type and differentiated with dual numbers, revising ADR 8's trait with hand-written Jacobians; the finite-difference check stays. At an event the algebraic variables are solved again before the next step | Hand-written Jacobians: a second statement of every model that can disagree with the first, where dual numbers give the exact derivative of the code that runs. ANDES's way across events (a 0.1 ms step whose trapezoid average spans the event): a first-order error, kept only as an option to compare with ANDES |
 
 ## 11. Roadmap
 
@@ -479,7 +480,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | **2. Data exchange** — done | CGMES 2.4.15 and 3.0 import (EQ, TP, SSH, SV, DL, GL) and SSH/SV export; PSS/E RAW import and export; validation reports | CGMES conformity configurations and ACTIVSg cases import and agree with PowSyBl to the fidelity bar |
 | **3. Steady-state completeness** — done, two bars missed | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis. See the phase 3 results below |
 | **4. Workspace at scale** (runs alongside 2 and 3) — done | Projects, variants, scenarios, study cases; data manager; renderer at scale; result browser and comparison; reports. Substation diagrams deferred by ADR 12 | A 70,000-bus project is usable end to end with no frame over 100 ms. See the phase 4 results below |
-| **5. Dynamics** | DAE solver, events, DYR import, wave D1, then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases |
+| **5. Dynamics** — wave D1 done | DAE solver, events, DYR import, wave D1 (ADR 13), then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases. See the wave D1 results below |
 | **6. Short circuit** | Breaking and steady-state currents, DC component, power station units, converter sources, all fault types; the superposition method | The TR 60909-4 example network from pandapower's open test suite reproduced to its stated tolerances for three-phase and line-to-line faults, maximum and minimum, power station units included |
 | **7. Release hardening** | Reproducible builds, SBOM, attestations, Firefox and WebKit test projects, accessibility audit, user guide, operator benchmark kit | The assurance bar passes; 1.0.0 released |
 
@@ -652,6 +653,25 @@ The two bars phase 3 missed:
   ACTIVSg70k in 0.56 to 0.67 s from the last solution (1 or 2 iterations; 3.1 s and 18 iterations before phase 4,
   since the start now carries the machines held at their limits); without reactive limits it takes 345 ms. What
   remains is the size of the report (39 MB of JSON, about a third of the time); a columnar report is the next step.
+
+### Phase 5 wave D1 results (2026-10-10, local)
+
+The exit bar for the wave is met: on ANDES's published PSS/E cases (Kundur's two-area system with classical and with
+round-rotor machines, the IEEE 14-bus and the WECC 179-bus systems) and on three cases that place SEXS, IEEET1 and
+HYGOV in them, every machine's rotor angle, speed, powers, field voltage and mechanical power and the bus voltages
+agree with ANDES to 2e-3 rad, 3e-6 p.u., 1e-3 p.u., 2e-3 p.u. and 5e-5 p.u.; most agree to 1e-5 (docs/TEST-REPORT.md
+has each case). The comparison found three things about the reference, each measured: ANDES's step across an event
+carries a first-order error; its anti-windup limits carry an error that shrinks with its step, so ANDES runs at
+0.25 ms against the engine's 1 ms; and it leaves ESST3A's terminal current and IEEEG1's valve rate limits on the
+system base and ESDC2A's transducer out of the loop. docs/TESTING.md describes how each is handled.
+
+What was built: the simultaneous implicit solver with Jacobians from dual numbers (section 5.8), the D1 library of
+ADR 13, events with fault impedance and reclosure, PSS/E DYR import with RAW version 32, machine dynamics in the
+document with an inspector editor for each control, and the results view's new traces. With the implicit method the
+default step is 5 ms, five times the old one, at an accuracy within 0.13° of ANDES at 0.25 ms on the reference cases;
+ACTIVSg10k simulates 5 s in 3.1 s at 5 ms.
+
+Left for the next waves: ZIP loads in dynamics and ESST1A (still D1 in the design; ADR 13), D2 and D3.
 
 ## 12. Risks
 

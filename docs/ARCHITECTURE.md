@@ -57,18 +57,30 @@ changed meanwhile. Position changes are not sent to the engines, which never rea
 | `ps-num` | Complex numbers and the clock (the host's clock in WebAssembly) |
 | `ps-sparse` | Sparse matrices and the `SparseSolver` trait: faer's sparse LU, a dense reference LU, complex systems |
 | `ps-model` | The canonical model: equipment, operations with inverses, validation, snapshots, study case settings |
-| `ps-io` | Importers: PowerStudio documents, MATPOWER, CGMES 2.4.15 and 3.0, PSS/E RAW 33 and 35; the import report |
+| `ps-io` | Importers: PowerStudio documents, MATPOWER, CGMES 2.4.15 and 3.0, PSS/E RAW 32, 33 and 35 with DYR; the import report |
 | `ps-topology` | Switches and outages to calculation buses, islands and energisation |
 | `ps-net` | The per-unit network: every conversion from engineering units, defined once |
 | `ps-lf` | Newton-Raphson and DC load flow on sparse matrices |
 | `ps-sc` | IEC 60909-style short circuit |
-| `ps-dyn` | Classical-model stability simulation |
+| `ps-dyn` | Stability simulation: machines and their controls solved with the network by the implicit trapezoidal rule (see below) |
 | `ps-study` | Studies on a model, contingency analysis, reports, and the request interface (`api.rs`) |
 | `ps-wasm` | The WebAssembly boundary: `ps_call`, `ps_alloc`, `ps_free` |
 | `ps-cli` | `ps`, the native runner for studies and benchmarks |
 
 The workspace forbids `unsafe` code everywhere except the exported functions of `ps-wasm`, denies every Clippy
 warning, and bans `unwrap`, `expect` and `panic` outside tests: engine errors reach the user as messages.
+
+**Stability (`ps-dyn`).** `scalar.rs` defines the numbers model equations are written over (`f64`, and dual numbers
+that carry one derivative); `block.rs` the variable layout and the standard blocks; `machine.rs`, `exciter.rs`,
+`governor.rs` and `stabiliser.rs` the models; `unit.rs` evaluates a machine with its controls in a fixed order (stator,
+governor, stabiliser, exciter, rotor), the field voltage being an algebraic variable so an exciter may read the stator
+current it drives. `sim.rs` assembles every unit and the network's current balance into one system, steps it with the
+implicit trapezoidal rule and Newton's method on a sparse Jacobian of fixed pattern, holds anti-windup limits and
+applies events. A machine's dynamic data live in `ps_model::MachineDynamics`: the classical fields every machine has,
+the rotor model with its round-rotor data, and `Controls` (exciter, governor, stabiliser), each a `ControllerKind` with
+its parameters in DYR order. In the document they are flat generator fields plus three `controller` fields holding
+`null` or `{ model, …parameters }`; the inspector edits a control's parameters in a group under its model choice, and
+the data sheet shows the model's name. `ps-io/src/dyr.rs` applies a PSS/E DYR file to a model read from RAW.
 
 **Engine in the browser (`src/engine/`).** `module.js` compiles the WebAssembly module once per page, from the
 embedded copy in the built file or from the file in the source tree. `host.js` instantiates it and exchanges

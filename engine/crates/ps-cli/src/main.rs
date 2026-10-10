@@ -9,7 +9,7 @@
 //! ps cgmes <file|folder|archive>... --sv <out.xml> [--warm] [--solution <file>]
 //!                                                             solve and write the state variables (SV) profile, and
 //!                                                             the state by element and node as JSON
-//! ps psse <case.raw> [--lf] [--warm] [--model]                import PSS/E RAW (versions 33 and 35), the same way
+//! ps psse <case.raw> [--lf] [--warm] [--model]                import PSS/E RAW (versions 32, 33 and 35), the same way
 //! ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]
 //!                                                             write any model PowerStudio reads as PSS/E RAW, and
 //!                                                             the engine's load flow by RAW bus number
