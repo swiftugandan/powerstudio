@@ -10,7 +10,7 @@
 import { EngineHost } from '../engine/host.js';
 import { request, requestOpen, openDocument, editDocument } from '../engine/studies.js';
 import { importFiles } from '../engine/exchange.js';
-import { autoLayout } from '../core/layout.js';
+import { autoLayout, laidOut, drawingOf } from '../core/layout.js';
 
 /** @type {Promise<EngineHost> | null} */
 let engine = null;
@@ -46,6 +46,11 @@ self.onmessage = async (/** @type {MessageEvent} */ event) => {
     if (!engine) throw new Error('The calculation engine was not started.');
     const host = await engine;
     const t0 = performance.now();
+    if (msg.type === 'layout') {
+      const bytes = new TextEncoder().encode(JSON.stringify(drawingOf(laidOut(msg.json))));
+      postMessage({ id, type: 'result', bytes, ms: performance.now() - t0 }, [bytes.buffer]);
+      return;
+    }
     if (msg.type === 'import') {
       const { summary, doc: imported } = importFiles(host, msg.files);
       // Laid out here, so a large network does not hold up the page.

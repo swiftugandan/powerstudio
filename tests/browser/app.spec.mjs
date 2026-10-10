@@ -152,6 +152,20 @@ test('copies, pastes, switches out of service, nudges and selects with a marquee
   await expect(x).toHaveValue('-260');
 });
 
+test('arranges the diagram in the worker as one undoable step', async ({ page }) => {
+  await open(page);
+  await page.locator('.tree-row[data-id="B4"]').click();
+  await page.locator('#inspector-panel summary', { hasText: 'Diagram' }).click();
+  const x = page.locator('#inspector-panel input[data-key="x"]');
+  await expect(x).toHaveValue('-280');
+  await palette(page, 'Arrange');
+  await expect(page.locator('#app')).toContainText('Arranged the diagram.');
+  await expect(x).not.toHaveValue('-280');
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(x).toHaveValue('-280');
+});
+
 test('resizes, reroutes and reconnects with the diagram handles', async ({ page }) => {
   await open(page);
   /** @param {number} x @param {number} y */

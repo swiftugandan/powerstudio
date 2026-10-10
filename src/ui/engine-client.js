@@ -15,9 +15,10 @@ import { engineModule } from '../engine/module.js';
 import { EngineHost, jsonPayload } from '../engine/host.js';
 import { request } from '../engine/studies.js';
 import { importFiles } from '../engine/exchange.js';
-import { autoLayout } from '../core/layout.js';
 import { adapt } from '../engine/reports.js';
 import { serialise } from './persistence.js';
+import { DRAWING_KEYS } from '../core/store.js';
+import { autoLayout, laidOut, drawingOf } from '../core/layout.js';
 import { yieldToBrowser } from './dom.js';
 
 /** @typedef {import('../engine/reports.js').CalcKind} CalcKind */
@@ -82,6 +83,8 @@ export class EngineClient {
   /** Forwards an edit to the workers whose copies are current; the others get the whole document when next needed.
    * @param {import('../core/store.js').Op[]} ops */
   applyOps(ops) {
+    // The engines never read where elements are drawn, so moving them is not sent.
+    ops = ops.filter(op => !(op.type === 'set' && DRAWING_KEYS.has(op.key)));
     if (!this.doc || !ops.length) return;
     const before = this.key;
     this.edits++;
@@ -233,6 +236,32 @@ export class EngineClient {
     }
   }
 
+  /**
+   * Lays a document's diagram out again on the first worker (on this thread when there are no workers), and returns
+   * every element's drawing fields as laid out, or null when the document changed while it was being serialised.
+   * @param {import('../core/document.js').PowerDocument} doc @param {() => boolean} same whether the document is unchanged
+   * @returns {Promise<Array<Record<string, unknown>> | null>}
+   */
+  async layout(doc, same) {
+    this.active++;
+    try {
+      const json = await serialise(doc, same, yieldToBrowser);
+      if (json === null) return null;
+      const module = await engineModule();
+      const s = this.slot(0, module);
+      if (!s) return drawingOf(laidOut(json));
+      /** @type {Reply} */
+      const reply = await new Promise((resolve, reject) => {
+        const id = ++this.seq;
+        s.pending = { id, resolve, reject };
+        s.worker.postMessage({ id, type: 'layout', json });
+      });
+      return jsonPayload(reply.bytes);
+    } finally {
+      this.active--;
+    }
+  }
+
   /** Stops a run that has been cancelled or superseded. @param {number} token */
   check(token) {
     if (token !== this.token) throw new CancelledError();
@@ -285,3 +314,4 @@ export class EngineClient {
     }
   }
 }
+

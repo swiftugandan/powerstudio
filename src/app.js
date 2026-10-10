@@ -4,7 +4,7 @@
 import { DocumentStore } from './core/store.js';
 import { emptyDocument, nextId, normalizeSteps, validateForCalculation, busesOf } from './core/document.js';
 import { makeElement, CLASSES } from './core/catalog.js';
-import { autoLayout, snap } from './core/layout.js';
+import { snap } from './core/layout.js';
 import { SAMPLES } from './samples/index.js';
 import { Commands } from './ui/commands.js';
 import { Ribbon } from './ui/ribbon.js';
@@ -51,6 +51,8 @@ export class App {
     /** Where the next load flow starts: the last converged solution, or an imported network's voltages (see calc).
      * @type {import('./engine/reports.js').StartVoltages | null} */
     this.start = null;
+    /** Whether an Arrange is laying the diagram out in the worker. */
+    this.arranging = false;
     /** @type {Set<string>} */
     this.selection = new Set();
     this.hover = '';
@@ -372,10 +374,10 @@ export class App {
   maybeAutoLoadFlow() {
     if (!this.prefs.autoLoadFlow || !this.results.loadflow) return;
     // An edit during a calculation recalculates once that calculation ends.
-    if (this.running) { this.autoPending = true; return; }
+    if (this.running || this.arranging) { this.autoPending = true; return; }
     clearTimeout(this.autoTimer);
     // A calculation the user starts within the delay must not be replaced by this one.
-    this.autoTimer = window.setTimeout(() => { if (!this.running) this.calc('loadflow', { auto: true }); }, 250);
+    this.autoTimer = window.setTimeout(() => { if (!this.running && !this.arranging) this.calc('loadflow', { auto: true }); }, 250);
   }
 
   /** Runs an edit and reports a refusal instead of throwing. @param {string} label @param {() => void} fn @returns {string} error message or '' */
@@ -561,13 +563,31 @@ export class App {
     this.tryEdit('Switch', () => this.store.transact(on ? 'Switch into service' : 'Switch out of service', tx => { for (const e of els) tx.set(/** @type {Element} */ (e).id, 'inService', on); }));
   }
 
-  /** Lays the whole diagram out again from the topology, as one undoable step. */
-  arrange() {
-    const doc = structuredClone(this.store.doc);
-    autoLayout(doc);
-    const keys = ['x', 'y', 'len', 'orient', 'fromPos', 'toPos', 'hvPos', 'lvPos', 'pos', 'side', 'bend'];
-    this.store.transact('Arrange diagram', tx => { for (const el of doc.elements) for (const k of keys) if (k in el && this.store.get(el.id)?.[k] !== el[k]) tx.set(el.id, k, el[k]); });
-    this.viewport.fit();
+  /** Lays the whole diagram out again from the topology, as one undoable step. The layout runs in the calculation
+   * worker, so a national network does not hold the page; an edit made meanwhile wins, and the layout is dropped. */
+  async arrange() {
+    const revision = this.store.revision, unchanged = () => this.store.revision === revision;
+    this.arranging = true;
+    this.commands.changed();
+    this.setStatusMessage('Arranging the diagram…');
+    try {
+      const drawing = await this.engine.layout(this.store.doc, unchanged);
+      if (!drawing || !unchanged()) { toast('info', 'The network changed while it was being arranged. Arrange it again to lay out the new state.'); return; }
+      this.store.transact('Arrange diagram', tx => {
+        for (const d of drawing) {
+          const el = this.store.get(/** @type {string} */ (d.id));
+          if (el) for (const [k, v] of Object.entries(d)) if (k !== 'id' && el[k] !== v) tx.set(el.id, k, v);
+        }
+      });
+      this.viewport.fit();
+      this.setStatusMessage('Arranged the diagram.');
+    } catch (error) {
+      this.log('error', `Could not arrange the diagram: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      this.arranging = false;
+      this.commands.changed();
+      if (this.autoPending) { this.autoPending = false; if (this.resultsStale('loadflow')) this.maybeAutoLoadFlow(); }
+    }
   }
 
   /** @param {number} dx @param {number} dy */
@@ -889,7 +909,8 @@ export class App {
   registerCommands() {
     const c = this.commands;
     const sel = () => this.selection.size > 0;
-    const idle = () => !this.running;
+    // The first worker does one thing at a time: a calculation or an Arrange.
+    const idle = () => !this.running && !this.arranging;
     const tool = (/** @type {Tool} */ t, /** @type {string} */ label, /** @type {string} */ ic, /** @type {string} */ key, /** @type {string} */ hint) =>
       c.add({ id: `tool.${t}`, label, icon: ic, keys: [key], group: t === 'select' || t === 'pan' ? 'Tool' : 'Insert', hint, run: () => this.setTool(this.tool === t && t !== 'select' ? 'select' : t), pressed: () => this.tool === t });
     // File
@@ -923,7 +944,8 @@ export class App {
       c.add({ id: `edit.nudge${key}`, label: `Move ${key.slice(5).toLowerCase()}`, group: 'Edit', keys: [key], palette: false, run: () => this.nudge(dx, dy) });
       c.add({ id: `edit.nudgeFar${key}`, label: `Move ${key.slice(5).toLowerCase()} far`, group: 'Edit', keys: [`Shift+${key}`], palette: false, run: () => this.nudge(dx * 5, dy * 5) });
     }
-    c.add({ id: 'layout.arrange', label: 'Arrange', icon: 'layout', group: 'Edit', hint: 'Lay the diagram out again from the network topology', run: () => this.arrange() });
+    c.add({ id: 'layout.arrange', label: 'Arrange', icon: 'layout', group: 'Edit', hint: 'Lay the diagram out again from the network topology',
+      enabled: () => !this.running && !this.arranging, run: () => { void this.arrange(); } });
     // Tools
     tool('select', 'Select', 'select', 'V', 'Select and move elements');
     tool('pan', 'Pan', 'pan', 'H', 'Drag to move the view; you can also hold Space');

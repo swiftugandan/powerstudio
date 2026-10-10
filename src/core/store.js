@@ -225,7 +225,10 @@ function invert(op) {
   }
 }
 
-const GRAPHIC_KEYS = new Set(['x', 'y', 'len', 'orient', 'fromPos', 'toPos', 'hvPos', 'lvPos', 'pos', 'side', 'bend', 'name']);
+/** Fields that only place an element on the diagram; no calculation reads them. */
+export const DRAWING_KEYS = new Set(['x', 'y', 'len', 'orient', 'fromPos', 'toPos', 'hvPos', 'lvPos', 'pos', 'side', 'bend']);
+/** Fields whose change leaves calculation results current: the drawing and the names. */
+const GRAPHIC_KEYS = new Set([...DRAWING_KEYS, 'name']);
 
 /** @param {string} label @param {Op[]} ops @param {Change['source']} source @returns {Change} */
 function describe(label, ops, source) {

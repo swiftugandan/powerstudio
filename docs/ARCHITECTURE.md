@@ -46,7 +46,9 @@ groups' positions, with repulsion found through a counting-sorted grid of typed 
 by row with the least movement that keeps a margin between bars (pool-adjacent-violators), so regions stay together.
 On ACTIVSg70k the median branch spans 660 drawing units and none crosses a tenth of the drawing; the row packing it
 replaced left a median of 19,840 and 66,000 such branches. 2,000 busbars lay out in about 0.1 s, 10,000 in 0.4 s
-and 70,000 in 2.7 s, in the worker that imports them.
+and 70,000 in 2.7 s, in the worker that imports them; Arrange runs the same layout in the first worker and applies
+the result as one transaction (at 70,000 busbars about 650,000 position changes, 150 ms), dropping it if the network
+changed meanwhile. Position changes are not sent to the engines, which never read them.
 
 **Engine (`engine/`).** A Cargo workspace; `docs/ENGINE.md` describes what it computes.
 

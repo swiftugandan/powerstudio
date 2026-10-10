@@ -15,6 +15,7 @@
  * all-pairs method. */
 
 import { busesOf } from './document.js';
+import { DRAWING_KEYS } from './store.js';
 
 /** @typedef {import('./document.js').PowerDocument} PowerDocument @typedef {import('./catalog.js').Element} Element */
 
@@ -413,3 +414,20 @@ function push(m, k, v) { const a = m.get(k); if (a) a.push(v); else m.set(k, [v]
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 /** @param {number} v */
 const round3 = v => Math.round(v * 1000) / 1000;
+
+/** A document laid out from its JSON text. @param {string} json @returns {import('../core/document.js').PowerDocument} */
+export function laidOut(json) {
+  const doc = JSON.parse(json);
+  autoLayout(doc);
+  return doc;
+}
+
+/** Every element's drawing fields, with its identifier. @param {import('../core/document.js').PowerDocument} doc */
+export function drawingOf(doc) {
+  return doc.elements.map(el => {
+    /** @type {Record<string, unknown>} */
+    const out = { id: el.id };
+    for (const k of DRAWING_KEYS) if (k in el) out[k] = el[k];
+    return out;
+  });
+}
