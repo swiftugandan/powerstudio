@@ -436,7 +436,10 @@ depend on storage order.
 
 ### 9.3 Releases and supply chain
 
-- Reproducible builds checked in CI by building the engine on two runners and comparing `.wasm` hashes.
+- Reproducible builds checked in CI by building the engine in two environments and comparing `.wasm` hashes. Both
+  share the release build's host, Linux on x86_64 (the runner's toolchain, and a digest-pinned container that gives
+  the same environment anywhere): Cargo folds the build host into crate identities, so builds on different hosts
+  differ by design (found when CI first ran, release 1.1).
 - Signed release tags, a CycloneDX software bill of materials for the Rust and JavaScript build dependencies, and
   GitHub artifact attestations for the release files. The published-page checksum check from 0.1 stays.
 - Semantic versioning of the engine and of the project file format, with migrations tested on fixtures from every

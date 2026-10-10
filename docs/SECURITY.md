@@ -37,8 +37,10 @@ device and makes them hard to leak through the app itself.
 - **The passphrase is not stored and cannot be recovered.** A forgotten passphrase loses the encrypted file.
 - **The single file is only as trustworthy as where it came from.** Check a downloaded `PowerStudio.html` against the
   SHA-256 published with each release and the build's GitHub attestation (`gh attestation verify PowerStudio.html
-  --repo swiftugandan/powerstudio`). Releases are reproducible: `scripts/check-reproducible.mjs` and CI's two-system
-  comparison rebuild the engine to the same bytes.
+  --repo swiftugandan/powerstudio`). Releases are reproducible: the engine is built on Linux on x86_64, and
+  `node scripts/build-engine.mjs --container` rebuilds it to the same bytes on any machine with Docker, in the pinned
+  image CI checks it against. (A build on another host, such as a Mac, differs: Cargo folds the build host into
+  crate identities, which changes the order of the functions in the output.)
 - **Browser extensions** can read any page they are allowed on. That is outside what a page can control.
 
 ## Supply chain

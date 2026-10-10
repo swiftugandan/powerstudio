@@ -52,6 +52,7 @@ npm test                  # Node tests: the WebAssembly engine, native and WebAs
 npx playwright install chromium firefox webkit
 npm run test:browser      # Playwright against the built file over HTTP: Chromium (WebGPU, Canvas 2D), Firefox, WebKit
 node scripts/check-reproducible.mjs   # builds the engine again elsewhere and requires the same bytes
+node scripts/build-engine.mjs --container   # builds the engine as releases are built (Linux x86_64, in Docker)
 node scripts/sbom.mjs     # writes the CycloneDX bill of materials, dist/PowerStudio.cdx.json
 ```
 

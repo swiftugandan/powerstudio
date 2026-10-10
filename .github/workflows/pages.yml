@@ -64,11 +64,13 @@ jobs:
           if-no-files-found: ignore
 
   reproducible:
-    # The engine must build to the same bytes on two operating systems, and again from another place on each.
+    # The engine must build to the same bytes in two environments that share the release build's host (Linux on
+    # x86_64): the runner's own toolchain, built again from another place, and the pinned container. Builds on other
+    # hosts differ by design (scripts/build-engine.mjs explains why).
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        environment: [runner, container]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
@@ -77,17 +79,20 @@ jobs:
         with:
           node-version: 22
       - name: Rust toolchain (pinned by engine/rust-toolchain.toml)
+        if: matrix.environment == 'runner'
         working-directory: engine
         run: rustup toolchain install
-      - name: Build the engine (WebAssembly)
-        run: node scripts/build-engine.mjs
-      - name: Build it again from a copy, with a fresh cargo home and target directory
-        run: node scripts/check-reproducible.mjs
-      - run: cp src/engine/powerstudio-engine.wasm.sha256 engine-${{ matrix.os }}.sha256
+      - name: Build the engine (WebAssembly) with the runner's toolchain, and again from a copy
+        if: matrix.environment == 'runner'
+        run: node scripts/build-engine.mjs && node scripts/check-reproducible.mjs
+      - name: Build the engine (WebAssembly) in the pinned container
+        if: matrix.environment == 'container'
+        run: node scripts/build-engine.mjs --container
+      - run: cp src/engine/powerstudio-engine.wasm.sha256 engine-${{ matrix.environment }}.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: engine-hash-${{ matrix.os }}
-          path: engine-${{ matrix.os }}.sha256
+          name: engine-hash-${{ matrix.environment }}
+          path: engine-${{ matrix.environment }}.sha256
 
   reproducible-compare:
     needs: reproducible
@@ -97,11 +102,11 @@ jobs:
         with:
           pattern: engine-hash-*
           merge-multiple: true
-      - name: The builds on both systems are identical
+      - name: The runner's build and the container's are identical
         run: |
           cat engine-*.sha256
           test "$(cut -d' ' -f1 engine-*.sha256 | sort -u | wc -l)" -eq 1
-          echo "### Reproducible engine: $(cut -d' ' -f1 engine-ubuntu-latest.sha256) on Ubuntu and macOS" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Reproducible engine: $(cut -d' ' -f1 engine-runner.sha256), on the runner and in the pinned container" >> "$GITHUB_STEP_SUMMARY"
 
   build:
     needs: [test, reproducible-compare]

@@ -312,7 +312,11 @@ compares the published `/app/` and `PowerStudio.html` against the build's SHA-25
 
 The engine build is reproducible: `scripts/build-engine.mjs` remaps the cargo registry and checkout paths that panic
 locations would embed, and `scripts/check-reproducible.mjs` builds again from a copy elsewhere with a fresh cargo home
-and requires the same bytes; CI compares builds on Ubuntu and macOS. `scripts/sbom.mjs` writes the CycloneDX bill of
+and requires the same bytes. The build host cannot be taken out of the bytes: Cargo folds the host's target triple
+into the identity of build scripts and proc-macros, which reaches every crate's symbol hashes and so the order of the
+functions in the output, so a Mac and a Linux machine build different bytes from the same commit. Releases are built
+on Linux on x86_64; `build-engine.mjs --container` gives that environment anywhere Docker runs (a digest-pinned Rust
+image), and CI requires the runner's own build and the container's to be identical. `scripts/sbom.mjs` writes the CycloneDX bill of
 materials. A tag runs `.github/workflows/release.yml`, which builds, checks, attests and drafts the release.
 
 ## Testing

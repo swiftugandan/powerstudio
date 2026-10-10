@@ -4,6 +4,20 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## The first CI run, and reproducibility across hosts (2026-10-10)
+
+The first push ran CI for the first time. Two checks failed. The routing test's time bound (400 ms) failed at 777 ms on
+a runner that runs the test files side by side; the bound now only catches a search that stops scaling, and the
+200 ms budget is the development machine's measurement. The comparison of the engine built on Ubuntu (x86_64) and on
+macOS (Arm) failed: the bytes differ, and an Arm Linux build in a container differs from both. The difference is not
+paths, which are remapped, but the build host: Cargo folds the host's target triple into the identity of build
+scripts and proc-macros (as an OpenEmbedded patch series and a Rust internals thread describe), which changes every
+crate's symbol hashes and with them the order of 852 of the engine's 2,021 functions. The claim that the engine
+builds to the same bytes on two operating systems was never true; the local check only varied the path. Releases are
+now defined as Linux x86_64 builds, `build-engine.mjs --container` reproduces them on any machine with Docker in a
+digest-pinned image, and CI compares the runner's build with the container's. The engine is now also built with its
+symbols stripped, which takes 232 KiB off the app.
+
 ## Navigation, CAD phase C4, and release 1.1.0 (2026-10-10, local, branch `cad`)
 
 | Check | Result |
