@@ -1,7 +1,8 @@
 /** The data manager: every element of one class as a spreadsheet, the way engineers edit national models.
  *
  * Columns come from the catalogue's field specs (`src/core/catalog.js`), as in the inspector, and every change goes
- * through `store.transact` with the same validation, so undo, autosave and the calculation workers follow. Rows are
+ * through `store.transact`, whose `Tx.set` applies the catalogue's ranges and connection rules to the sheet and the
+ * inspector alike; undo, autosave and the calculation workers follow. Rows are
  * filtered by text and sorted by any column, and the table is virtual: only the rows in view are in the page.
  *
  * Editing: double-click a cell, press Enter or F2, or start typing; Enter or Tab commits, Escape cancels. With several
@@ -11,7 +12,7 @@
  * the elements on the diagram. */
 
 import { h } from './dom.js';
-import { CLASSES, CLASS_ORDER } from '../core/catalog.js';
+import { CLASSES, CLASS_ORDER, checkValue } from '../core/catalog.js';
 import { enumLabel } from './fields.js';
 import { editable, parseNumber } from './format.js';
 
@@ -453,8 +454,13 @@ export class DataSheet {
         const who = row.name || row.id;
         if (c === ID) { if (v.trim() && v.trim() !== row.id) throw new Error(`${who}: identifiers cannot be changed here.`); return; }
         if (c.when && !c.when(row)) return;
-        try { writes.push({ id: row.id, c, value: this.parse(c, v) }); }
+        let value;
+        try { value = this.parse(c, v); }
         catch (error) { throw new Error(`${who}: ${error instanceof Error ? error.message : error}`); }
+        // The ranges are checked here too, so a refusal names the element; Tx.set checks everything again.
+        const bad = c.type === 'bus' && value === '' ? '' : checkValue(c, value);
+        if (bad) throw new Error(`${who}: ${bad}`);
+        writes.push({ id: row.id, c, value });
       }));
     } catch (error) {
       this.app.toast('error', error instanceof Error ? error.message : String(error), { title: 'Nothing was pasted' });

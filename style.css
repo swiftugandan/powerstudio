@@ -498,6 +498,7 @@ table.grid td.muted { color: var(--text-3); }
 .sheet-hint { color: var(--text-3); font-size: 11.5px; }
 table.grid.sheet { width: max-content; min-width: 100%; }
 table.grid.sheet:focus { outline: none; }
+table.grid.sheet td { user-select: none; }
 table.grid.sheet th.sticky, table.grid.sheet td.sticky { position: sticky; left: 0; border-right: 1px solid var(--border); }
 table.grid.sheet th.sticky { z-index: 2; }
 table.grid.sheet td.sticky { z-index: 1; background: var(--surface); font-family: var(--mono); font-size: 11.5px; color: var(--text-2); }
