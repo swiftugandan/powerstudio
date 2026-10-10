@@ -5,6 +5,8 @@
 
 /** @type {Promise<WebAssembly.Module> | null} */
 let compiled = null;
+/** SHA-256 of the module's bytes, as run records cite it ('' where WebCrypto is unavailable). */
+let digest = '';
 
 /** The engine's compiled module. */
 export function engineModule() {
@@ -12,14 +14,29 @@ export function engineModule() {
   return compiled;
 }
 
+/** SHA-256 of the engine's WebAssembly, once it has loaded. */
+export async function engineDigest() {
+  await engineModule();
+  return digest;
+}
+
 async function load() {
+  const bytes = await read();
+  try {
+    digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch { digest = ''; }
+  return WebAssembly.compile(bytes);
+}
+
+/** The module's bytes, from the single-file build or the source tree. @returns {Promise<ArrayBuffer>} */
+async function read() {
   const embedded = /** @type {{ __POWERSTUDIO_ENGINE__?: string }} */ (globalThis).__POWERSTUDIO_ENGINE__;
   if (embedded) {
     const packed = Uint8Array.from(atob(embedded), ch => ch.charCodeAt(0));
     const stream = new Blob([packed]).stream().pipeThrough(new DecompressionStream('gzip'));
-    return WebAssembly.compile(await new Response(stream).arrayBuffer());
+    return new Response(stream).arrayBuffer();
   }
   const response = await fetch('./src/engine/powerstudio-engine.wasm');
   if (!response.ok) throw new Error('The calculation engine is missing: run npm run build:engine.');
-  return WebAssembly.compile(await response.arrayBuffer());
+  return response.arrayBuffer();
 }

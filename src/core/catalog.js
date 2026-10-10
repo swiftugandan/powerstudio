@@ -10,10 +10,12 @@
  * @typedef {{
  *   key: string, label: string, type: FieldType, group: FieldGroup, default: unknown,
  *   unit?: string, min?: number, max?: number, exclusiveMin?: boolean, options?: readonly string[], help?: string,
- *   symbol?: string, optional?: string, when?: (el: Record<string, unknown>) => boolean,
+ *   symbol?: string, optional?: string, when?: (el: Record<string, unknown>) => boolean, operating?: boolean,
  * }} FieldSpec
  * `optional` lets a busbar field be empty and names that choice ("Own busbar"); `when` shows a field only when it
- * applies to the element's other values (a control's target only while the control is on).
+ * applies to the element's other values (a control's target only while the control is on). `operating` marks a value
+ * of the operating point (switching state, setpoints, loads, generation, taps), which a scenario may set; every other
+ * field describes the equipment as built.
  * @typedef {'bus' | 'line' | 'trafo' | 'gen' | 'extgrid' | 'load' | 'shunt'} ElementClass
  * @typedef {{ cls: ElementClass, label: string, plural: string, prefix: string, kind: 'node' | 'branch' | 'shunt',
  *   ends: readonly string[], fields: readonly FieldSpec[] }} ClassSpec
@@ -28,7 +30,7 @@ const int = (key, label, def, extra = {}) => ({ key, label, type: 'integer', gro
 const bus = (key, label) => ({ key, label, type: 'bus', group: 'basic', default: '' });
 /** A busbar field that may be empty. @param {string} key @param {string} label @param {string} empty @param {Partial<FieldSpec>} [extra] @returns {FieldSpec} */
 const optionalBus = (key, label, empty, extra = {}) => ({ key, label, type: 'bus', group: 'loadflow', default: '', optional: empty, ...extra });
-const inService = /** @type {FieldSpec} */ ({ key: 'inService', label: 'In service', type: 'bool', group: 'basic', default: true });
+const inService = /** @type {FieldSpec} */ ({ key: 'inService', label: 'In service', type: 'bool', group: 'basic', default: true, operating: true });
 const name = /** @type {FieldSpec} */ ({ key: 'name', label: 'Name', type: 'string', group: 'basic', default: '' });
 /** Position of a connection along its bus bar, from -0.5 (start) to 0.5 (end). @param {string} key @param {string} label */
 const attach = (key, label) => num(key, label, 0, { group: 'graphic', min: -0.5, max: 0.5, help: 'Position along the bus bar, from -0.5 (start) to 0.5 (end).' });
@@ -95,17 +97,17 @@ export const CLASSES = {
       num('tapStep', 'Tap step (HV side)', 1.25, { unit: '%', group: 'loadflow', when: el => el.tapKind !== 'phase' }),
       num('phaseStep', 'Phase shift per step', 1, { unit: '°', group: 'loadflow', min: -30, max: 30, when: el => el.tapKind === 'phase',
         help: 'How far each position beyond neutral makes the LV side lag.' }),
-      int('tapPos', 'Tap position', 0, { group: 'loadflow' }),
+      int('tapPos', 'Tap position', 0, { group: 'loadflow', operating: true }),
       int('tapNeutral', 'Neutral position', 0, { group: 'loadflow' }),
       int('tapMin', 'Lowest position', -9, { group: 'loadflow' }),
       int('tapMax', 'Highest position', 9, { group: 'loadflow' }),
-      { key: 'tapControl', label: 'Automatic tap control', type: 'bool', group: 'loadflow', default: false,
+      { key: 'tapControl', label: 'Automatic tap control', type: 'bool', group: 'loadflow', default: false, operating: true,
         help: 'Moves the taps in the load flow when the study case lets tap changers or phase shifters regulate.' },
       optionalBus('ctrlBus', 'Regulated busbar', 'LV busbar', { when: el => !!el.tapControl && el.tapKind !== 'phase' }),
-      num('vTarget', 'Voltage target', 1, { unit: 'p.u.', group: 'loadflow', min: 0.5, max: 1.5, when: el => !!el.tapControl && el.tapKind !== 'phase' }),
+      num('vTarget', 'Voltage target', 1, { unit: 'p.u.', group: 'loadflow', min: 0.5, max: 1.5, operating: true, when: el => !!el.tapControl && el.tapKind !== 'phase' }),
       num('vBand', 'Dead band', 2, { unit: '%', group: 'loadflow', min: 0, max: 20, when: el => !!el.tapControl && el.tapKind !== 'phase',
         help: 'Full width of the band the voltage may lie in without a tap change, % of the busbar\'s nominal voltage.' }),
-      num('pTarget', 'Active power target', 0, { unit: 'MW', group: 'loadflow', when: el => !!el.tapControl && el.tapKind === 'phase',
+      num('pTarget', 'Active power target', 0, { unit: 'MW', group: 'loadflow', operating: true, when: el => !!el.tapControl && el.tapKind === 'phase',
         help: 'Active power into the transformer at its HV winding.' }),
       num('pBand', 'Dead band', 5, { unit: 'MW', group: 'loadflow', min: 0, when: el => !!el.tapControl && el.tapKind === 'phase',
         help: 'Full width of the band the flow may lie in without a tap change.' }),
@@ -121,9 +123,9 @@ export const CLASSES = {
       name, bus('bus', 'Busbar'), inService,
       { key: 'mode', label: 'Control mode', type: 'enum', group: 'loadflow', default: 'PV', options: GEN_MODES,
         help: 'PV holds active power and voltage. PQ holds active and reactive power. Reference sets the angle and balances the system.' },
-      num('p', 'Active power', 50, { unit: 'MW', group: 'loadflow', symbol: 'P' }),
-      num('q', 'Reactive power (PQ mode)', 0, { unit: 'Mvar', group: 'loadflow', symbol: 'Q', when: el => el.mode === 'PQ' }),
-      num('vset', 'Voltage setpoint', 1.0, { unit: 'p.u.', min: 0.5, max: 1.5, group: 'loadflow', when: el => el.mode !== 'PQ' }),
+      num('p', 'Active power', 50, { unit: 'MW', group: 'loadflow', symbol: 'P', operating: true }),
+      num('q', 'Reactive power (PQ mode)', 0, { unit: 'Mvar', group: 'loadflow', symbol: 'Q', operating: true, when: el => el.mode === 'PQ' }),
+      num('vset', 'Voltage setpoint', 1.0, { unit: 'p.u.', min: 0.5, max: 1.5, group: 'loadflow', operating: true, when: el => el.mode !== 'PQ' }),
       optionalBus('regBus', 'Regulated busbar', 'Own busbar', { when: el => el.mode !== 'PQ',
         help: 'The busbar whose voltage the machine holds. Machines regulating one busbar share its reactive power.' }),
       num('angle', 'Voltage angle (reference)', 0, { unit: '°', group: 'loadflow', when: el => el.mode === 'Reference' }),
@@ -150,8 +152,8 @@ export const CLASSES = {
     cls: 'extgrid', label: 'External grid', plural: 'External grids', prefix: 'X', kind: 'shunt', ends: ['bus'],
     fields: [
       name, bus('bus', 'Busbar'), inService,
-      num('vset', 'Voltage setpoint', 1.0, { unit: 'p.u.', min: 0.5, max: 1.5, group: 'loadflow' }),
-      num('angle', 'Voltage angle', 0, { unit: '°', group: 'loadflow' }),
+      num('vset', 'Voltage setpoint', 1.0, { unit: 'p.u.', min: 0.5, max: 1.5, group: 'loadflow', operating: true }),
+      num('angle', 'Voltage angle', 0, { unit: '°', group: 'loadflow', operating: true }),
       num('skMax', 'Short-circuit power max', 5000, { unit: 'MVA', min: 0, exclusiveMin: true, group: 'shortcircuit', symbol: 'Sk″max' }),
       num('skMin', 'Short-circuit power min', 4000, { unit: 'MVA', min: 0, exclusiveMin: true, group: 'shortcircuit', symbol: 'Sk″min' }),
       num('rxMax', 'R/X ratio max', 0.1, { min: 0, group: 'shortcircuit' }),
@@ -166,8 +168,8 @@ export const CLASSES = {
     cls: 'load', label: 'Load', plural: 'Loads', prefix: 'D', kind: 'shunt', ends: ['bus'],
     fields: [
       name, bus('bus', 'Busbar'), inService,
-      num('p', 'Active power', 10, { unit: 'MW', group: 'loadflow', symbol: 'P', help: 'At nominal voltage.' }),
-      num('q', 'Reactive power', 3, { unit: 'Mvar', group: 'loadflow', symbol: 'Q', help: 'At nominal voltage.' }),
+      num('p', 'Active power', 10, { unit: 'MW', group: 'loadflow', symbol: 'P', operating: true, help: 'At nominal voltage.' }),
+      num('q', 'Reactive power', 3, { unit: 'Mvar', group: 'loadflow', symbol: 'Q', operating: true, help: 'At nominal voltage.' }),
       num('pZ', 'Constant impedance share of P', 0, { unit: '%', group: 'loadflow', min: 0, max: 100,
         help: 'The share of the active power that varies with the voltage squared; constant current varies with the voltage, and the rest is constant power.' }),
       num('pI', 'Constant current share of P', 0, { unit: '%', group: 'loadflow', min: 0, max: 100 }),
@@ -184,12 +186,12 @@ export const CLASSES = {
       num('q', 'Reactive power per section', 10, { unit: 'Mvar', group: 'loadflow', help: 'At rated voltage. Positive for a capacitor, negative for a reactor.' }),
       num('p', 'Active losses per section', 0, { unit: 'MW', min: 0, group: 'loadflow' }),
       num('vn', 'Rated voltage', 110, { unit: 'kV', min: 0, exclusiveMin: true }),
-      int('sections', 'Sections in service', 1, { group: 'loadflow', min: 0 }),
+      int('sections', 'Sections in service', 1, { group: 'loadflow', min: 0, operating: true }),
       int('maxSections', 'Sections installed', 1, { group: 'loadflow', min: 1 }),
-      { key: 'vControl', label: 'Automatic voltage control', type: 'bool', group: 'loadflow', default: false,
+      { key: 'vControl', label: 'Automatic voltage control', type: 'bool', group: 'loadflow', default: false, operating: true,
         help: 'Switches sections in the load flow when the study case lets switched shunts regulate.' },
       optionalBus('ctrlBus', 'Regulated busbar', 'Own busbar', { when: el => !!el.vControl }),
-      num('vTarget', 'Voltage target', 1, { unit: 'p.u.', group: 'loadflow', min: 0.5, max: 1.5, when: el => !!el.vControl }),
+      num('vTarget', 'Voltage target', 1, { unit: 'p.u.', group: 'loadflow', min: 0.5, max: 1.5, operating: true, when: el => !!el.vControl }),
       num('vBand', 'Dead band', 2, { unit: '%', group: 'loadflow', min: 0, max: 20, when: el => !!el.vControl,
         help: 'Full width of the band the voltage may lie in without switching, % of the busbar\'s nominal voltage.' }),
       attach('pos', 'Connection'),

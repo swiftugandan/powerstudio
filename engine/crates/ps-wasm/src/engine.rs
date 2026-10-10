@@ -6,7 +6,7 @@
 //! | `op` | Header fields | Payload | Reply |
 //! | --- | --- | --- | --- |
 //! | `version` | | | `engine` version |
-//! | `study` | `kind`, `options`, `resident` (use the open document) | PowerStudio document (JSON text); none for `contingency_merge` or with `resident` | the report as JSON text |
+//! | `study` | `kind`, `options`, `resident` (use the open document), `record` (hash the inputs and the report) | PowerStudio document (JSON text); none for `contingency_merge` or with `resident` | the report as JSON text; with `record`, the header's `record` holds the `engine` version and the SHA-256 of the `model`, the `study` case and the `results` |
 //! | `doc_open` | | PowerStudio document (JSON text) | `elements` |
 //! | `doc_edit` | `ops`: the editor's operations (see `ps_io::powerstudio_edit`) | | `elements` |
 //! | `load_matpower` | | MATPOWER case text | model size and conversion issues |
@@ -69,6 +69,20 @@ pub struct Engine {
     open: Option<Open>,
     model: Option<ps_model::Model>,
     session: api::Session,
+}
+
+/// A report without its `timing` fields, which measure the machine rather than the result.
+fn without_timing(v: &Value) -> Value {
+    match v {
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .filter(|(k, _)| k.as_str() != "timing")
+                .map(|(k, x)| (k.clone(), without_timing(x)))
+                .collect(),
+        ),
+        Value::Array(a) => Value::Array(a.iter().map(without_timing).collect()),
+        other => other.clone(),
+    }
 }
 
 /// The document the editor has open, and its conversion since the last edit.
@@ -152,23 +166,33 @@ impl Engine {
                     .ok_or("the study request has no kind")?;
                 let opts = req.header.get("options").cloned().unwrap_or(Value::Null);
                 let resident = req.header.get("resident").and_then(Value::as_bool).unwrap_or(false);
-                let (report, issues) = if kind == "contingency_merge" {
-                    (api::handle(kind, &opts, None, &mut self.session, progress)?, Vec::new())
+                let record = req.header.get("record").and_then(Value::as_bool).unwrap_or(false);
+                let (loaded, issues) = if kind == "contingency_merge" {
+                    (None, Vec::new())
                 } else if resident {
                     let (loaded, issues) = self.open.as_mut().ok_or("no document is open")?.loaded()?;
-                    (
-                        api::handle(kind, &opts, Some(loaded), &mut self.session, progress)?,
-                        issues.clone(),
-                    )
+                    (Some(loaded), issues.clone())
                 } else {
                     self.load_document(&req.payload)?;
                     let (_, doc, issues) = self.document.as_ref().ok_or("no document")?;
-                    (
-                        api::handle(kind, &opts, Some(doc), &mut self.session, progress)?,
-                        issues.clone(),
-                    )
+                    (Some(doc), issues.clone())
                 };
-                Ok(ok(json!({ "issues": issues }), report.to_string().into_bytes()))
+                let value = api::handle(kind, &opts, loaded, &mut self.session, progress)?;
+                let report = value.to_string().into_bytes();
+                let mut header = json!({ "issues": issues });
+                if record {
+                    // The run record's hashes: the model as calculated (not how it is drawn), the study case, and the
+                    // report without its timings, which the engine's determinism makes reproducible.
+                    let results = ps_model::sha256_hex(without_timing(&value).to_string().as_bytes());
+                    let mut hashes = json!({ "engine": env!("CARGO_PKG_VERSION"), "results": results });
+                    if let Some(l) = loaded {
+                        hashes["model"] = json!(l.model.content_hash().map_err(|e| e.to_string())?);
+                        let study = serde_json::to_vec(&l.study).map_err(|e| e.to_string())?;
+                        hashes["study"] = json!(ps_model::sha256_hex(&study));
+                    }
+                    header["record"] = hashes;
+                }
+                Ok(ok(header, report))
             }
             "doc_open" => {
                 let text = std::str::from_utf8(&req.payload).map_err(|_| "the document is not UTF-8 text")?;

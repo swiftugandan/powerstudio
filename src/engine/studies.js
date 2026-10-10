@@ -40,18 +40,24 @@ export function engineOptions(kind, options) {
  * @param {EngineHost} engine @param {string} kind @param {PowerDocument | null} doc @param {Record<string, any>} options
  * @param {OnProgress} [onProgress]
  */
-export function request(engine, kind, doc, options, onProgress) {
+export function request(engine, kind, doc, options, onProgress) { return study(engine, kind, doc, options, onProgress).payload; }
+
+/**
+ * One engine study request, returning the whole reply: on `doc`, or on the document the engine holds open when `doc`
+ * is null and `resident` is set; with `record` the reply's header carries the run record's hashes.
+ * @param {EngineHost} engine @param {string} kind @param {PowerDocument | null} doc @param {Record<string, any>} options
+ * @param {OnProgress} [onProgress] @param {{ resident?: boolean, record?: boolean }} [flags]
+ */
+export function study(engine, kind, doc, options, onProgress, flags = {}) {
   const payload = doc ? textPayload(JSON.stringify(doc)) : undefined;
-  return engine.call({ op: 'study', kind, options: engineOptions(kind, options) }, payload, onProgress).payload;
+  return engine.call({ op: 'study', kind, options: engineOptions(kind, options), ...flags }, payload, onProgress);
 }
 
 /**
  * Runs one engine request on the document the engine holds open (`openDocument`), and returns the raw JSON report.
  * @param {EngineHost} engine @param {string} kind @param {Record<string, any>} options @param {OnProgress} [onProgress]
  */
-export function requestOpen(engine, kind, options, onProgress) {
-  return engine.call({ op: 'study', kind, options: engineOptions(kind, options), resident: true }, undefined, onProgress).payload;
-}
+export function requestOpen(engine, kind, options, onProgress) { return study(engine, kind, null, options, onProgress, { resident: true }).payload; }
 
 /** Gives the engine a document to hold open, as JSON text. @param {EngineHost} engine @param {string} json */
 export function openDocument(engine, json) { engine.call({ op: 'doc_open' }, textPayload(json)); }

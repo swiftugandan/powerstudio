@@ -19,7 +19,7 @@ mod wiring;
 
 pub use equipment::*;
 pub use ops::{Element, Op, OpError};
-pub use snapshot::{SNAPSHOT_MAGIC, SNAPSHOT_VERSION, SnapshotError};
+pub use snapshot::{SNAPSHOT_MAGIC, SNAPSHOT_VERSION, SnapshotError, sha256_hex};
 pub use validate::{Issue, Severity};
 pub use wiring::Wiring;
 

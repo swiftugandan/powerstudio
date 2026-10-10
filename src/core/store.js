@@ -78,6 +78,10 @@ export class DocumentStore {
     this.emit(describe(label, tx.ops, 'edit'));
   }
 
+  /** Forgets undo and redo, as opening a document does: after the destination of edits changed, undoing one must not
+   * route its reversal somewhere else. */
+  clearHistory() { this.past = []; this.future = []; }
+
   get canUndo() { return this.past.length > 0; }
   get canRedo() { return this.future.length > 0; }
   get undoLabel() { return this.past[this.past.length - 1]?.label ?? ''; }

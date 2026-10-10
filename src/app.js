@@ -6,6 +6,7 @@ import { emptyDocument, nextId, normalizeSteps, validateForCalculation, busesOf 
 import { makeElement, CLASSES } from './core/catalog.js';
 import { snap } from './core/layout.js';
 import { SAMPLES } from './samples/index.js';
+import { projectFromDocument, projectFromParts, composeSteps, route, partTexts, allParts, activeCase } from './core/project.js';
 import { Commands } from './ui/commands.js';
 import { Ribbon } from './ui/ribbon.js';
 import { ModelTree } from './ui/tree.js';
@@ -13,6 +14,7 @@ import { Inspector } from './ui/inspector.js';
 import { Dock } from './ui/dock.js';
 import { Viewport } from './ui/viewport.js';
 import { EngineClient, CancelledError } from './ui/engine-client.js';
+import { engineDigest } from './engine/module.js';
 import { savePrefs, newDocId, serialise } from './ui/persistence.js';
 import { applyTheme, readPalette } from './ui/theme.js';
 import { buildOverlay } from './ui/overlay.js';
@@ -48,6 +50,10 @@ export class App {
     this.rendererPreference = opt.renderer;
     this.store = new DocumentStore(emptyDocument());
     this.docId = '';
+    /** The open project, and its parts edited since the last save. @type {import('./core/project.js').Project} */
+    this.project = projectFromDocument(this.store.doc);
+    /** @type {Set<import('./core/project.js').Part>} */
+    this.dirtyParts = new Set();
     /** Where the next load flow starts: the last converged solution, or an imported network's voltages (see calc).
      * @type {import('./engine/reports.js').StartVoltages | null} */
     this.start = null;
@@ -161,9 +167,24 @@ export class App {
 
   // ----- Documents -----
 
-  /** Loads a document into the editor. @param {PowerDocument} doc @param {string} id */
-  load(doc, id) {
+  /**
+   * Opens a project: the editor gets its active study case's composition, built in slices so a national network does
+   * not hold the page. A `fresh` project (new, a sample, an import) has every part to save.
+   * @param {import('./core/project.js').Project} project @param {string} id @param {{ fresh?: boolean }} [opt]
+   */
+  async open(project, id, opt = {}) {
     this.flushSave();
+    const doc = await this.sliced(composeSteps(project));
+    this.project = project;
+    this.dirtyParts = new Set(opt.fresh ? allParts(project) : []);
+    this.load(doc, id);
+  }
+
+  /**
+   * Puts a composed document in the editor, clearing results, selection and history.
+   * @param {PowerDocument} doc @param {string} id @param {{ keepView?: boolean }} [opt]
+   */
+  load(doc, id, opt = {}) {
     this.docId = id;
     this.prefs.lastDoc = id;
     this.savePrefs();
@@ -175,17 +196,16 @@ export class App {
     this.setTool('select');
     this.store.load(doc);
     this.start = null;
-    this.viewport.fit();
+    if (!opt.keepView) this.viewport.fit();
     this.refreshLegend();
     this.dock.render();
-    this.markSaved();
+    if (!this.dirtyParts.size) this.markSaved();
+    this.commands.changed();
   }
 
-  newDocument() {
-    const doc = emptyDocument('Untitled network');
-    const id = newDocId();
-    this.load(doc, id);
-    this.save();
+  async newDocument() {
+    await this.open(projectFromDocument(emptyDocument('Untitled network')), newDocId(), { fresh: true });
+    await this.save();
     this.log('info', 'New network. Insert busbars from the Insert tab or press B.');
     this.ribbon.select('insert');
   }
@@ -194,15 +214,63 @@ export class App {
   async openSample(sampleId, opt = {}) {
     const s = SAMPLES.find(x => x.id === sampleId);
     if (!s) return;
-    this.load(s.create(), newDocId());
+    await this.open(projectFromDocument(s.create()), newDocId(), { fresh: true });
     await this.save();
     if (!opt.quiet) this.log('info', `Opened the sample “${s.title}”. It is a copy; the original is always available from File.`);
   }
 
+  // ----- Project -----
+
+  /** Puts the active study case's composition in the editor again, after its scenario or variants changed: results and
+   * undo history clear, the view stays. */
+  async recompose() {
+    const doc = await this.sliced(composeSteps(this.project));
+    this.load(doc, this.docId, { keepView: true });
+    this.scheduleSave();
+  }
+
+  /** Makes a study case active. @param {string} id */
+  async switchCase(id) {
+    const p = this.project;
+    if (id === p.activeCase || !p.cases.some(c => c.id === id)) return;
+    p.activeCase = id;
+    if (!activeCase(p).variants.includes(p.recording)) p.recording = '';
+    this.dirtyParts.add('manifest');
+    await this.recompose();
+    this.log('info', `Study case “${activeCase(p).name}”.`);
+  }
+
+  /** Where edits to the equipment go: the base model ('') or a variant of the active study case. Undo history clears,
+   * so an undo never lands somewhere else than its edit did. @param {string} id */
+  setRecording(id) {
+    const p = this.project;
+    p.recording = activeCase(p).variants.includes(id) ? id : '';
+    this.store.clearHistory();
+    this.dirtyParts.add('manifest');
+    this.scheduleSave();
+    this.commands.changed();
+    this.updateProjectBar();
+  }
+
+  /** After the project page changed the project: saves the parts it names, and recomposes when the active case's
+   * composition changed. @param {Iterable<import('./core/project.js').Part>} parts @param {boolean} recompose */
+  async projectChanged(parts, recompose) {
+    for (const part of parts) this.dirtyParts.add(part);
+    if (!activeCase(this.project).variants.includes(this.project.recording)) this.project.recording = '';
+    if (recompose) await this.recompose(); else this.scheduleSave();
+    this.updateProjectBar();
+  }
+
+  /** Shows the active study case and where edits go in the title bar. */
+  updateProjectBar() {}
+
   /** The import gate (`normalizeDocument`), run in slices of about 25 ms so a national network does not hold the page.
    * @param {unknown} input @returns {Promise<{ doc: import('./core/document.js').PowerDocument, issues: string[] }>} */
-  async normalize(input) {
-    const steps = normalizeSteps(input);
+  normalize(input) { return this.sliced(normalizeSteps(input)); }
+
+  /** Runs a generator to its end in slices of about 25 ms, yielding to the browser between them.
+   * @template T @param {Generator<void, T, void>} steps @returns {Promise<T>} */
+  async sliced(steps) {
     for (;;) {
       const t0 = performance.now();
       let r = steps.next();
@@ -218,7 +286,7 @@ export class App {
       const rec = await this.library.get(id);
       if (!rec) return false;
       const { doc, issues } = await this.normalize(rec.doc);
-      this.load(doc, id);
+      await this.open(projectFromParts(doc, await this.library.parts(id)), id);
       for (const i of issues) this.log('warn', i);
       if (!opt.quiet) this.log('info', `Opened “${doc.name}”.`);
       return true;
@@ -242,15 +310,26 @@ export class App {
   async save(opt = {}) {
     clearTimeout(this.saveTimer);
     this.saveTimer = 0;
-    const doc = this.store.doc, revision = this.store.revision, id = this.docId;
+    const project = this.project, revision = this.store.revision, id = this.docId, elements = this.store.doc.elements.length;
+    const parts = this.dirtyParts;
+    if (!parts.size) return;
+    this.dirtyParts = new Set();
+    // Parts a later change makes dirty again are saved by the save that change schedules.
+    const keep = () => { for (const p of parts) this.dirtyParts.add(p); };
     try {
-      const json = opt.now ? JSON.stringify(doc) : await serialise(doc, () => this.store.doc === doc && this.store.revision === revision, yieldToBrowser);
-      if (json === null) return;
-      await this.library.put(id, doc.name, doc.elements.length, json);
-      if (this.store.revision === revision) this.markSaved();
+      if (parts.has('base')) {
+        const base = project.base;
+        const json = opt.now ? JSON.stringify(base) : await serialise(base, () => this.project === project && this.store.revision === revision, yieldToBrowser);
+        if (json === null) { keep(); return; }
+        await this.library.put(id, base.name, elements, json);
+      }
+      const rest = partTexts(project, parts);
+      if (rest.length) await this.library.putParts(id, rest);
+      if (this.store.revision === revision && !this.dirtyParts.size) this.markSaved();
     } catch (error) {
+      keep();
       this.setSaveState('pending', 'Not saved');
-      this.log('error', `Saving in this browser failed: ${error instanceof Error ? error.message : error}. Export the network to keep it.`);
+      this.log('error', `Saving in this browser failed: ${error instanceof Error ? error.message : error}. Export the project to keep it.`);
     }
   }
 
@@ -260,7 +339,7 @@ export class App {
     this.saveTimer = window.setTimeout(() => this.save(), 400);
   }
 
-  flushSave() { if (this.saveTimer) this.save({ now: true }); }
+  flushSave() { if (this.saveTimer || this.dirtyParts.size) this.save({ now: true }); }
 
   markSaved() { this.setSaveState('saved', this.library.persistent ? 'Saved in this browser' : 'Kept for this session'); }
 
@@ -294,7 +373,7 @@ export class App {
         let json;
         try { json = JSON.parse(await files[0].text()); } catch { throw new Error('The file is not valid JSON.'); }
         const { doc, issues } = await this.normalize(json);
-        this.load(doc, newDocId());
+        await this.open(projectFromDocument(doc), newDocId(), { fresh: true });
         await this.save();
         this.log('ok', `Imported “${label}” as “${doc.name}” with ${doc.elements.length} elements.`);
         for (const i of issues) this.log('warn', i);
@@ -308,7 +387,7 @@ export class App {
       if (!(await importDialog(summary, files.map(f => f.name)))) { this.log('info', `Import of “${label}” cancelled.`); return; }
       // The engine's document passes the same gate as any file; it should need no changes.
       const { doc, issues } = await this.normalize(raw);
-      this.load(doc, newDocId());
+      await this.open(projectFromDocument(doc), newDocId(), { fresh: true });
       this.start = summary.fidelity.start.busIds.length ? summary.fidelity.start : null;
       await this.save();
       const z = summary.size;
@@ -349,6 +428,8 @@ export class App {
     // The calculation workers keep their own copies of the document.
     if (change.source === 'load') this.engine.setDocument(this.store.doc); else this.engine.applyOps(change.ops);
     if (change.source === 'load') this.dock.sheet.reset();
+    // Every edit lands in its part of the project: the base, a variant, the scenario or the study case.
+    else for (const part of route(this.project, change.ops)) this.dirtyParts.add(part);
     if (change.network || change.study) this.networkRevision++;
     for (const id of [...this.selection]) if (!this.store.get(id)) this.selection.delete(id);
     const name = /** @type {HTMLInputElement} */ (byId('doc-name'));
@@ -619,14 +700,18 @@ export class App {
       // or an imported network's voltages, so a re-solve after an edit takes a few iterations. One that does not
       // converge from there is tried once more from the usual start before it is reported.
       const progress = (/** @type {number} */ done, /** @type {number} */ total) => this.showProgress(done, total);
-      const warm = kind === 'loadflow' && this.start;
-      let { result, ms } = await this.engine.run(kind, doc, warm ? { start: this.start } : {}, progress);
-      if (warm && !result.converged) {
-        this.start = null;
-        const cold = await this.engine.run(kind, doc, {}, progress);
+      // A calculation the user starts goes in the project's run log; recalculations on edit do not.
+      const record = !opt.auto;
+      let start = kind === 'loadflow' ? this.start : null;
+      let { result, ms, record: hashes } = await this.engine.run(kind, doc, start ? { start } : {}, progress, { record });
+      if (start && !result.converged) {
+        this.start = start = null;
+        const cold = await this.engine.run(kind, doc, {}, progress, { record });
         result = cold.result;
         ms += cold.ms;
+        hashes = cold.record;
       }
+      if (hashes) void this.recordRun(kind, result, ms, hashes, start);
       if (kind === 'loadflow' && result.converged) this.start = startOf(result);
       this.results[kind] = { result, ms, revision };
       // The calculation is over once its result is stored: other commands work while the result is shown.
@@ -661,6 +746,35 @@ export class App {
     this.commands.changed();
     this.updateStatus();
     if (this.autoPending) { this.autoPending = false; if (this.resultsStale('loadflow')) this.maybeAutoLoadFlow(); }
+  }
+
+  /**
+   * Appends a calculation to the project's run log (docs/design/NATIONAL-GRADE.md, section 9.2): what ran, on which
+   * engine, the hashes of its inputs and its report, and its outcome. A load flow solved from a previous solution
+   * names that start's hash too, since the result depends on it to within the tolerance.
+   * @param {CalcKind} kind @param {any} r @param {number} ms @param {import('./ui/engine-client.js').Hashes} hashes
+   * @param {import('./engine/reports.js').StartVoltages | null} start
+   */
+  async recordRun(kind, r, ms, hashes, start) {
+    const p = this.project, c = activeCase(p), now = new Date();
+    try {
+      const outcome = kind === 'loadflow' ? { converged: r.converged, iterations: r.iterations, lossesMw: r.totals.losses, warnings: r.warnings.length }
+        : kind === 'shortcircuit' ? { buses: r.buses.length, maxIkssKa: Math.max(0, ...r.buses.map((/** @type {any} */ b) => b.ikss)) }
+          : kind === 'contingency' ? { cases: r.cases.length, violating: r.cases.filter((/** @type {any} */ x) => x.converged && x.violations.length).length, unsolvable: r.cases.filter((/** @type {any} */ x) => !x.converged).length }
+            : { stable: r.stable, steps: r.steps };
+      /** @type {import('./ui/persistence.js').RunRecord} */
+      const rec = {
+        run: `${now.toISOString()}-${Math.random().toString(16).slice(2, 6)}`, time: now.toISOString(), kind,
+        studyCase: c.name, scenario: p.scenarios.find(x => x.id === c.scenario)?.name ?? '',
+        variants: p.variants.filter(v => c.variants.includes(v.id)).map(v => v.name),
+        engine: { version: hashes.engine, wasmSha256: await engineDigest() },
+        inputs: { modelSha256: hashes.model ?? '', studySha256: hashes.study ?? '', startSha256: start ? await sha256(JSON.stringify(start)) : '' },
+        outcome, resultsSha256: hashes.results, durationMs: Math.round(ms),
+      };
+      await this.library.addRun(this.docId, rec);
+    } catch (error) {
+      this.log('warn', `The run was not added to the run log: ${error instanceof Error ? error.message : error}`);
+    }
   }
 
   /** Logs the outcome of a calculation in plain words. @param {CalcKind} kind @param {any} r @param {number} ms @param {boolean} auto */
@@ -1042,4 +1156,12 @@ function startOf(r) {
   const held = [];
   for (const u of [...r.gens, ...r.svcs]) if (u.atLimit) held.push({ id: u.id, limit: u.atLimit });
   return { busIds: r.buses.map(b => b.id), vm: r.buses.map(b => b.vm), va: r.buses.map(b => b.va), held };
+}
+
+/** SHA-256 of a text, as 64 hexadecimal digits ('' where WebCrypto is unavailable). @param {string} text */
+async function sha256(text) {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch { return ''; }
 }

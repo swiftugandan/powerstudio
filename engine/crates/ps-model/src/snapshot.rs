@@ -8,6 +8,11 @@ use sha2::{Digest, Sha256};
 
 use crate::{Class, Model, NodeRef};
 
+/// SHA-256 of some bytes, as 64 hexadecimal digits: the form every hash in a run record takes.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// The first bytes of every snapshot.
 pub const SNAPSHOT_MAGIC: &[u8; 8] = b"PSMODEL\0";
 /// The snapshot format this build writes and reads.
@@ -109,8 +114,7 @@ impl Model {
 
     /// The model hash: SHA-256 of the compacted model's encoding, as 64 hexadecimal digits.
     pub fn content_hash(&self) -> Result<String, SnapshotError> {
-        let digest = Sha256::digest(self.canonical_bytes()?);
-        Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
+        Ok(sha256_hex(&self.canonical_bytes()?))
     }
 
     fn canonical_bytes(&self) -> Result<Vec<u8>, SnapshotError> {

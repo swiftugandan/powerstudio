@@ -1,14 +1,15 @@
 /** Calculation worker: one engine instance, so the diagram stays responsive while it computes. The engine holds the
  * document the page is editing open and applies the page's edits to it, so a calculation sends neither.
  * Messages in: `{ type: 'init', module }` once; `{ type: 'doc', json, key }` (a document, as JSON text) and
- * `{ type: 'ops', ops, key }` (the store's edits); `{ id, kind, key, options }` for a study on the open document (or
- * `{ id, kind, doc, options }` on a document sent with it); `{ id, type: 'import', files }` to open other tools' files.
- * Messages out: `{ id, type: 'progress', done, total }`, then `{ id, type: 'result', bytes, ms }` (the JSON report,
- * transferred; an import adds its `summary` and sends the laid-out document as `bytes`) or `{ id, type: 'error',
+ * `{ type: 'ops', ops, key }` (the store's edits); `{ id, kind, key, options, record }` for a study on the open document
+ * (or `{ id, kind, doc, options, record }` on a document sent with it); `{ id, type: 'import', files }` to open other
+ * tools' files; `{ id, type: 'layout', json }` to lay a document out. Messages out: `{ id, type: 'progress', done,
+ * total }`, then `{ id, type: 'result', bytes, record, ms }` (the JSON report, transferred, and with `record` the run
+ * record's hashes; an import adds its `summary` and sends the laid-out document as `bytes`) or `{ id, type: 'error',
  * message, stale }`, where `stale` says the engine does not hold the document state the study named. */
 
 import { EngineHost } from '../engine/host.js';
-import { request, requestOpen, openDocument, editDocument } from '../engine/studies.js';
+import { study, openDocument, editDocument } from '../engine/studies.js';
 import { importFiles } from '../engine/exchange.js';
 import { autoLayout, laidOut, drawingOf } from '../core/layout.js';
 
@@ -64,8 +65,11 @@ self.onmessage = async (/** @type {MessageEvent} */ event) => {
       postMessage({ id, type: 'error', message: failure || 'The calculation worker does not hold the current document.', stale: true });
       return;
     }
-    const bytes = 'key' in msg ? requestOpen(host, kind, options, progress) : request(host, kind, msg.doc, options, progress);
-    postMessage({ id, type: 'result', bytes, ms: performance.now() - t0 }, [bytes.buffer]);
+    const reply = 'key' in msg
+      ? study(host, kind, null, options, progress, { resident: true, record: !!msg.record })
+      : study(host, kind, msg.doc, options, progress, { record: !!msg.record });
+    const bytes = reply.payload;
+    postMessage({ id, type: 'result', bytes, record: reply.header.record, ms: performance.now() - t0 }, [bytes.buffer]);
   } catch (error) {
     postMessage({ id, type: 'error', message: error instanceof Error ? error.message : String(error) });
   }

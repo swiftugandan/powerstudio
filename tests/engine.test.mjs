@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { root, engine, wasmPath } from './helpers.mjs';
 import { EngineHost, jsonPayload } from '../src/engine/host.js';
-import { request, requestOpen, openDocument, editDocument } from '../src/engine/studies.js';
+import { request, requestOpen, openDocument, editDocument, study } from '../src/engine/studies.js';
+import { createHash } from 'node:crypto';
 import { applyOp } from '../src/core/store.js';
 
 /** The requests compared: every study on every oracle input, with the simulation shortened to keep the run quick. */
@@ -110,6 +111,24 @@ test('a document held open and edited in the engine gives the same results as th
   assert.throws(() => requestOpen(held, 'loadflow', {}), /no document is open/);
   openDocument(held, read('ieee14'));
   assert.ok(jsonPayload(requestOpen(held, 'loadflow', {})).converged);
+});
+
+test('run records: the engine hashes the model, the study case and the report, the same way every time', () => {
+  const doc = JSON.parse(read('ieee14'));
+  const a = study(engine, 'loadflow', doc, {}, undefined, { record: true }), b = study(engine, 'loadflow', doc, {}, undefined, { record: true });
+  assert.deepEqual(a.header.record, b.header.record);
+  assert.match(a.header.record.results, /^[0-9a-f]{64}$/);
+  assert.notEqual(a.header.record.results, createHash('sha256').update(a.payload).digest('hex'), 'the timings are left out');
+  assert.match(a.header.record.model, /^[0-9a-f]{64}$/);
+  assert.match(a.header.record.engine, /^\d+\.\d+\.\d+$/);
+  // Moving a busbar on the diagram leaves the model's hash; changing a load does not.
+  const moved = structuredClone(doc);
+  moved.elements.find((/** @type {any} */ e) => e.cls === 'bus').x += 100;
+  assert.equal(study(engine, 'loadflow', moved, {}, undefined, { record: true }).header.record.model, a.header.record.model);
+  const loaded = structuredClone(doc);
+  loaded.elements.find((/** @type {any} */ e) => e.cls === 'load').p += 1;
+  assert.notEqual(study(engine, 'loadflow', loaded, {}, undefined, { record: true }).header.record.model, a.header.record.model);
+  assert.equal(study(engine, 'loadflow', doc, {}).header.record, undefined, 'no record unless asked');
 });
 
 /** @param {string} name */

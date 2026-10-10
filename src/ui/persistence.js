@@ -1,12 +1,24 @@
-/** Local-first storage. Documents live in IndexedDB in this browser; small preferences live in localStorage. Nothing
- * leaves the machine. When IndexedDB is unavailable (some private windows) documents are kept in memory for the
- * session and the app says so. */
+/** Local-first storage. Projects live in IndexedDB in this browser; small preferences live in localStorage. Nothing
+ * leaves the machine. When IndexedDB is unavailable (some private windows) projects are kept in memory for the
+ * session and the app says so.
+ *
+ * A project is stored in parts, so an edit rewrites only the part it changed: the base document's JSON (`documents`,
+ * the store version 1 and 2 kept whole documents in), its catalogue entry (`meta`: name, size, last save), and its
+ * manifest, variants and scenarios (`parts`, keyed `<project>/manifest`, `<project>/variant/<id>`,
+ * `<project>/scenario/<id>`). Run records go in `runs`, keyed `<project>/<run>`. A document saved before projects
+ * (versions 1 and 2) has no parts and opens as a project with one study case. OPFS would suit large files, but
+ * Chromium refuses it to pages opened from a file, which PowerStudio supports; IndexedDB keeps large values as files and
+ * works from both. */
 
-const DB = 'powerstudio', STORE = 'documents', META = 'meta', VERSION = 2;
+const DB = 'powerstudio', STORE = 'documents', META = 'meta', PARTS = 'parts', RUNS = 'runs', VERSION = 3;
 
 /** @typedef {import('../core/document.js').PowerDocument} PowerDocument */
 /** What the library lists: a document's name, last save and size. @typedef {{ id: string, name: string, updated: number, elements: number }} DocMeta */
 /** @typedef {DocMeta & { doc: PowerDocument }} StoredDoc */
+/** One calculation as the run log keeps it (docs/design/NATIONAL-GRADE.md, section 9.2).
+ * @typedef {{ run: string, time: string, kind: string, studyCase: string, scenario: string, variants: string[],
+ *   engine: { version: string, wasmSha256: string }, inputs: { modelSha256: string, studySha256: string, startSha256: string },
+ *   outcome: Record<string, unknown>, resultsSha256: string, durationMs: number }} RunRecord */
 /** A stored document: its JSON text (version 2), or the document itself as version 1 stored it.
  * @typedef {{ id: string, json?: string, doc?: PowerDocument }} DocRecord */
 
@@ -41,6 +53,10 @@ export class DocumentLibrary {
     this.db = null;
     /** @type {Map<string, { meta: DocMeta, json: string }>} */
     this.memory = new Map();
+    /** Parts and run records when IndexedDB is unavailable. @type {Map<string, { key: string, project: string, json: string }>} */
+    this.memoryParts = new Map();
+    /** @type {Map<string, RunRecord & { key: string, project: string }>} */
+    this.memoryRuns = new Map();
     this.persistent = false;
   }
 
@@ -51,6 +67,9 @@ export class DocumentLibrary {
         req.onupgradeneeded = event => {
           const db = req.result, tx = /** @type {IDBTransaction} */ (req.transaction);
           if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' }).createIndex('updated', 'updated');
+          for (const name of [PARTS, RUNS]) {
+            if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' }).createIndex('project', 'project');
+          }
           if (!db.objectStoreNames.contains(META)) {
             // Listing reads only this store; the documents saved before it (version 1) get their entries here.
             const meta = db.createObjectStore(META, { keyPath: 'id' });
@@ -77,12 +96,13 @@ export class DocumentLibrary {
     return this.persistent;
   }
 
-  /** @template T @param {IDBTransactionMode} mode @param {(s: IDBObjectStore, meta: IDBObjectStore) => IDBRequest<T>} fn
+  /** @template T @param {IDBTransactionMode} mode
+   * @param {(s: IDBObjectStore, meta: IDBObjectStore, parts: IDBObjectStore, runs: IDBObjectStore) => IDBRequest<T>} fn
    * @returns {Promise<T>} */
   request(mode, fn) {
     return new Promise((resolve, reject) => {
-      const tx = /** @type {IDBDatabase} */ (this.db).transaction([STORE, META], mode);
-      const req = fn(tx.objectStore(STORE), tx.objectStore(META));
+      const tx = /** @type {IDBDatabase} */ (this.db).transaction([STORE, META, PARTS, RUNS], mode);
+      const req = fn(tx.objectStore(STORE), tx.objectStore(META), tx.objectStore(PARTS), tx.objectStore(RUNS));
       tx.oncomplete = () => resolve(req.result);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error ?? new Error('Storage transaction aborted.'));
@@ -117,10 +137,71 @@ export class DocumentLibrary {
     await this.request('readwrite', (s, m) => { m.put(meta); return s.put({ id, json }); });
   }
 
-  /** @param {string} id */
+  /** The parts of a project, keyed by their name within it (`manifest`, `variant/<id>`, `scenario/<id>`), as JSON text.
+   * @param {string} id @returns {Promise<Map<string, string>>} */
+  async parts(id) {
+    const all = this.db
+      ? /** @type {Array<{ key: string, json: string }>} */ (await this.request('readonly', (_, __, parts) => parts.index('project').getAll(id)))
+      : [...this.memoryParts.values()].filter(p => p.project === id);
+    return new Map(all.map(p => [p.key.slice(id.length + 1), p.json]));
+  }
+
+  /**
+   * Writes parts of a project in one transaction (JSON text, or null to delete one) and marks it saved now.
+   * @param {string} id @param {Array<[string, string | null]>} parts by name within the project
+   */
+  async putParts(id, parts) {
+    if (!this.db) {
+      for (const [name, json] of parts) {
+        const key = `${id}/${name}`;
+        if (json === null) this.memoryParts.delete(key); else this.memoryParts.set(key, { key, project: id, json });
+      }
+      const m = this.memory.get(id);
+      if (m) m.meta.updated = Date.now();
+      return;
+    }
+    await this.request('readwrite', (_, meta, store) => {
+      for (const [name, json] of parts) {
+        if (json === null) store.delete(`${id}/${name}`); else store.put({ key: `${id}/${name}`, project: id, json });
+      }
+      const touch = meta.get(id);
+      touch.onsuccess = () => { if (touch.result) meta.put({ ...touch.result, updated: Date.now() }); };
+      return touch;
+    });
+  }
+
+  /** Appends a run record to a project's run log. @param {string} id @param {RunRecord} record */
+  async addRun(id, record) {
+    const row = { ...record, key: `${id}/${record.run}`, project: id };
+    if (!this.db) { this.memoryRuns.set(row.key, row); return; }
+    await this.request('readwrite', (_, __, ___, runs) => runs.put(row));
+  }
+
+  /** A project's run log, oldest first. @param {string} id @returns {Promise<RunRecord[]>} */
+  async runs(id) {
+    const all = this.db
+      ? /** @type {Array<RunRecord & { key: string, project: string }>} */ (await this.request('readonly', (_, __, ___, runs) => runs.index('project').getAll(id)))
+      : [...this.memoryRuns.values()].filter(r => r.project === id);
+    return all.map(({ key: _, project: __, ...r }) => /** @type {RunRecord} */ (r)).sort((a, b) => a.time.localeCompare(b.time));
+  }
+
+  /** Deletes a project with its parts and run log. @param {string} id */
   async remove(id) {
-    if (!this.db) { this.memory.delete(id); return; }
-    await this.request('readwrite', (s, m) => { m.delete(id); return s.delete(id); });
+    if (!this.db) {
+      this.memory.delete(id);
+      for (const [k, p] of this.memoryParts) if (p.project === id) this.memoryParts.delete(k);
+      for (const [k, r] of this.memoryRuns) if (r.project === id) this.memoryRuns.delete(k);
+      return;
+    }
+    await this.request('readwrite', (s, m, parts, runs) => {
+      for (const store of [parts, runs]) {
+        store.index('project').getAllKeys(id).onsuccess = e => {
+          for (const key of /** @type {IDBValidKey[]} */ (/** @type {IDBRequest} */ (e.target).result)) store.delete(key);
+        };
+      }
+      m.delete(id);
+      return s.delete(id);
+    });
   }
 }
 
