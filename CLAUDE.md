@@ -11,7 +11,8 @@ features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md f
   `engine/rust-toolchain.toml`, which rustup only reads when cargo runs from `engine/`.
 - `npm run test:engine` and `npm run lint:engine`: the engine's native tests, and rustfmt plus Clippy (warnings
   denied). `engine/target/release/ps study <kind> <document.json>` runs any study natively; `ps bench <case.m>` times
-  a MATPOWER load flow.
+  a MATPOWER load flow; `ps compare <model> --reference <folder>` is the operator benchmark kit's comparison
+  (docs/BENCHMARK-KIT.md).
 - `npm start`: dev server at http://127.0.0.1:8770/ (modular source, no build step; build the engine first).
 - `npm run check`: strict `tsc --checkJs`, two configs (page with DOM and WebGPU types; worker and core).
 - `npm test`: Node test runner over `tests/*.test.mjs`, including the native-versus-WebAssembly comparison.

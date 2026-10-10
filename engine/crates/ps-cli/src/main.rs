@@ -13,6 +13,10 @@
 //! ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]
 //!                                                             write any model PowerStudio reads as PSS/E RAW, and
 //!                                                             the engine's load flow by RAW bus number
+//! ps compare <input>... --reference <folder> [--study <document.json>] [--qlim] [--out <report.md>] [--json]
+//!                                                             compare the engine's results with another tool's, read
+//!                                                             from CSV tables (docs/BENCHMARK-KIT.md); exit status 1
+//!                                                             when anything differs
 //! ```
 //!
 //! `kind` is one of `loadflow`, `shortcircuit`, `contingency`, `contingency_plan`, `contingency_chunk` or `rms`;
@@ -23,10 +27,26 @@ use std::process::ExitCode;
 use ps_study::{LoadFlowRun, Silent, api};
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] [--sv <out.xml>]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]\n       ps contingency <input>... [--gens] [--screen] [--qlim] [--tol <MVA>] [--from <k>] [--to <k>]";
+const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] [--sv <out.xml>]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]\n       ps contingency <input>... [--gens] [--screen] [--qlim] [--tol <MVA>] [--from <k>] [--to <k>]\n       ps compare <input>... --reference <folder> [--study <document.json>] [--qlim] [--out <report.md>] [--json]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("compare") {
+        // The report goes to standard output either way; a difference beyond tolerance exits with status 1.
+        return match compare(&args) {
+            Ok((out, passed)) => {
+                #[allow(clippy::print_stdout)]
+                {
+                    println!("{out}");
+                }
+                if passed { ExitCode::SUCCESS } else { ExitCode::from(1) }
+            }
+            Err(e) => {
+                eprintln!("ps: {e}");
+                ExitCode::from(2)
+            }
+        };
+    }
     match run(&args) {
         Ok(out) => {
             #[allow(clippy::print_stdout)]
@@ -128,7 +148,17 @@ fn positional(args: &[String]) -> Vec<String> {
         } else if a.starts_with("--") {
             skip = matches!(
                 a.as_str(),
-                "--raw" | "--out" | "--solution" | "--sv" | "--options" | "--tol" | "--repeat" | "--from" | "--to"
+                "--raw"
+                    | "--out"
+                    | "--solution"
+                    | "--sv"
+                    | "--options"
+                    | "--tol"
+                    | "--repeat"
+                    | "--from"
+                    | "--to"
+                    | "--reference"
+                    | "--study"
             );
         } else {
             out.push(a.clone());
@@ -164,6 +194,96 @@ fn load_any(paths: &[String]) -> Result<ps_model::Model, String> {
             Ok(ps_io::cgmes::import(&files).map_err(|e| e.to_string())?.model)
         }
     }
+}
+
+/// For CGMES input, the names results are usually given under: each ConnectivityNode's TopologicalNode, by mRID and
+/// by name, mapped to the ConnectivityNode. Empty for other formats.
+fn topological_aliases(paths: &[String]) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut out = std::collections::HashMap::new();
+    let ext = paths
+        .first()
+        .and_then(|p| std::path::Path::new(p).extension())
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    if matches!(ext.as_deref(), Some("json" | "m" | "raw")) {
+        return Ok(out);
+    }
+    let files = ps_io::files::read_paths(paths).map_err(|e| e.to_string())?;
+    let mut g = ps_io::rdf::Graph::new();
+    for f in files.iter().filter(|f| f.name.to_ascii_lowercase().ends_with(".xml")) {
+        g.read(&f.name, &f.data).map_err(|e| e.to_string())?;
+    }
+    let bare = |s: &str| s.trim_start_matches('#').trim_start_matches('_').to_string();
+    for cn in g.of_class("ConnectivityNode") {
+        let Some(tn) = g.reference(cn, "ConnectivityNode.TopologicalNode") else {
+            continue;
+        };
+        let node = bare(&cn.id);
+        if let Some(name) = g.get(tn).and_then(|t| g.text(t, "IdentifiedObject.name")) {
+            out.entry(name.to_string()).or_insert_with(|| node.clone());
+        }
+        out.entry(bare(tn)).or_insert(node);
+    }
+    Ok(out)
+}
+
+/// `ps compare`: the engine's results against another tool's, and whether every value is within its tolerance.
+fn compare(args: &[String]) -> Result<(String, bool), String> {
+    let inputs = positional(args);
+    let model = load_any(&inputs)?;
+    let aliases = topological_aliases(&inputs)?;
+    let folder = value(args, "--reference").ok_or(USAGE)?;
+    let mut tables = Vec::new();
+    let mut entries: Vec<_> = std::fs::read_dir(folder)
+        .map_err(|e| format!("{folder}: {e}"))?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("csv")))
+        .collect();
+    entries.sort();
+    for path in entries {
+        let name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        tables.push(ps_study::compare::parse_csv(&name, &text)?);
+    }
+    if tables.is_empty() {
+        return Err(format!(
+            "{folder} has no .csv tables (docs/BENCHMARK-KIT.md lists them)"
+        ));
+    }
+    // The study case of a PowerStudio document, or a plain Newton-Raphson to 1e-6 MVA.
+    let mut study = match value(args, "--study") {
+        Some(path) => {
+            ps_io::powerstudio::parse(&read(path)?)
+                .map_err(|e| format!("{path}: {e}"))?
+                .study
+        }
+        None => ps_model::study::StudyCase {
+            loadflow: ps_model::study::LoadFlowSettings {
+                tolerance: 1e-6,
+                max_iter: 50,
+                ..ps_model::study::LoadFlowSettings::plain()
+            },
+            ..Default::default()
+        },
+    };
+    if flag(args, "--qlim") {
+        study.loadflow.enforce_q_limits = true;
+    }
+    let report = ps_study::compare::compare(&model, &aliases, &tables, &study, &Default::default())?;
+    let text = if flag(args, "--json") {
+        serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+    } else {
+        ps_study::compare::markdown(&model, &report)
+    };
+    if let Some(out) = value(args, "--out") {
+        std::fs::write(out, &text).map_err(|e| format!("{out}: {e}"))?;
+    }
+    Ok((text, report.passed))
 }
 
 fn read(path: &str) -> Result<String, String> {

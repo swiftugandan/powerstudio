@@ -5,6 +5,7 @@
 //! the JSON the browser app reads; their field names are part of the engine's interface (docs/ENGINE.md).
 
 pub mod api;
+pub mod compare;
 pub mod contingency;
 pub mod crypto;
 pub mod exchange;
