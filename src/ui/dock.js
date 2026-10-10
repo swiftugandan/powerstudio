@@ -310,7 +310,7 @@ export class Dock {
     const own = new Map(app.store.doc.study.contingency.list.map(c => [c.id, c.name || c.id]));
     const ruleName = new Map(app.store.doc.study.contingency.remedial.map(x => [x.id, x.name || x.id]));
     const kindOf = (/** @type {import('../engine/reports.js').ContingencyCase} */ c) =>
-      c.cls === 'multiple' ? `${c.elements.length} elements` : /** @type {Record<string, { label: string } | undefined>} */ (CLASSES)[c.cls]?.label ?? c.cls;
+      c.cls === 'multiple' ? `${c.elements.length} elements` : c.cls === 'busbar' ? 'Busbar fault' : /** @type {Record<string, { label: string } | undefined>} */ (CLASSES)[c.cls]?.label ?? c.cls;
     const state = (/** @type {import('../engine/reports.js').ContingencyCase} */ c) => {
       if (!c.converged) return 'Not solvable';
       const v = c.violations.length ? `${c.violations.length} violation${c.violations.length === 1 ? '' : 's'}` : 'Secure';

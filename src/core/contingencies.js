@@ -2,7 +2,8 @@
  * and its rules, and the JSON file they are exchanged in.
  *
  * The file is `{ "format": "powerstudio-contingencies", "version": 1, "contingencies": [...], "remedialActions": [...] }`.
- * A contingency is `{ id, name, elements: [element ids] }`. A remedial action is `{ id, name, contingencies: [ids],
+ * A contingency is `{ id, name, elements: [element ids] }`; a busbar among its elements stands for a fault there, which
+ * takes out everything connected to it. A remedial action is `{ id, name, contingencies: [ids],
  * conditions: [...], actions: [...] }`, with conditions `{ kind: 'loading', element, above }` (%),
  * `{ kind: 'voltageBelow' | 'voltageAbove', node, below | above }` (p.u.) or `{ kind: 'outage', element }`, and actions
  * `{ kind: 'switch', element, inService }`, `{ kind: 'generation', element, p }` (MW), `{ kind: 'tap', element,
@@ -20,7 +21,7 @@ export const CONTINGENCY_FORMAT = 'powerstudio-contingencies';
  */
 
 /** The element classes each part of a contingency or rule can name. */
-export const OUTAGE_CLASSES = /** @type {readonly string[]} */ (['line', 'trafo', 'gen']);
+export const OUTAGE_CLASSES = /** @type {readonly string[]} */ (['line', 'trafo', 'gen', 'bus']);
 export const BRANCH_CLASSES = /** @type {readonly string[]} */ (['line', 'trafo']);
 export const ACTION_CLASSES = /** @type {Readonly<Record<Action['kind'], readonly string[]>>} */ ({
   switch: ['line', 'trafo', 'gen', 'load', 'shunt'], generation: ['gen'], tap: ['trafo'], loadShed: ['load'],
@@ -76,7 +77,7 @@ export function checkContingencies(contingencies, remedial, cls) {
       continue;
     }
     const elements = raw.elements.filter(e => typeof e === 'string' && OUTAGE_CLASSES.includes(cls.get(e) ?? ''));
-    if (elements.length !== raw.elements.length) issues.push(`Contingency ${raw.id}: dropped elements this network does not have, or that cannot fail (a contingency takes out lines, transformers and generators).`);
+    if (elements.length !== raw.elements.length) issues.push(`Contingency ${raw.id}: dropped elements this network does not have, or that cannot fail (a contingency takes out lines, transformers, generators and busbars).`);
     if (!elements.length) { issues.push(`Skipped contingency ${raw.id}: none of its elements is in this network.`); continue; }
     seen.add(raw.id);
     list.push({ id: /** @type {string} */ (raw.id), name: typeof raw.name === 'string' ? raw.name : '', elements: /** @type {string[]} */ (elements) });

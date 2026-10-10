@@ -573,6 +573,7 @@
    "lines": true,
    "trafos": true,
    "gens": false,
+   "busbars": false,
    "maxLoading": 100,
    "acceptableS": 0,
    "screening": false,

@@ -95,10 +95,10 @@ solution then stalls at a mismatch it reports, bus by bus, instead of diverging.
 - **HVDC links** run at their setpoints: the rectifier draws the setpoint from its AC network and the inverter delivers
   it less the stations' losses (a percentage) and the line's R·P²/V². A line-commutated station also consumes
   |P|·tan(acos pf); a voltage-source station regulates voltage or holds its reactive power within limits.
-- **Controls** act as outer loops around Newton, in OpenLoadFlow's order: slack distribution, area interchange,
-  reactive limits, phase shifters, tap changers, switched shunts. A loop that changes something re-solves before the next is checked, and a
-  round repeats until nothing changes (at most 30 changes). `engine/crates/ps-lf/src/control.rs` and `discrete.rs`
-  state each rule:
+- **Controls** act as outer loops around Newton, in OpenLoadFlow's order: slack distribution, area interchange, reactive
+  limits, phase shifters, tap changers, switched shunts. A loop that changes something re-solves before the next is
+  checked, and a round repeats until nothing changes (at most 30 changes). `engine/crates/ps-lf/src/control.rs` and
+  `discrete.rs` state each rule:
   - *Slack distribution* shares each island's imbalance among machines (by maximum power, present power,
     participation factor or remaining margin) within their active limits and without changing their sign, or among
     loads by their active power. What the participants cannot take stays with the reference. An island with an
@@ -180,9 +180,13 @@ for the branch contributions; the correction factors against their formulas (`ps
 
 `ps-study::contingency` solves the network after each contingency and judges the result against the study case's
 limits. The contingencies are every selected line, transformer, machine and HVDC link taken out alone (in that order,
-each in model order, with the element's identifier as the contingency's), followed by the study case's own list: a
-contingency there has its own identifier and takes out several elements together, such as both circuits of a double
-line. Each case lists its highest loading, its voltage extremes, the buses it cuts off and its violations of the
+each in model order, with the element's identifier as the contingency's), then, with busbar faults selected, a fault on
+every busbar where anything connects (buses of bus-branch models, busbar sections of node-breaker ones), followed by
+the study case's own list: a contingency there has its own identifier and takes out several elements together, such
+as both circuits of a double line. A busbar among a contingency's elements stands for a fault there: its protection
+opens every switch around it and everything connected there goes out, so feeders reached through those switches hang
+open at that end. CGMES contingency data (`Contingency`, `ContingencyEquipment`) is not read: none of the conformity
+configurations carries any, so there is nothing to test a mapping against. Each case lists its highest loading, its voltage extremes, the buses it cuts off and its violations of the
 loading limit and of every node's voltage band, marking those already present in the base case. Cases are ranked with
 unsolvable cases first, then by the number of violations, then by highest loading.
 
@@ -292,7 +296,10 @@ the decoupled voltage model (B″). Both take a branch outage as a low-rank corr
   of IEEE 14 in turn at 99.99 % of its limit and each busbar's band edge 0.0001 p.u. from its voltage, below and
   above: the cases the drift rule alone let through (24 outages before the limit rule) and a bus over its band in the
   base case falling under it. Screening clears 2,584 of ACTIVSg2000's 3,206
-  branch outages, and takes ACTIVSg10k from 26 to 11.5 ms per outage natively. A remedial action relieves the IEEE 14 overload and leaves every other outage unchanged.
+  branch outages, and takes ACTIVSg10k from 26 to 11.5 ms per outage natively. A remedial action relieves the IEEE
+  14 overload and leaves every other outage unchanged. A busbar fault on the IEEE 14 sample equals the contingency of
+  everything connected at the bus; on the node-breaker IEEE 14 every busbar section's fault solves and loses that
+  section.
 - `tests/contingency.test.mjs` and `tests/contingencies.test.mjs`: the same through WebAssembly, the file's checks, and
   removal and undo in the document.
 

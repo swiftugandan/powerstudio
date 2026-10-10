@@ -264,6 +264,8 @@ pub struct ContingencySettings {
     pub gens: bool,
     /// Take out HVDC links.
     pub hvdc: bool,
+    /// Fault each busbar: its protection opens every switch around it and everything connected there goes out.
+    pub busbars: bool,
     /// Loading limit, %.
     pub max_loading: f64,
     /// How long an overload after an outage may last before operators act, seconds: a branch is judged against the
@@ -292,6 +294,7 @@ impl Default for ContingencySettings {
             trafos: true,
             gens: false,
             hvdc: false,
+            busbars: false,
             max_loading: 100.0,
             acceptable_s: 0.0,
             list: Vec::new(),

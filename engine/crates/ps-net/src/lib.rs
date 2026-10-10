@@ -889,11 +889,14 @@ fn regulating_taps(
 ) -> Vec<TapSource> {
     let sb = model.meta.base_mva;
     let mut sources = Vec::new();
-    let branch_of = |class: Class, row: usize, winding: u8| {
-        branches
-            .iter()
-            .position(|b| b.class == class && b.row as usize == row && b.winding == winding)
-    };
+    // The calculation branch of each transformer winding, found once (a linear search per transformer is quadratic
+    // on a national model).
+    let index: std::collections::HashMap<(Class, u32, u8), usize> = branches
+        .iter()
+        .enumerate()
+        .map(|(i, b)| ((b.class, b.row, b.winding), i))
+        .collect();
+    let branch_of = |class: Class, row: usize, winding: u8| index.get(&(class, row as u32, winding)).copied();
     // One axis of a tap branch: which changer, its range, its present index and target.
     struct Axis {
         ratio: Option<usize>,

@@ -896,6 +896,7 @@ export class App {
     c.add({ id: 'sc.atSelection', keywords: 'fault here', label: 'Short circuit at selected busbar', icon: 'shortcircuit', group: 'Calculate', enabled: () => [...this.selection].some(id => this.store.get(id)?.cls === 'bus'),
       run: () => { const id = [...this.selection].find(x => this.store.get(x)?.cls === 'bus'); if (id) this.faultAt(id); } });
     studyToggle('contingency.gens', 'Generator outages', 'gen', 'contingency', 'gens', true, false);
+    studyToggle('contingency.busbars', 'Busbar faults', 'bus', 'contingency', 'busbars', true, false);
     studyToggle('contingency.screening', 'Screen outages first', 'loadflow', 'contingency', 'screening', true, false);
     c.add({ id: 'contingency.edit', keywords: 'remedial action special protection double circuit n-2 list', label: 'Contingencies', icon: 'settings', group: 'Study case',
       hint: 'Contingencies of several elements, and remedial actions', run: () => openContingencyDialog(this) });

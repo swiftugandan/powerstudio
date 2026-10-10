@@ -193,6 +193,25 @@ pub fn definitions(model: &Model, study: &StudyCase) -> Vec<Contingency> {
     add(Class::Transformer3, model.transformers3.len(), st.trafos);
     add(Class::Generator, model.generators.len(), st.gens);
     add(Class::Hvdc, model.hvdc_lines.len(), st.hvdc);
+    // A fault on every busbar: buses of bus-branch models and busbar sections of node-breaker ones, where anything
+    // connects.
+    if st.busbars {
+        let incidence = Incidence::new(model);
+        for (row, n) in model.nodes.iter().enumerate() {
+            let busbar = matches!(n.kind, ps_model::NodeKind::Bus | ps_model::NodeKind::BusbarSection);
+            if busbar && model.alive(Class::Node, row) && incidence.0.get(row).is_some_and(|e| !e.is_empty()) {
+                out.push(Contingency {
+                    id: n.id.clone(),
+                    name: if n.name.is_empty() {
+                        n.id.clone()
+                    } else {
+                        n.name.clone()
+                    },
+                    elements: vec![n.id.clone()],
+                });
+            }
+        }
+    }
     out.extend(st.list.iter().cloned());
     out
 }
@@ -304,12 +323,28 @@ fn out_of_service(br: &ps_lf::PuBranch) -> bool {
 /// The base case's state for the fast path: the network as solved, started from its voltages, and the branches
 /// whose loss splits it.
 struct Base {
-    calc: Calc,
     net: PuNetwork,
     opt: ps_lf::Options,
     bridges: HashSet<usize>,
     monitor: Monitor,
     real_bus: Vec<bool>,
+    /// The calculation branch of each line and two-winding transformer, by class and row.
+    branch_of: HashMap<(Class, u32), usize>,
+}
+
+impl Base {
+    /// The calculation branch of a single-branch outage when the fast path and screening can take it: a line or a
+    /// two-winding transformer whose loss keeps the network whole.
+    fn reusable_branch(&self, found: &[(Class, usize)]) -> Option<usize> {
+        match found {
+            [(k @ (Class::Line | Class::Transformer2), row)] => self
+                .branch_of
+                .get(&(*k, *row as u32))
+                .copied()
+                .filter(|b| !self.bridges.contains(b)),
+            _ => None,
+        }
+    }
 }
 
 /// Branches whose removal splits the network (bridges of its graph; parallel branches never are).
@@ -789,10 +824,16 @@ fn prepare(model: &Model, study: &StudyCase) -> Result<Prepared, String> {
     };
     let base = Base {
         bridges: bridges(&net),
+        branch_of: calc
+            .branches
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.winding == 0)
+            .map(|(i, b)| ((b.class, b.row), i))
+            .collect(),
         monitor: Monitor::new(model, &calc, post_duration),
         net,
         opt,
-        calc,
         real_bus,
     };
     let mut notes = Vec::new();
@@ -819,15 +860,64 @@ fn prepare(model: &Model, study: &StudyCase) -> Result<Prepared, String> {
     })
 }
 
-/// The elements of a contingency resolved to classes and rows, its class name, and the identifiers not found.
-fn resolve<'a>(index: &ps_model::IdIndex, c: &'a Contingency) -> (Vec<(Class, usize)>, &'static str, Vec<&'a str>) {
-    let found: Vec<(Class, usize)> = c
-        .elements
-        .iter()
-        .filter_map(|id| Class::ALL.iter().find_map(|&k| index.get(k, id).map(|row| (k, row))))
-        .collect();
-    let cls = match found.as_slice() {
-        [(k, _)] => cls_name(*k),
+/// What connects at each node: the in-service elements with a terminal there, switches included. A busbar fault takes
+/// them out.
+struct Incidence(Vec<Vec<(Class, usize)>>);
+
+impl Incidence {
+    fn new(model: &Model) -> Self {
+        let mut at = vec![Vec::new(); model.nodes.len()];
+        for class in [
+            Class::Line,
+            Class::Transformer2,
+            Class::Transformer3,
+            Class::Generator,
+            Class::Load,
+            Class::Shunt,
+            Class::Svc,
+            Class::ExternalGrid,
+            Class::Converter,
+            Class::Switch,
+        ] {
+            for row in (0..model.len(class)).filter(|&r| active(model, &Outages::none(), class, r)) {
+                for n in model.element_nodes(class, row) {
+                    if let Some(list) = at.get_mut(n.index()) {
+                        list.push((class, row));
+                    }
+                }
+            }
+        }
+        Self(at)
+    }
+}
+
+/// The elements of a contingency resolved to classes and rows, its class name, and the identifiers not found. A node
+/// stands for a fault on that busbar: its protection opens every switch around it and everything connected there goes
+/// out.
+fn resolve<'a>(
+    index: &ps_model::IdIndex,
+    incidence: &Incidence,
+    c: &'a Contingency,
+) -> (Vec<(Class, usize)>, &'static str, Vec<&'a str>) {
+    let mut found: Vec<(Class, usize)> = Vec::new();
+    let mut busbars = 0;
+    for id in &c.elements {
+        if let Some(row) = index.get(Class::Node, id) {
+            busbars += 1;
+            for &e in incidence.0.get(row).into_iter().flatten() {
+                if !found.contains(&e) {
+                    found.push(e);
+                }
+            }
+        } else if let Some(e) = Class::ALL.iter().find_map(|&k| index.get(k, id).map(|row| (k, row)))
+            && !found.contains(&e)
+        {
+            found.push(e);
+        }
+    }
+    let cls = match (found.as_slice(), busbars, c.elements.len()) {
+        (_, 1, 1) => "busbar",
+        ([(k, _)], 0, _) => cls_name(*k),
         _ => "multiple",
     };
     let missing = c
@@ -970,19 +1060,15 @@ pub fn run_chunk(
     let range = range.start.min(list.len())..range.end.min(list.len());
     let total = range.len();
     let index = model.index();
+    let incidence = Incidence::new(model);
     let mut cases = Vec::with_capacity(total);
     let mut worst = Worst::default();
     let mut effort = Effort::default();
     for (done, c) in list[range].iter().enumerate() {
-        let (found, cls, missing) = resolve(&index, c);
+        let (found, cls, missing) = resolve(&index, &incidence, c);
         // Screening: a single branch that keeps the network whole and whose estimate stays clear of every limit.
-        if let (Some(scr), [(k @ (Class::Line | Class::Transformer2), row)]) = (screen.as_mut(), found.as_slice())
-            && let Some(b) = base
-                .calc
-                .branches
-                .iter()
-                .position(|x| x.class == *k && x.row as usize == *row && x.winding == 0)
-                .filter(|b| !base.bridges.contains(b))
+        if let Some(scr) = screen.as_mut()
+            && let Some(b) = base.reusable_branch(&found)
             && let Some(est) = scr.estimate(&base, b)
             // A remedial action that would fire on the estimate needs the full solution.
             && fired(&study.contingency.remedial, c, &est, &base.monitor).is_empty()
@@ -1222,16 +1308,7 @@ fn solve_case(
     effort: &mut Effort,
     fast: bool,
 ) -> Solved {
-    let branch = match found {
-        _ if !fast => None,
-        [(k @ (Class::Line | Class::Transformer2), row)] => base
-            .calc
-            .branches
-            .iter()
-            .position(|b| b.class == *k && b.row as usize == *row && b.winding == 0)
-            .filter(|b| !base.bridges.contains(b)),
-        _ => None,
-    };
+    let branch = if fast { base.reusable_branch(found) } else { None };
     if let Some(b) = branch {
         effort.reused += 1;
         let mut net = base.net.clone();
@@ -1312,11 +1389,12 @@ pub fn detailed(model: &Model, study: &StudyCase, list: &[Contingency]) -> Resul
     let p = prepare(model, study)?;
     let base_dead: HashSet<&str> = p.base_dead.iter().map(String::as_str).collect();
     let index = model.index();
+    let incidence = Incidence::new(model);
     let mut cache = Cache::default();
     let mut effort = Effort::default();
     let mut out = Vec::with_capacity(list.len());
     for c in list {
-        let (found, _, missing) = resolve(&index, c);
+        let (found, _, missing) = resolve(&index, &incidence, c);
         if !missing.is_empty() {
             return Err(format!("{}: unknown element(s) {}", c.id, missing.join(", ")));
         }

@@ -18,9 +18,9 @@ test('a rule never widens: one with an invalid condition, or for no remaining co
   assert.equal(r.issues.length, 4);
 });
 
-test('contingencies keep only elements that can fail, and identifiers of their own', () => {
+test('contingencies keep only elements that can fail (a busbar stands for a fault there), and identifiers of their own', () => {
   const r = checkContingencies([{ id: 'C1', elements: ['L1', 'D1', 'B1'] }, { id: 'L2', elements: ['T1'] }, { id: 'C2', elements: ['D1'] }], [], classes);
-  assert.deepEqual(r.contingencies, [{ id: 'C1', name: '', elements: ['L1'] }]);
+  assert.deepEqual(r.contingencies, [{ id: 'C1', name: '', elements: ['L1', 'B1'] }]);
 });
 
 test('actions name elements of the class they act on', () => {

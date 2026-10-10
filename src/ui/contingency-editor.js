@@ -184,7 +184,7 @@ export async function openContingencyDialog(app) {
 
   body.append(
     h('h3', { text: 'Contingencies' }),
-    h('p', { class: 'cont-note', text: 'The analysis takes out each line and transformer in turn, as the study case sets. Add contingencies here for elements that fail together, such as both circuits of a double line.' }),
+    h('p', { class: 'cont-note', text: 'The analysis takes out each line and transformer in turn, as the study case sets. Add contingencies here for elements that fail together, such as both circuits of a double line. A busbar stands for a fault there, which takes out everything connected to it.' }),
     contingencies,
     addButton('Add contingency', () => { draft.list.push({ id: nextId('C', draft.list), name: '', elements: [] }); renderContingencies(); renderRules();
       /** @type {HTMLInputElement | null} */ (contingencies.querySelector('tbody tr:last-child .chips input'))?.focus(); }),

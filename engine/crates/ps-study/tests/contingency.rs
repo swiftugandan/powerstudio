@@ -392,3 +392,87 @@ fn a_remedial_action_relieves_the_overload_it_is_for() {
         assert_eq!(c.max_loading, w.max_loading, "{}", c.id);
     }
 }
+
+/// A busbar fault takes out everything connected at the busbar: on the IEEE 14 sample it equals the contingency of
+/// the bus's lines, transformers and injections, and it reports the bus lost.
+#[test]
+fn a_busbar_fault_takes_out_everything_connected_there() {
+    use ps_model::study::Contingency;
+    let imp = input("ieee14");
+    let model = &imp.model;
+    let bus = model.index().get(ps_model::Class::Node, "B4").unwrap();
+    let connected: Vec<String> = ps_model::Class::ALL
+        .iter()
+        .flat_map(|&k| {
+            (0..model.len(k))
+                .filter(move |&r| {
+                    k != ps_model::Class::Node && model.element_nodes(k, r).iter().any(|n| n.index() == bus)
+                })
+                .map(move |r| model.id_of(k, r).unwrap_or("").to_string())
+        })
+        .collect();
+    assert!(connected.len() >= 5, "{connected:?}");
+    let mut study = imp.study.clone();
+    study.contingency.lines = false;
+    study.contingency.trafos = false;
+    study.contingency.list = vec![
+        Contingency {
+            id: "fault".into(),
+            name: String::new(),
+            elements: vec!["B4".into()],
+        },
+        Contingency {
+            id: "all".into(),
+            name: String::new(),
+            elements: connected,
+        },
+    ];
+    let r = contingency::run(model, &study, &mut Silent).unwrap();
+    let (fault, all) = (
+        r.cases.iter().find(|c| c.id == "fault").unwrap(),
+        r.cases.iter().find(|c| c.id == "all").unwrap(),
+    );
+    assert_eq!(fault.cls, "busbar");
+    assert!(fault.converged);
+    assert!(fault.lost_buses.contains(&"B4".to_string()), "{:?}", fault.lost_buses);
+    assert_eq!(
+        (fault.max_loading, fault.min_v, fault.max_v),
+        (all.max_loading, all.min_v, all.max_v)
+    );
+}
+
+/// In a node-breaker model a busbar fault opens the switches around the busbar section: the section is lost, while
+/// the network around it solves.
+#[test]
+fn a_busbar_section_fault_opens_its_switches() {
+    let cases = json("tests/oracle/psse-cases.json");
+    let case = cases["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "ieee14-nb-35")
+        .unwrap();
+    let model = psse_import(case).model;
+    let sections: Vec<&ps_model::Node> = model
+        .nodes
+        .iter()
+        .filter(|n| n.kind == ps_model::NodeKind::BusbarSection)
+        .collect();
+    assert!(!sections.is_empty());
+    let mut study = ps_model::study::StudyCase::default();
+    study.contingency.lines = false;
+    study.contingency.trafos = false;
+    study.contingency.busbars = true;
+    let r = contingency::run(&model, &study, &mut Silent).unwrap();
+    let faults: Vec<_> = r.cases.iter().filter(|c| c.cls == "busbar").collect();
+    assert!(!faults.is_empty());
+    let mut solved = 0;
+    for c in &faults {
+        if c.converged {
+            solved += 1;
+            assert!(c.lost_buses.contains(&c.id), "{}: {:?}", c.id, c.lost_buses);
+        }
+        eprintln!("{}: converged {} lost {:?}", c.id, c.converged, c.lost_buses);
+    }
+    assert!(solved > 0);
+}
