@@ -45,9 +45,9 @@ jobs:
         run: npm run test:engine
       - name: Unit and engine tests (the WebAssembly build, native and WebAssembly compared)
         run: npm test
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Browser tests (WebGPU and Canvas 2D projects)
+      - name: Install Chromium, Firefox and WebKit
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Browser tests (Chromium with WebGPU and with Canvas 2D, Firefox, WebKit; accessibility audit)
         # Chromium's WebGPU instance does not survive on these runners (scripts/webgpu-probe.mjs, docs/TEST-REPORT.md),
         # so the webgpu project checks truthful reporting and real drawing here; WebGPU itself is required on macOS.
         env:
@@ -63,8 +63,48 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
 
+  reproducible:
+    # The engine must build to the same bytes on two operating systems, and again from another place on each.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Rust toolchain (pinned by engine/rust-toolchain.toml)
+        working-directory: engine
+        run: rustup toolchain install
+      - name: Build the engine (WebAssembly)
+        run: node scripts/build-engine.mjs
+      - name: Build it again from a copy, with a fresh cargo home and target directory
+        run: node scripts/check-reproducible.mjs
+      - run: cp src/engine/powerstudio-engine.wasm.sha256 engine-${{ matrix.os }}.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-hash-${{ matrix.os }}
+          path: engine-${{ matrix.os }}.sha256
+
+  reproducible-compare:
+    needs: reproducible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: engine-hash-*
+          merge-multiple: true
+      - name: The builds on both systems are identical
+        run: |
+          cat engine-*.sha256
+          test "$(cut -d' ' -f1 engine-*.sha256 | sort -u | wc -l)" -eq 1
+          echo "### Reproducible engine: $(cut -d' ' -f1 engine-ubuntu-latest.sha256) on Ubuntu and macOS" >> "$GITHUB_STEP_SUMMARY"
+
   build:
-    needs: test
+    needs: [test, reproducible-compare]
     runs-on: ubuntu-latest
     outputs:
       sha256: ${{ steps.hash.outputs.sha256 }}

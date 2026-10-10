@@ -1,0 +1,62 @@
+name: Release
+
+# A tag vX.Y.Z builds the release from that commit, checks that the engine builds to the same bytes again, writes the
+# software bill of materials, attests the files' provenance and the bill of materials with GitHub's artifact
+# attestations, and drafts a GitHub release with the files and the notes in docs/releases/vX.Y.Z.md. The draft is
+# published by hand after review.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - name: Rust toolchain (pinned by engine/rust-toolchain.toml)
+        working-directory: engine
+        run: rustup toolchain install
+      - run: npm ci
+      - name: The tag, package.json and src/core/version.js agree
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          node -e "const v=require('./package.json').version; if (v !== process.argv[1]) { console.error('package.json has ' + v + ', the tag ' + process.argv[1]); process.exit(1) }" "$tag"
+          grep -q "'$tag'" src/core/version.js || { echo "src/core/version.js does not say $tag"; exit 1; }
+          test -f "docs/releases/${GITHUB_REF_NAME}.md" || { echo "docs/releases/${GITHUB_REF_NAME}.md is missing"; exit 1; }
+      - name: Build the engine and the app
+        run: node scripts/build-engine.mjs && node build.mjs
+      - name: Build the engine again elsewhere and compare
+        run: node scripts/check-reproducible.mjs
+      - name: Software bill of materials (CycloneDX)
+        run: node scripts/sbom.mjs dist/PowerStudio.cdx.json
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/PowerStudio.html
+            src/engine/powerstudio-engine.wasm
+            dist/PowerStudio.cdx.json
+      - uses: actions/attest-sbom@v2
+        with:
+          subject-path: dist/PowerStudio.html
+          sbom-path: dist/PowerStudio.cdx.json
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "PowerStudio ${GITHUB_REF_NAME#v}" --notes-file "docs/releases/${GITHUB_REF_NAME}.md" \
+            dist/PowerStudio.html dist/PowerStudio.html.sha256 dist/PowerStudio.cdx.json
