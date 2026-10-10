@@ -26,6 +26,8 @@ const OVERHANG = 24;
 
 /** @param {number} v @param {number} step */
 const toGrid = (v, step) => Math.round(v / step) * step;
+/** A coordinate to a thousandth of a unit: a shift onto a line must land on it exactly, not 1e-14 short. @param {number} v */
+const tidy = v => Math.round(v * 1000) / 1000;
 
 /** The start, centre and end lines of a bar on each axis, and the point a guide through it passes. @param {Element} bus */
 function linesOf(bus) {
@@ -84,8 +86,8 @@ export class Snapper {
     const guides = [];
     const ax = nearest(this.xs, lines.flatMap(l => l.xs.map(v => v + dx)), this.tol);
     const ay = nearest(this.ys, lines.flatMap(l => l.ys.map(v => v + dy)), this.tol);
-    const sx = ax ? dx + ax.shift : toGrid(/** @type {number} */ (first.x) + dx, this.grid) - /** @type {number} */ (first.x);
-    const sy = ay ? dy + ay.shift : toGrid(/** @type {number} */ (first.y) + dy, this.grid) - /** @type {number} */ (first.y);
+    const sx = tidy(ax ? dx + ax.shift : toGrid(/** @type {number} */ (first.x) + dx, this.grid) - /** @type {number} */ (first.x));
+    const sy = tidy(ay ? dy + ay.shift : toGrid(/** @type {number} */ (first.y) + dy, this.grid) - /** @type {number} */ (first.y));
     if (ax) {
       const ats = [ax.line.at, ...lines.map(l => l.cy + sy)];
       guides.push({ kind: 'line', x0: ax.line.v, y0: Math.min(...ats) - OVERHANG, x1: ax.line.v, y1: Math.max(...ats) + OVERHANG });

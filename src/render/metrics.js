@@ -13,8 +13,8 @@ const WIDE = new Set([...'MWmw@%&']);
 
 /**
  * Widths that err wide: the monospaced faces in `FONTS` advance up to about 0.62 em (Menlo 0.602, SF Mono in WebKit
- * 0.618), counted here as 0.64, and these sans widths exceed the advances of the sans faces in `FONTS` for each class
- * of character. Characters beyond ASCII (°, ″, δ, −) may come
+ * 0.618, DejaVu Sans Mono 0.602), counted here as 0.64, and these sans widths exceed the advances of the sans faces
+ * that stand in for `FONTS` on macOS and on Linux (DejaVu Sans, the widest) for each class of character. Characters beyond ASCII (°, ″, δ, −) may come
  * from a fallback font, so they count as 1.2 em in either face. A browser test checks the claim in every browser.
  * @type {Measure}
  */
@@ -24,8 +24,8 @@ export function conservativeMeasure(font, weight, size, text) {
     for (const ch of text) em += ch > '~' ? 1.2 : 0.64;
     return em * size;
   }
-  for (const ch of text) em += ch > '~' ? 1.2 : NARROW.has(ch) ? 0.34 : WIDE.has(ch) ? 0.95 : ch >= 'A' && ch <= 'Z' ? 0.72 : 0.6;
-  return em * size * (weight >= 600 ? 1.05 : 1);
+  for (const ch of text) em += ch > '~' ? 1.2 : NARROW.has(ch) ? 0.4 : WIDE.has(ch) ? 1.05 : ch >= 'A' && ch <= 'Z' ? 0.8 : 0.68;
+  return em * size * (weight >= 600 ? 1.1 : 1);
 }
 
 /**
