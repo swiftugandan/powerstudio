@@ -478,7 +478,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | **1. Engine foundation** — done | Rust workspace, model and operations, snapshot format, topology processor, per-unit network, and all four 0.1 calculations ported at 0.1 parity (sparse Newton-Raphson with 0.1's controls, short circuit, N-1, classical stability; the national-grade versions are phases 3, 5 and 6); coordinator and worker pool; `ps-cli` | Every 0.1 oracle test passes on the engine; ACTIVSg25k solves within target; the JavaScript solvers are deleted. See the phase 1 results below |
 | **2. Data exchange** — done | CGMES 2.4.15 and 3.0 import (EQ, TP, SSH, SV, DL, GL) and SSH/SV export; PSS/E RAW import and export; validation reports | CGMES conformity configurations and ACTIVSg cases import and agree with PowSyBl to the fidelity bar |
 | **3. Steady-state completeness** — done, two bars missed | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis. See the phase 3 results below |
-| **4. Workspace at scale** (runs alongside 2 and 3) | Projects, variants, scenarios, study cases; data manager; renderer at scale; result browser and comparison; reports. Substation diagrams deferred by ADR 12 | A 70,000-bus project is usable end to end with no frame over 100 ms |
+| **4. Workspace at scale** (runs alongside 2 and 3) — done | Projects, variants, scenarios, study cases; data manager; renderer at scale; result browser and comparison; reports. Substation diagrams deferred by ADR 12 | A 70,000-bus project is usable end to end with no frame over 100 ms. See the phase 4 results below |
 | **5. Dynamics** | DAE solver, events, DYR import, wave D1, then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases |
 | **6. Short circuit** | Breaking and steady-state currents, DC component, power station units, converter sources, all fault types; the superposition method | The TR 60909-4 example network from pandapower's open test suite reproduced to its stated tolerances for three-phase and line-to-line faults, maximum and minimum, power station units included |
 | **7. Release hardening** | Reproducible builds, SBOM, attestations, Firefox and WebKit test projects, accessibility audit, user guide, operator benchmark kit | The assurance bar passes; 1.0.0 released |
@@ -617,6 +617,41 @@ Carried to phase 4: the 0.5 s warm start at 70,000 buses, which needs the reside
 re-uses its ordering and symbolic analysis (78 ms of the 528 ms natively); and N-1 with reactive limits at 10,000
 buses, where each outage still switches tens of machines in three to six rounds of Newton. Measured responsiveness
 during an N-1 (no frame over 100 ms) is part of phase 4's renderer work.
+
+### Phase 4 results (2026-10-10, local)
+
+The exit bar is met: on ACTIVSg70k every step of a session (import, open, pan, zoom, select, the model tree, a load
+flow, its tables, the data sheet) keeps every frame under 100 ms in Chromium, and so does the page throughout a
+10,000-bus N-1. docs/TEST-REPORT.md has the figures.
+
+What was built:
+
+- **Projects** (section 7): study cases, scenarios as operating values, variants as operation logs, every edit routed
+  to its part, stored in IndexedDB by part (ADR 6, revised: OPFS is refused to pages opened from a file), exported to
+  one file. Each calculation the user starts appends a run record with the hashes of section 9.2, computed in the
+  engine; reports are kept compressed so two runs can be compared.
+- **Data manager** (section 8.3): a virtual spreadsheet per class with multi-row edits and paste checked whole.
+- **Result browser**: filters to rows near or beyond their limits, worst post-contingency states per element, a load
+  flow compared with any recorded run, CSV. **Reports**: a printable study report with the run records on its cover.
+- **Renderer at scale** (section 8.2): a multilevel layout that keeps regions together, levels of detail by voltage
+  with violations visible at every zoom. Substation diagrams are deferred by ADR 12, which keeps the workspace on the
+  bus-branch document for release 1.
+- **CGMES SSH export** without moving the workspace: a CGMES project's operating values go back into its own SSH by
+  mRID, with the SV of their load flow; PowSyBl reads every edited value.
+- **Engines that hold the document**: each worker's engine keeps the open document and applies the editor's
+  operations to it, so a calculation copies nothing; the status bar shows the engines' memory, and the pool sizes
+  itself to the device and continues on fewer workers when one runs out of memory.
+
+The two bars phase 3 missed:
+
+- **N-1 of ACTIVSg10k with reactive limits** now takes 116 to 117 s on 8 workers, under the 2-minute bar (199 s in
+  phase 3). The Jacobian's shape no longer changes when machines reach their limits, so it is ordered once per network
+  (time spent ordering on a 600-outage sample: 16.5 s to 1.8 s, the same 2,830 iterations); the admittance matrix
+  builds in linear time; the pool hands out chunks as workers come free; and chunks merge from their bytes.
+- **A 70,000-bus re-solve under 0.5 s** is still missed with reactive limits. After an edit the engine re-solves
+  ACTIVSg70k in 0.56 to 0.67 s from the last solution (1 or 2 iterations; 3.1 s and 18 iterations before phase 4,
+  since the start now carries the machines held at their limits); without reactive limits it takes 345 ms. What
+  remains is the size of the report (39 MB of JSON, about a third of the time); a columnar report is the next step.
 
 ## 12. Risks
 

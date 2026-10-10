@@ -1,8 +1,50 @@
 # Test report
 
 Numbers are copied from the runs; nothing here is estimated. Re-run the commands in [TESTING.md](TESTING.md) to
-reproduce them. The first three sections cover the Rust engine's phases 3, 2 and 1 (local runs only: they have not
+reproduce them. The first four sections cover phases 4, 3, 2 and 1 (local runs only: they have not
 been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+
+## Workspace at scale, phase 4 (commit `bc56afe`, 2026-10-10, local)
+
+Same environment as phases 1 to 3 (Apple M5 Pro, Chromium 156, Node 26). Local runs only: phase 4 has not been
+pushed, so CI has not run it.
+
+| Suite | Result |
+| --- | --- |
+| Type checking (`npm run check`, both configs) | passed |
+| Engine format and lints (`npm run lint:engine`) | passed, no warnings |
+| Engine tests, native (`npm run test:engine`) | 78 passed, 0 failed |
+| Node tests on the WebAssembly engine (`npm test`) | 87 passed, 0 failed |
+| Browser tests (`npm run test:browser`), both projects | 46 passed, 0 failed, 16 skipped (screenshot captures) |
+| Pages build (`npm run build:pages`) | built; `dist/PowerStudio.html` 1,763,487 bytes, sha256 `0c63c366b718ea9a91a966630f132b620158ec835e914b3ad5e8456a20dc5cb6` |
+
+The engine module is 2,324,754 bytes (747,808 gzip-compressed), sha256
+`055bdc59fe55997da94e0b7ea7a30f01fc1a5d16b09c0aeeee49f8e1e3be3d92`.
+
+New checks in phase 4:
+
+| Check | Result |
+| --- | --- |
+| CGMES SSH export read back (`cgmes_ssh.rs`), eleven configurations | an unchanged document gives no SSH; an edited load, voltage target, tap and line read back exactly; a load flow from the exported SV stays within 2.7e-12 p.u. |
+| CGMES SSH export read by PowSyBl (`scripts/oracle/ssh_check.py`) | every edited value found on all eleven (three loads are boundary injections PowSyBl folds into dangling lines) |
+| Run record hashes (`engine.test.mjs`) | the same request gives the same hashes; moving a busbar leaves the model hash, a load change moves it |
+| Engine-held document (`engine.test.mjs`) | every study on the document held open and edited equals the study on the edited document sent whole |
+| Projects (`project.test.mjs`) | edits routed to the base, a variant, the scenario and the study case; variants replay over a base changed since |
+| Fixed-shape Jacobian | every oracle and PowSyBl agreement test unchanged; the same 2,830 Newton iterations on a 600-outage ACTIVSg10k sample |
+
+Scale in Chromium (the app on the built file, unless named):
+
+| Measurement | Result | Bar |
+| --- | --- | --- |
+| ACTIVSg70k, every step of the session (import, open, pan, zoom, select, tree, load flow, table) | no frame over 100 ms | no frame over 100 ms: met |
+| ACTIVSg70k data sheet (open, scroll, edit, filter, sort, change class) | no frame over 50 ms | met |
+| ACTIVSg10k N-1 with reactive limits, 12,899 outages, 8 workers | 116 to 117 s (193 s at the start of the phase) | under 2 min: met |
+| The page during that N-1 | 6,952 frames, none over 100 ms (the longest 50 ms) | no frame over 100 ms: met |
+| ACTIVSg70k load flow after an edit, with reactive limits (engine) | 0.56 to 0.67 s, 1 or 2 iterations | under 0.5 s: missed |
+| ACTIVSg70k edit to result in the app | 1.05 to 1.13 s, with the 250 ms recalculate-on-edit delay | |
+| ACTIVSg70k re-solve without reactive limits (`browser-bench.mjs --resolve`) | 345 ms, 2 iterations | under 0.5 s: met |
+| ACTIVSg70k layout | median branch 660 units (19,840 before), none over a tenth of the drawing; 2.7 s in the worker | |
+| Engine memory at 70,000 buses | 478 MB reading the document whole, 618 MB holding it open | |
 
 ## Steady-state completeness, phase 3 (commit `48a21f6`, 2026-10-10, local)
 
@@ -205,18 +247,19 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Live site in a browser | Opened https://swiftugandan.github.io/powerstudio/ in local Chromium: the website showed the build-time figures (13.393 MW, 27.35 kA, 10 of 20, stays in step); its "Open PowerStudio" button opened `/app/`, which drew with WebGPU (Apple, metal-3) and converged the IEEE 14 load flow in 3 iterations, with no page errors |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
-## Not verified (as of phase 3)
+## Not verified (as of phase 4)
 
 - Firefox, Safari and Chromium on Windows; WebGPU on Linux with a real GPU.
 - Touch and pinch gestures on a real phone (the phone layout was tested at 390 × 844 in Chromium).
 - Screen readers.
 - The short-circuit method against the text of IEC 60909-0 or its TR 60909-4 examples (only against pandapower).
-- Editing networks larger than about 2,000 busbars: ACTIVSg10k opens and solves in the app, but its automatic
-  diagram is dense and was not used for editing.
+- Drawing by hand on a national network's diagram: ACTIVSg70k is laid out, drawn by level of detail and edited
+  through the data sheet in the measurements, but no one has drawn new equipment on it at that scale.
 - Real operators' CGMES and RAW files: only the ENTSO-E conformity configurations, PowSyBl's test files and public
   test systems were read.
 - PSS/E itself: RAW files written by PowerStudio were read by PowerStudio and by PowSyBl, not by PSS/E.
 - The engine build in CI, and its reproducibility on a second machine.
 - Area interchange against PSS/E itself: it is tested against the area record's definition only.
 - CGMES contingency data, which no conformity configuration carries.
-- Responsiveness of the app during a 10,000-bus N-1 (frames under 100 ms), which phase 4 measures.
+- Real operators' study practice with projects (variants, scenarios, study cases): the behaviour is tested, the
+  workflow has not been tried by an operator.
