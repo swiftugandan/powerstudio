@@ -1328,6 +1328,8 @@ export class App {
     // Help
     c.add({ id: 'palette.open', label: 'Command palette', icon: 'search', keys: ['Mod+K', 'Mod+Shift+P'], global: true, group: 'Help', hint: 'Search commands and elements', run: () => openPalette(this) });
     c.add({ id: 'help.shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'], group: 'Help', run: () => openBackstage(this, 'shortcuts') });
+    c.add({ id: 'help.guide', label: 'User guide', keywords: 'manual documentation help how to', icon: 'help', group: 'Help', hint: 'How to draw, calculate, import and export, in the documentation',
+      run: () => { open(`${REPO_URL}/blob/main/docs/USER-GUIDE.md`, '_blank', 'noopener'); } });
     c.add({ id: 'help.about', label: 'About PowerStudio', icon: 'info', group: 'Help', run: () => openBackstage(this, 'about') });
     void closeBackstage;
   }

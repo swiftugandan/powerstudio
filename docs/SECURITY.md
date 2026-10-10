@@ -43,8 +43,8 @@ device and makes them hard to leak through the app itself.
 
 ## Supply chain
 
-Each release carries a CycloneDX bill of materials (`PowerStudio.cdx.json`, written by `scripts/sbom.mjs`): the 78
-crates the engine is built from, with the checksums `engine/Cargo.lock` pins, and the npm tools used to build and test,
+Each release carries a CycloneDX bill of materials (`PowerStudio.cdx.json`, written by `scripts/sbom.mjs`): the crates
+the engine is built from (85 in 1.0.0), with the checksums `engine/Cargo.lock` pins, and the npm tools used to build and test,
 which the app does not contain. A test holds every shipped component to a permissive licence and a pinned hash. The
 release workflow attests the files' provenance and the bill of materials with GitHub's artifact attestations.
 

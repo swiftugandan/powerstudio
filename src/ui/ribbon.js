@@ -43,7 +43,7 @@ export const TABS = [
     { label: 'Rendering', items: [{ stack: ['view.rendererAuto', 'view.rendererCanvas'] }] },
   ] },
   { id: 'help', label: 'Help', groups: [
-    { label: 'Learn', items: [{ cmd: 'help.shortcuts', size: 'large' }, { cmd: 'palette.open', size: 'large' }] },
+    { label: 'Learn', items: [{ cmd: 'help.guide', size: 'large' }, { cmd: 'help.shortcuts', size: 'large' }, { cmd: 'palette.open', size: 'large' }] },
     { label: 'Samples', items: [{ cmd: 'sample.ieee14', size: 'large' }, { cmd: 'sample.riverside', size: 'large' }] },
     { label: 'About', items: [{ cmd: 'help.about', size: 'large' }] },
   ] },

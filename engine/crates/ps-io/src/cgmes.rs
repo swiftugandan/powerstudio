@@ -115,12 +115,10 @@ const USED: [(&str, &str); 34] = [
 fn not_used_reason(class: &str) -> &'static str {
     match class {
         c if c.starts_with("Diagram") || c == "TextDiagramObject" || c == "VisibilityLayer" => {
-            "diagram layout: shown with the substation diagrams (design phase 4)"
+            "diagram layout: not used; the diagram is laid out automatically"
         }
-        "Location" | "PositionPoint" | "CoordinateSystem" => {
-            "geographical location: shown with the geographic diagrams (design phase 4)"
-        }
-        c if c.starts_with("DC") || c.contains("Converter") => "HVDC equipment: not yet modelled (design phase 3)",
+        "Location" | "PositionPoint" | "CoordinateSystem" => "geographical location: not used",
+        c if c.starts_with("DC") || c.contains("Converter") => "HVDC equipment: CGMES DC networks are not modelled",
         c if c.starts_with("Sv") || c == "TopologicalIsland" => {
             "state variables beyond voltages: recomputed by the load flow"
         }
@@ -135,7 +133,7 @@ fn not_used_reason(class: &str) -> &'static str {
             || c.starts_with("VComp")
             || c.starts_with("Synchronous") =>
         {
-            "dynamic models: the classical model is used (design phase 5 adds these)"
+            "dynamic models: only the machines' classical data are read (PSS/E DYR files bring controls)"
         }
         _ => "not used by the calculations",
     }

@@ -16,11 +16,16 @@ features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md f
 - `npm start`: dev server at http://127.0.0.1:8770/ (modular source, no build step; build the engine first).
 - `npm run check`: strict `tsc --checkJs`, two configs (page with DOM and WebGPU types; worker and core).
 - `npm test`: Node test runner over `tests/*.test.mjs`, including the native-versus-WebAssembly comparison.
-- `npm run test:browser`: Playwright against `dist/PowerStudio.html` (it builds first); projects `webgpu` and `canvas`.
+- `npm run test:browser`: Playwright against `dist/PowerStudio.html` (it builds first); projects `webgpu`, `canvas`,
+  `firefox` and `webkit` (`npx playwright install chromium firefox webkit`), including the axe-core audit
+  (`tests/browser/a11y.spec.mjs`).
 - `npm run build`: `dist/PowerStudio.html` plus its SHA-256. `npm run build:pages`: `_site/` (website at `/`, app at
   `/app/`, download). The website's numbers come from the engine at build time; never type them into `site/index.html`.
-- Releases: bump `version` in `package.json` and `src/core/version.js` together (a test checks), tag `vX.Y.Z`, and
-  attach `dist/PowerStudio.html` and its `.sha256` to the GitHub release.
+- Releases: bump `version` in `package.json`, `src/core/version.js` and `engine/Cargo.toml` together (a test checks the
+  first two), write `docs/releases/vX.Y.Z.md`, add the release's sample documents to `tests/fixtures/vX.Y.Z/` with the
+  oracle's voltages (as `v0.1.0` has them), and push the tag `vX.Y.Z`: `.github/workflows/release.yml` builds, checks
+  reproducibility, writes the SBOM, attests and drafts the release. `node scripts/check-reproducible.mjs` and
+  `node scripts/sbom.mjs` run the same checks locally.
 - `PS_SCREENSHOTS=1 npx playwright test screenshots --project=webgpu`: refreshes `docs/screenshots/`.
 
 ## Rules
@@ -46,6 +51,9 @@ features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md f
   importer in JavaScript.
 - Every document edit goes through `store.transact` so undo, redo, autosave and staleness work.
 - Buttons get behaviour from `data-cmd` and a registered command; never attach click handlers to command buttons.
+- HTML reaches the page only through `setHtml` or `h(tag, { html })` (`src/ui/dom.js`), with every value passed
+  through `esc`: the built app requires Trusted Types and allows only that policy. Never assign `innerHTML` directly.
+- Colours meet WCAG AA contrast in both themes (the accessibility audit checks); use the theme tokens in `style.css`.
 - The bundler supports only single-line `import { … } from '…'` and `export function|function*|class|const|let`.
   Keep the one `new Worker(new URL('./worker/engine.worker.js', import.meta.url), { type: 'module' })` in `main.js`
   as written.

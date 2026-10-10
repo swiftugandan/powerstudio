@@ -37,6 +37,8 @@ class and its fields (type, unit, limits, group, help text); the inspector, the 
 from it. `document.js` holds the document shape, the study case settings and `normalizeDocument`, the single gate
 every opened or imported file passes. `contingencies.js` checks the study case's own contingencies and remedial
 actions, for documents and for the contingency file alike, so a rule can never end up wider than written.
+`sealed.js` seals a project with a passphrase (AES-256-GCM through Web Crypto, the key from the engine's Argon2id)
+and opens it again.
 `store.js` is the only way to change a document: transactions record each
 operation with the value it replaced, so undo and redo are exact, and edits that share a coalescing key (a drag,
 typing in one field) merge into one step. `layout.js` draws a diagram for networks that arrive without one: an exact
@@ -63,7 +65,7 @@ changed meanwhile. Position changes are not sent to the engines, which never rea
 | `ps-lf` | Newton-Raphson and DC load flow on sparse matrices |
 | `ps-sc` | IEC 60909-style short circuit |
 | `ps-dyn` | Stability simulation: machines and their controls solved with the network by the implicit trapezoidal rule (see below) |
-| `ps-study` | Studies on a model, contingency analysis, reports, and the request interface (`api.rs`) |
+| `ps-study` | Studies on a model, contingency analysis, reports, the request interface (`api.rs`), the benchmark kit's comparison (`compare.rs`) and key derivation for encrypted projects (`crypto.rs`) |
 | `ps-wasm` | The WebAssembly boundary: `ps_call`, `ps_alloc`, `ps_free` |
 | `ps-cli` | `ps`, the native runner for studies and benchmarks |
 
@@ -254,7 +256,9 @@ in `engine/rust-toolchain.toml` and the dependency versions locked in `engine/Ca
 build. It wraps each module in a function registry, bundles the worker separately and starts it from a Blob URL,
 embeds the engine gzip-compressed (the page decompresses it with the browser's `DecompressionStream`), inlines the
 stylesheet and favicon, and adds the Content-Security-Policy, whose `'wasm-unsafe-eval'` allows compiling
-WebAssembly and nothing else. The output, `dist/PowerStudio.html`, is byte-for-byte deterministic; its SHA-256 is
+WebAssembly and nothing else, and which requires Trusted Types: HTML reaches the page only through `setHtml`
+(`src/ui/dom.js`, policy `powerstudio`) and the worker starts only from its own Blob URL (policy
+`powerstudio-worker`, created in the bundle's prelude). The output, `dist/PowerStudio.html`, is byte-for-byte deterministic; its SHA-256 is
 written next to it.
 
 `build-pages.mjs` builds the GitHub Pages site into `_site/`: the website from `site/index.html` at `/`, the app at
@@ -263,6 +267,11 @@ agreement with the oracles) and its diagram are computed by the engine during th
 the diagram drawn as SVG from the app's own display list with the colours read from `style.css`. The Pages workflow
 compares the published `/app/` and `PowerStudio.html` against the build's SHA-256.
 
+The engine build is reproducible: `scripts/build-engine.mjs` remaps the cargo registry and checkout paths that panic
+locations would embed, and `scripts/check-reproducible.mjs` builds again from a copy elsewhere with a fresh cargo home
+and requires the same bytes; CI compares builds on Ubuntu and macOS. `scripts/sbom.mjs` writes the CycloneDX bill of
+materials. A tag runs `.github/workflows/release.yml`, which builds, checks, attests and drafts the release.
+
 ## Testing
 
 - `npm run test:engine` runs the engine's tests natively: the oracle goldens for every study, the model's operations
@@ -270,6 +279,7 @@ compares the published `/app/` and `PowerStudio.html` against the build's SHA-25
 - `npm test` builds the WebAssembly engine and runs the Node test runner over `tests/*.test.mjs`: the same oracle
   checks through the WebAssembly build, a comparison of every study's report between the native and WebAssembly
   engines, determinism across runs and instances, the store, the import gate, the diagram geometry and the build.
-- `npm run test:browser` runs Playwright against the built file over HTTP, in two projects: `webgpu` (Chromium with
-  WebGPU enabled) and `canvas` (the headless shell, which has no WebGPU adapter, so the fallback is exercised).
+- `npm run test:browser` runs Playwright against the built file over HTTP, in four projects: `webgpu` (Chromium with
+  WebGPU enabled), `canvas` (the headless shell, which has no WebGPU adapter, so the fallback is exercised), `firefox`
+  and `webkit`, with an axe-core accessibility audit among the specs.
 - `docs/TESTING.md` explains how to regenerate the oracle goldens; `docs/TEST-REPORT.md` records the latest runs.

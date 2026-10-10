@@ -26,6 +26,8 @@ async function open(page, query, scheme = 'light') {
 
 /** @param {import('@playwright/test').Page} page @param {string} name @param {string} caption */
 async function shot(page, name, caption) {
+  // A shortcut the capture pressed leaves the diagram with its keyboard focus ring; the pictures show the app at rest.
+  await page.evaluate(() => { if (document.activeElement?.classList.contains('viewport-canvas')) /** @type {HTMLElement} */ (document.activeElement).blur(); });
   await page.waitForTimeout(300);
   mkdirSync(DIR, { recursive: true });
   await page.screenshot({ path: `${DIR}/${name}.png` });

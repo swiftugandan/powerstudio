@@ -1,8 +1,33 @@
 # Test report
 
 Numbers are copied from the runs; nothing here is estimated. Re-run the commands in [TESTING.md](TESTING.md) to
-reproduce them. The first sections cover phase 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only: they
-have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
+they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+
+## Release hardening, phase 7 (2026-10-10, local, version 1.0.0)
+
+Same environment as phases 1 to 6, plus Playwright's Firefox and WebKit builds. Local runs only.
+
+| Check | Result |
+| --- | --- |
+| Engine tests (`npm run test:engine`) | 99 passed |
+| Node tests (`npm test`) | 115 passed |
+| Browser tests (`npm run test:browser`), Chromium with WebGPU and with Canvas 2D, Firefox, WebKit | 155 passed, 33 skipped (32 screenshot captures, and Firefox's synthetic paste) |
+| Accessibility audit (axe-core 4.13.0, WCAG 2.1 A and AA; 9 states in each project) and keyboard focus marks | No violations in any project |
+| Trusted Types | Required; the app breaks no rule, and raw HTML and further policies are refused, in all four projects |
+| Type check and lints | Clean |
+| Reproducible engine (`scripts/check-reproducible.mjs`: another path, a fresh cargo home and target directory) | Identical, sha256 `0c669772be96c4ae31adeaf980adc6f91e1deb49e8c64f0739790a4b1c0cd212` |
+| Single-file build, twice | Identical |
+| Bill of materials | 85 engine components, each with a permitted licence and a pinned checksum; 26 build and test tools |
+| Key derivation for encrypted projects | Equal to Argon2's reference implementation on 3 cases, natively and in WebAssembly; about 100 ms in WebAssembly |
+| v0.1.0 documents | Both open with nothing to report and solve to the voltages pandapower gave them in 0.1.0 (1e-8 p.u.) |
+
+What the new browser projects and the audit found, all fixed: WebKit refuses Blobs in IndexedDB in ephemeral
+sessions (Safari's private browsing), which broke recording runs and importing CGMES; muted text at 3.9:1 and status
+pills at 3.9:1 against WCAG's 4.5:1; a tab list holding plain buttons; splitters without their value; no focus ring
+on the diagram, on native selects in WebKit, or one that showed on the File page's teal; and the File page letting
+focus leave it. CI's reproducibility comparison across Ubuntu and macOS, and the release workflow's attestations, have
+not run: nothing has been pushed.
 
 ## Short circuit, phase 6 (2026-10-10, local)
 
@@ -361,11 +386,12 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Live site in a browser | Opened https://swiftugandan.github.io/powerstudio/ in local Chromium: the website showed the build-time figures (13.393 MW, 27.35 kA, 10 of 20, stays in step); its "Open PowerStudio" button opened `/app/`, which drew with WebGPU (Apple, metal-3) and converged the IEEE 14 load flow in 3 iterations, with no page errors |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
-## Not verified (as of phase 6)
+## Not verified (as of phase 7)
 
-- Firefox, Safari and Chromium on Windows; WebGPU on Linux with a real GPU.
+- Safari itself, and any browser on Windows; WebGPU on Linux with a real GPU. (Playwright's Firefox and WebKit builds
+  run every browser test on macOS.)
 - Touch and pinch gestures on a real phone (the phone layout was tested at 390 × 844 in Chromium).
-- Screen readers.
+- Screen readers: the app passes axe-core's automated WCAG 2.1 A and AA rules, which do not replace a person using one.
 - The short-circuit method against the text of IEC 60909-0: it is checked against pandapower and against the TR
   60909-4 example's values as pandapower's test and CGMES MiniGrid give them, not against the documents themselves.
 - Breaking currents of single-fed faults by IEC's single-fed formula (the engine applies the meshed-network formula;
@@ -376,7 +402,8 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 - Real operators' CGMES and RAW files: only the ENTSO-E conformity configurations, PowSyBl's test files and public
   test systems were read.
 - PSS/E itself: RAW files written by PowerStudio were read by PowerStudio and by PowSyBl, not by PSS/E.
-- The engine build in CI, and its reproducibility on a second machine.
+- The engine build in CI, and its reproducibility on a second operating system (the workflow is in place; it runs on
+  the first push).
 - Area interchange against PSS/E itself: it is tested against the area record's definition only.
 - CGMES contingency data, which no conformity configuration carries.
 - Real operators' study practice with projects (variants, scenarios, study cases): the behaviour is tested, the

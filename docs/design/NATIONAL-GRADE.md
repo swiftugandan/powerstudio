@@ -487,7 +487,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | **4. Workspace at scale** (runs alongside 2 and 3) — done | Projects, variants, scenarios, study cases; data manager; renderer at scale; result browser and comparison; reports. Substation diagrams deferred by ADR 12 | A 70,000-bus project is usable end to end with no frame over 100 ms. See the phase 4 results below |
 | **5. Dynamics** — wave D1 done; D2 and D3 after 1.0 (ADR 14) | DAE solver, events, DYR import, wave D1 (ADR 13), then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases. See the wave D1 results below |
 | **6. Short circuit** — done (ADR 15) | Breaking currents, power station units, three-winding transformers per pair, motors, converter sources, neutral earthing, fault impedance, earth faults; steady-state current, DC component and the superposition method deferred | The TR 60909-4 example network from pandapower's open test suite reproduced to its stated tolerances for three-phase and line-to-line faults, maximum and minimum, power station units included. Met, and earth faults besides; see the phase 6 results below |
-| **7. Release hardening** | Reproducible builds, SBOM, attestations, Firefox and WebKit test projects, accessibility audit, user guide, operator benchmark kit | The assurance bar passes; 1.0.0 released |
+| **7. Release hardening** — done locally; release awaits the push | Reproducible builds, SBOM, attestations, Firefox and WebKit test projects, accessibility audit, user guide, operator benchmark kit | The assurance bar passes; 1.0.0 released. See the phase 7 results below |
 
 ### Phase 0 results (measured 2026-10-09)
 
@@ -699,6 +699,22 @@ the short-circuit profile's data, which found that it had been reading the resis
 ohms, and that it left power electronics connections out altogether. The document writer keeps transformers' rated
 voltages, zero-sequence impedances, earthing and connections, so a network opened in the app gives the model's
 currents to 1e-9.
+
+### Phase 7 results (2026-10-10, local)
+
+The assurance bar passes locally and 1.0.0 is ready to release: every test passes in Chromium (WebGPU and Canvas 2D),
+Firefox and WebKit, the app meets axe-core's WCAG 2.1 A and AA rules in both themes and at phone width, the engine
+rebuilds to the same bytes from another place with a fresh cargo home, and the release carries a CycloneDX bill of
+materials. What remains needs the push: CI's build on two operating systems, and the release workflow, which checks
+the version, rebuilds, attests the files and drafts the GitHub release from docs/releases/v1.0.0.md.
+
+What was built, by section 9: reproducible builds checked by `scripts/check-reproducible.mjs` and a CI job (9.3); the
+bill of materials and its licence policy, the release workflow with artifact attestations, and fixtures of every
+released version's documents (9.3); the operator benchmark kit, `ps compare` with docs/BENCHMARK-KIT.md (9.4); Trusted
+Types enforced, encrypted project export with Argon2id and AES-256-GCM, and the threat model stated in the app and in
+docs/SECURITY.md (9.5); and docs/USER-GUIDE.md. The new browser projects found a real fault, WebKit refusing Blobs in
+IndexedDB in private browsing, and the audit found contrast, tab, splitter and focus faults; docs/TEST-REPORT.md lists
+them. Signed tags need the maintainer's key and are left to the release itself.
 
 ## 12. Risks
 

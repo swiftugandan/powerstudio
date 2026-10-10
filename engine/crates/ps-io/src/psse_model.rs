@@ -209,7 +209,7 @@ fn mapped_as(s: Section) -> &'static str {
 fn not_used(s: Section) -> &'static str {
     match s {
         Section::MultiTerminalDc => "multi-terminal HVDC: not modelled",
-        Section::InductionMachine => "induction machines: not yet modelled",
+        Section::InductionMachine => "induction machines: not modelled",
         Section::ImpedanceCorrection => "impedance correction tables: transformers use their stated impedance",
         _ => "not used by the calculations",
     }
@@ -1103,7 +1103,7 @@ fn transformers(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
     }
     if controlled > 0 {
         cx.notes.push(format!(
-            "{controlled} transformer(s) have automatic tap control (COD); taps stay at their stated positions until control is modelled (design phase 3)."
+            "{controlled} transformer(s) have automatic tap control (COD). Voltage control (COD 1) and flow control (COD 3 and 5) act when the study case lets tap changers or phase shifters regulate; reactive power control (COD 2) and DC line control (COD 4) keep the stated tap positions."
         ));
     }
     Ok(())
@@ -1187,7 +1187,7 @@ fn facts(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
     }
     if series > 0 {
         cx.notes.push(format!(
-            "{series} series FACTS device(s) are not modelled yet (design phase 3)."
+            "{series} series FACTS device(s) are not modelled; they are left out."
         ));
     }
     if remote > 0 {

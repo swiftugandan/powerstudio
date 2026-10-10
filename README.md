@@ -29,7 +29,9 @@ Offline copy: download `PowerStudio.html` from the [latest release](https://gith
 | Files | Documents saved automatically in IndexedDB; open CGMES 2.4.15 and 3.0 models, PSS/E RAW files (versions 32, 33 and 35) with their DYR dynamic data and MATPOWER `.m` cases (also by drag and drop), with a dialog that shows what was read, what the diagram simplifies and how closely it reproduces the imported load flow; export JSON, SVG, PNG and CSV, and a CGMES project's operating point as SSH and SV in its own files | The engine's imports agree with PowSyBl on 12 CGMES configurations, 23 RAW files and 7 large MATPOWER grids; the editor's version of every one reproduces the imported load flow to 2e-12 p.u.; browser tests import case30 and a RAW file and round-trip an export |
 | Projects | Study cases that choose a scenario (switching, setpoints, loads, generation, taps) and variants (planned changes to the equipment); every edit kept in the part it belongs to, with the study case and recording variant in the title bar; a run log with the hashes of each calculation's model, settings and results; the whole project exported to one file | Unit tests route edits and replay variants over a changed base; a browser test records a change in a variant, turns it off and on, logs the run, reloads, and carries it all through a project file; engine tests check the hashes are reproducible and ignore the drawing |
 | Data manager | Every element of a class as a spreadsheet: filter, sort, edit a column of many rows at once, paste blocks from Excel or LibreOffice (checked whole before anything changes), copy rows out, export CSV; selection follows the diagram | Browser test edits several rows, pastes a block, refuses a bad paste and undoes; no frame over 50 ms on the 70,000-bus ACTIVSg grid |
-| Workspace | Ribbon, model tree, inspector, results dock, status bar, command palette, keyboard shortcuts, undo and redo, light and dark themes, phone layout | Browser tests cover the palette, undo and redo, theme and phone width |
+| Workspace | Ribbon, model tree, inspector, results dock, status bar, command palette, keyboard shortcuts, undo and redo, light and dark themes, phone layout | Browser tests cover the palette, undo and redo, theme and phone width; an axe-core audit (WCAG 2.1 A and AA) and a keyboard focus check pass in both themes and at phone width |
+| Security | No network access by policy, Trusted Types required, projects exportable encrypted with a passphrase (AES-256-GCM, key by Argon2id) | Browser tests check the policy, that raw HTML is refused, and the encrypted round trip; the key derivation matches Argon2's reference implementation |
+| Operator benchmark | `ps compare` solves a model and compares the results with your own tool's (load flow, short circuit, contingency), with a report of every difference | A test compares PowSyBl's results written as an operator's tables |
 | Samples | IEEE 14-bus system (MATPOWER case14 data) and Riverside, a 110/20/0.4 kV distribution network | Both are oracle inputs |
 
 ## Run, build and test
@@ -47,8 +49,10 @@ npm run check             # strict type checking with tsc --checkJs
 npm run test:engine       # the engine's own tests, native, against the oracle goldens
 npm run lint:engine       # rustfmt and Clippy, warnings denied
 npm test                  # Node tests: the WebAssembly engine, native and WebAssembly compared, store, import, build
-npx playwright install chromium
-npm run test:browser      # Playwright against the built file over HTTP, WebGPU and Canvas 2D projects
+npx playwright install chromium firefox webkit
+npm run test:browser      # Playwright against the built file over HTTP: Chromium (WebGPU, Canvas 2D), Firefox, WebKit
+node scripts/check-reproducible.mjs   # builds the engine again elsewhere and requires the same bytes
+node scripts/sbom.mjs     # writes the CycloneDX bill of materials, dist/PowerStudio.cdx.json
 ```
 
 `dist/PowerStudio.html` also works when opened straight from disk (checked in Chromium). Add `?renderer=canvas` to the URL to force the
@@ -97,8 +101,23 @@ deterministic HTML file with a Content-Security-Policy that forbids network conn
 conventions and verification of every calculation, and [docs/design/NATIONAL-GRADE.md](docs/design/NATIONAL-GRADE.md)
 for where the engine is going.
 
-The interface's only development dependencies are TypeScript (for `--checkJs`), Playwright and the WebGPU type
-definitions. The engine depends on faer (sparse LU), serde, serde_json, postcard and sha2.
+The interface's only development dependencies are TypeScript (for `--checkJs`), Playwright, axe-core (the
+accessibility audit) and the WebGPU type definitions; none is in the app. The engine depends on faer (sparse LU),
+serde, serde_json, postcard, sha2 and argon2 (key derivation for encrypted projects). Each release lists every
+component in a CycloneDX bill of materials.
+
+## Documentation
+
+| Document | For |
+| --- | --- |
+| [docs/USER-GUIDE.md](docs/USER-GUIDE.md) | Using the app: drawing, data, study cases, calculations, import and export |
+| [docs/ENGINE.md](docs/ENGINE.md) | What every calculation computes, its conventions and how it is checked |
+| [docs/BENCHMARK-KIT.md](docs/BENCHMARK-KIT.md) | Comparing PowerStudio with your own tool on your own model |
+| [docs/SECURITY.md](docs/SECURITY.md) | What is protected, how, and where protection ends |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the code is organised |
+| [docs/TESTING.md](docs/TESTING.md) and [docs/TEST-REPORT.md](docs/TEST-REPORT.md) | How it is tested, and the results |
+| [docs/design/NATIONAL-GRADE.md](docs/design/NATIONAL-GRADE.md) | The design and its decisions |
+| [docs/research/sources.md](docs/research/sources.md) | Where every reference value comes from |
 
 ## Scope and boundaries
 
@@ -114,41 +133,38 @@ errs high for faults fed by a single source; motors without pole pairs take no d
 Converter-fed sources follow pandapower's treatment, the only open reference for them, and inject a constant current
 in stability simulations.
 
-**Load flow.** Balanced, positive sequence only. Not implemented: automatic tap changers, switched shunts, remote
-voltage control, voltage-dependent loads, distributed slack, DC lines and converters. The engine's model and topology
-processing already handle switches and three-winding transformers, but the editor does not offer them yet (the
-IEEE 14 sample models its three-winding transformer as three two-winding units, as the IEEE data does), so in the app
-elements are only in or out of service. The engine solves networks of tens of thousands of buses (docs/ENGINE.md
-gives the timings), but the diagram editor has been used only with networks of up to a few hundred busbars.
+**Load flow.** Balanced, positive sequence only. HVDC links run at their set points (PSS/E two-terminal and VSC
+lines); CGMES DC equipment is not modelled, and in the editor an HVDC station becomes the fixed injection its set point
+gives. The engine handles switches and three-winding transformers, but the editor does not offer them yet: an imported
+network's closed switches join their busbars and a three-winding transformer becomes a star busbar with three
+two-winding transformers (the import dialog lists every simplification). Networks of tens of thousands of busbars open,
+solve and are laid out by voltage level, but their automatic diagram is dense; substation diagrams are not part of this
+release (NATIONAL-GRADE.md, ADR 12).
 
 **Contingency.** Contingencies of several elements are listed by hand; there is no automatic N-2 enumeration.
 Remedial actions fire once per contingency and do not chain, and there is no optimal redispatch: lost generation
 goes to the reference machines, or is shared as the load flow's balance setting says.
 
-**Stability.** The model library is the design's first wave: no salient-pole machines (GENSAL), no PSS2A, no
-renewable, HVDC or SVC dynamics and no motor loads (renewables are the next wave); faults are three-phase faults at
-busbars; stabilisers read their own machine only (no remote busbar, bus frequency or voltage derivative). DYR records
-of other models are reported, and their machines keep the classical model. No electromagnetic transients.
+**Stability.** The model library is the design's first wave: no salient-pole machines (GENSAL), no PSS2A, no renewable,
+HVDC or SVC dynamics (machines fed through converters inject a constant current) and no motor loads; faults are
+three-phase faults at busbars; stabilisers read their own machine only. DYR records of other models are reported, and
+their machines keep the classical model. No electromagnetic transients.
 
 **Not part of PowerStudio at all.** Protection coordination, harmonics, optimal power flow, state estimation,
 reliability, unbalanced three-phase load flow, cable sizing, arc flash.
 
-**Data and samples.** MATPOWER import reads format version 2. The diagram has no switches, three-winding
-transformers or static var compensators yet: an imported network's closed switches join their nodes into one busbar,
-a three-winding transformer becomes a star busbar with three two-winding ones, and a compensator becomes a machine
-without active power; the import dialog lists every such simplification. Networks of several thousand busbars open
-and solve, but their automatic diagram is dense; substation diagrams for them are planned (design phase 4). The IEEE 14 sample's ratings and machine data are
+**Data and samples.** MATPOWER import reads format version 2. The IEEE 14 sample's ratings and machine data are
 assumptions; on its 132 kV side nothing is earthed, so its earth-fault currents there are a few hundred amperes by
 design. Riverside is invented.
 
-**Verified environments.** The browser tests ran in Playwright's Chromium 156 on macOS (WebGPU on an Apple Metal
-adapter, and the Canvas 2D fallback in the headless shell) and on GitHub's Ubuntu runners, where Chromium's WebGPU
-does not work, so only Canvas 2D ran there; see [docs/TEST-REPORT.md](docs/TEST-REPORT.md). Firefox and Safari were
-not tested. Touch and pinch input are implemented but were not tried on a real phone. Keyboard operation and ARIA
-roles are in place, but the app has not been audited with a screen reader.
+**Verified environments.** The browser tests run in Playwright's Chromium on macOS (WebGPU on an Apple Metal adapter,
+and the Canvas 2D fallback in the headless shell), Firefox and WebKit on macOS, and on GitHub's Ubuntu runners, where
+Chromium's WebGPU does not work; see [docs/TEST-REPORT.md](docs/TEST-REPORT.md). Safari itself, Windows and real phones
+were not tried. The app passes an automated accessibility audit, but has not been tried with a screen reader.
 
-**Storage.** Documents stay in the browser that made them. Clearing site data deletes them; export to keep a copy.
-There is no sharing or collaboration.
+**Storage.** Documents stay in the browser that made them, unencrypted, as safe as the device account
+([docs/SECURITY.md](docs/SECURITY.md)). Clearing site data deletes them; export to keep a copy. There is no sharing or
+collaboration.
 
 ## Licence
 
