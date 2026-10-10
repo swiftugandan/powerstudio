@@ -109,3 +109,73 @@ fn chunks_merge_to_the_sequential_result() {
         }
     }
 }
+
+/// Screening never misses an outage that a full load flow flags: every outage with a violation the base case does
+/// not have (thermal or voltage) is solved in full, on every PSS/E reference case and on the 2,000-bus ACTIVSg grid.
+/// Prints how many outages screening judged safe.
+#[test]
+fn screening_never_misses_what_full_ac_flags() {
+    use ps_model::study::LoadFlowSettings;
+    let mut models: Vec<(String, ps_model::Model)> = Vec::new();
+    let cases = json("tests/oracle/psse-cases.json");
+    for case in cases["cases"].as_array().unwrap() {
+        if case["loadflow"] != false {
+            models.push((case["name"].as_str().unwrap().into(), psse_import(case).model));
+        }
+    }
+    let text = std::fs::read_to_string(repo(".cache/reference/case_ACTIVSg2000.m")).unwrap();
+    models.push((
+        "activsg2000".into(),
+        ps_io::matpower_model::to_model(&ps_io::matpower::parse(&text).unwrap()).model,
+    ));
+    let mut misses = Vec::new();
+    for (name, model) in &models {
+        let mut study = ps_model::study::StudyCase {
+            loadflow: LoadFlowSettings {
+                max_iter: 50,
+                ..LoadFlowSettings::plain()
+            },
+            ..Default::default()
+        };
+        let Ok(full) = contingency::run(model, &study, &mut Silent) else {
+            continue;
+        };
+        study.contingency.screening = true;
+        let screened = contingency::run(model, &study, &mut Silent).unwrap();
+        let flagged: Vec<&str> = full
+            .cases
+            .iter()
+            .filter(|c| c.violations.iter().any(|v| !v.in_base) || !c.converged)
+            .map(|c| c.id.as_str())
+            .collect();
+        for id in &flagged {
+            if let Some(sc) = screened.cases.iter().find(|c| c.id == *id && c.screened) {
+                let fc = full.cases.iter().find(|c| c.id == *id).unwrap();
+                let what: Vec<String> = fc
+                    .violations
+                    .iter()
+                    .filter(|v| !v.in_base)
+                    .map(|v| format!("{} {} {:.3} (limit {:.3})", v.kind, v.id, v.value, v.limit))
+                    .collect();
+                misses.push(format!(
+                    "{name}: {id} [{}; estimate {:.1} %]{}",
+                    what.join(", "),
+                    sc.max_loading.unwrap_or(0.0),
+                    if fc.converged { "" } else { " (does not converge)" }
+                ));
+            }
+        }
+        eprintln!(
+            "{name}: {} outages, {} flagged by full AC, {} judged safe by screening",
+            full.cases.len(),
+            flagged.len(),
+            screened.effort.screened
+        );
+    }
+    assert!(
+        misses.is_empty(),
+        "screening missed {}: {}",
+        misses.len(),
+        misses.join("\n")
+    );
+}

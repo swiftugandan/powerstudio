@@ -17,6 +17,7 @@ mod flows;
 mod init;
 mod network;
 mod newton;
+mod sensitivity;
 mod ybus;
 
 pub use dc::dc_angles;
@@ -28,4 +29,5 @@ pub use network::{
 pub use newton::{
     Balance, Cache, Control, ControlLog, IterationLog, Options, Solution, Timing, UnitOutput, solve, solve_cached,
 };
+pub use sensitivity::{DcModel, Modified, VoltageModel};
 pub use ybus::Ybus;

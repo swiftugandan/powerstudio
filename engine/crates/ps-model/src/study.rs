@@ -178,6 +178,15 @@ pub struct ContingencySettings {
     pub acceptable_s: f64,
     /// Further contingencies, such as several elements failing together.
     pub list: Vec<Contingency>,
+    /// Estimate each single-branch outage linearly first and solve it in full only when the estimate comes within
+    /// the margins of a limit.
+    pub screening: bool,
+    /// Loading margin of screening, % of the loading limit: an outage whose estimate loads a branch above
+    /// (100 − margin) % of the limit is solved in full.
+    pub screening_margin: f64,
+    /// Voltage margin of screening, p.u.: an outage whose estimate brings a voltage within this of its band's edge
+    /// is solved in full.
+    pub screening_voltage: f64,
 }
 
 impl Default for ContingencySettings {
@@ -190,6 +199,9 @@ impl Default for ContingencySettings {
             max_loading: 100.0,
             acceptable_s: 0.0,
             list: Vec::new(),
+            screening: false,
+            screening_margin: 5.0,
+            screening_voltage: 0.01,
         }
     }
 }
