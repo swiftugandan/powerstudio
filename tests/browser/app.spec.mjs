@@ -278,6 +278,42 @@ test('defines a two-line contingency and a remedial action, and the analysis rep
   await expect(dlg.locator('.cont-empty')).toHaveText(['No contingencies of your own yet.', 'No remedial actions yet.']);
 });
 
+test('edits loads in the data sheet: several rows at once, a pasted block, a refused paste, and undo', async ({ page }) => {
+  await open(page);
+  await page.locator('.dock-tab[data-tab="data"]').click();
+  await page.locator('.sheet-toolbar select').selectOption('load');
+  const p = page.locator('table.sheet tbody tr[data-id] td[data-key="p"]');
+  const q = page.locator('table.sheet tbody tr[data-id] td[data-key="q"]');
+  const before = await p.allTextContents();
+  // Three rows selected with Shift and arrows, then typing edits all three.
+  await p.nth(0).click();
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.press('Shift+ArrowDown');
+  await page.keyboard.type('4');
+  await page.keyboard.press('Enter');
+  await expect(p.nth(2)).toHaveText('4');
+  expect((await p.allTextContents()).slice(0, 4)).toEqual(['4', '4', '4', before[3]]);
+  // A block pasted from a spreadsheet fills from the active cell.
+  await p.nth(1).click();
+  const paste = (/** @type {string} */ text) => page.evaluate(t => {
+    const data = new DataTransfer();
+    data.setData('text/plain', t);
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true }));
+  }, text);
+  await paste('7\t3\n8\t2\n');
+  await expect(q.nth(2)).toHaveText('2');
+  expect(await p.nth(1).textContent()).toBe('7');
+  // A block with a value that is not a number changes nothing.
+  await paste('5\nabc\n');
+  await expect(page.locator('.toast').filter({ hasText: 'Nothing was pasted' })).toBeVisible();
+  expect(await p.nth(1).textContent()).toBe('7');
+  // Each edit is one undo step.
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(p.nth(1)).toHaveText('4');
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(p.nth(0)).toHaveText(before[0]);
+});
+
 test('imports a MATPOWER case and solves it to the MATPOWER solution', async ({ page }) => {
   await open(page);
   await page.locator('.ribbon-tab[data-tab="file"]').click();

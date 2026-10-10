@@ -15,6 +15,7 @@ flowchart LR
     app --> cmds[ui/commands.js]
     cmds --> ribbon[ui/ribbon.js] & palette[ui/palette.js] & keys[ui/keys.js]
     app --> tree[ui/tree.js] & insp[ui/inspector.js] & dock[ui/dock.js]
+    dock --> sheet[ui/datasheet.js]
     app --> vp[ui/viewport.js]
     vp --> scene[render/scene.js] --> dl[render/displaylist.js]
     dl --> gpu[render/webgpu.js<br>WGSL] & c2d[render/canvas2d.js] & svg[render/svg.js]
@@ -25,7 +26,7 @@ flowchart LR
   subgraph P["Worker pool"]
     wk[worker/engine.worker.js] --> host[engine/host.js] --> wasm[(engine .wasm)]
   end
-  client -- "compiled module, document, options" --> wk
+  client -- "compiled module, document once, then edits; options" --> wk
   wk -- "JSON report (transferred)" --> client
 ```
 
@@ -110,6 +111,14 @@ Fields that choose an element (busbar fields above 200 busbars, the fault locati
 contingency editor) are text boxes whose suggestion lists fill only when first focused, since a large network has
 tens of thousands of candidates.
 
+The data manager (`datasheet.js`, the Data tab of the dock) shows every element of one class as a virtual
+spreadsheet. Its columns are the catalogue's field specs, as in the inspector, and every change is a store
+transaction: a value typed into a cell, the same value written to every selected row, or a block pasted from another
+spreadsheet, which is parsed and checked whole before anything changes. It repaints only the rows in view, keeps each
+class's column widths once measured, and restyles rows in place on selection changes (replacing cells between the
+two clicks of a double-click would lose it). On ACTIVSg70k no frame takes over 50 ms while it opens, scrolls, edits,
+filters, sorts or changes class.
+
 Nothing a user does on a national network may hold the page for more than a frame or two, and the work that would is
 cut into steps: opening a document runs the import gate (`normalizeSteps`) in slices between frames; a calculation's
 result reaches the colours, the results table and the panels in separate tasks; the output log renders once per
@@ -124,10 +133,17 @@ core, up to eight), then has the engine merge the chunks. Workers need no Shared
 GitHub Pages and from a file on disk. Cancelling terminates the busy workers. If workers cannot start, one engine
 runs on the main thread.
 
+Each worker keeps its own copy of the open document. The client sends a worker the whole document as JSON once
+(serialised in slices by `serialise`, the same function autosave uses, and shared by every worker of the pool), and
+after that forwards each store change's operations, which the worker applies to its copy with the store's own
+`applyOp`. A calculation names the document state it expects (`opened:edits`); a worker whose copy is behind, such
+as one started after a cancel, receives the whole document again first. So a calculation never copies the document
+on the page's thread, and a contingency analysis over eight workers does not copy it eight times.
+
 ## Data flow of a calculation
 
 1. A command (`calc.loadflow`, …) checks `validateForCalculation` and hands the document to the engine client.
-2. The worker serialises the document into a study request; the engine imports it into its model (re-using the
+2. The worker serialises its copy of the document into a study request; the engine imports it into its model (re-using the
    previous import when the document is unchanged), processes the topology, builds the per-unit network, solves, and
    returns the report as JSON, which the worker transfers back without copying.
 3. `App` stores the adapted result with the current network revision, logs a summary in the Output panel, and

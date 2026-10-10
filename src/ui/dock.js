@@ -9,12 +9,17 @@ import { CLASSES } from '../core/catalog.js';
 import { effectiveTheme } from './theme.js';
 import { enumLabel } from './fields.js';
 import { minOf, maxOf } from '../core/extent.js';
+import { DataSheet } from './datasheet.js';
 
 /** @typedef {{ time: number, level: 'info' | 'ok' | 'warn' | 'error', text: string, detail?: string }} LogEntry
- * @typedef {'output' | 'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} DockTab */
+ * @typedef {'output' | 'data' | 'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} DockTab
+ * @typedef {import('../engine/reports.js').CalcKind} CalcKind */
+
+/** Whether a tab shows a calculation's results. @param {DockTab} t @returns {t is CalcKind} */
+const isResult = t => t !== 'output' && t !== 'data';
 
 const TABS = /** @type {Array<[DockTab, string, string]>} */ ([
-  ['output', 'Output', 'info'], ['loadflow', 'Load flow', 'loadflow'], ['shortcircuit', 'Short circuit', 'shortcircuit'],
+  ['output', 'Output', 'info'], ['data', 'Data', 'database'], ['loadflow', 'Load flow', 'loadflow'], ['shortcircuit', 'Short circuit', 'shortcircuit'],
   ['contingency', 'Contingency', 'contingency'], ['rms', 'Stability', 'rms'],
 ]);
 
@@ -30,7 +35,7 @@ export class Dock {
     /** Pending animation frame of a log render. */
     this.logFrame = 0;
     /** @type {DockTab} */
-    this.tab = /** @type {DockTab} */ (app.prefs.dockTab) in { output: 1, loadflow: 1, shortcircuit: 1, contingency: 1, rms: 1 } ? /** @type {DockTab} */ (app.prefs.dockTab) : 'output';
+    this.tab = /** @type {DockTab} */ (app.prefs.dockTab) in { output: 1, data: 1, loadflow: 1, shortcircuit: 1, contingency: 1, rms: 1 } ? /** @type {DockTab} */ (app.prefs.dockTab) : 'output';
     /** @type {Record<string, { key: string, dir: 1 | -1 }>} */
     this.sorts = {};
     this.lfView = 'buses';
@@ -53,6 +58,7 @@ export class Dock {
     });
     /** @type {Plot | null} */
     this.plot = null;
+    this.sheet = new DataSheet(app);
   }
 
   /** Adds a line to the output log. Many lines in a row (a calculation's warnings) render once, on the next frame.
@@ -73,7 +79,7 @@ export class Dock {
     this.app.prefs.dockTab = tab;
     this.app.savePrefs();
     if (this.app.prefs.dock === false) this.app.setPanel('dock', true);
-    if (tab !== 'output' && tab !== this.app.overlayKind && this.app.results[tab]) this.app.setOverlay(tab);
+    if (isResult(tab) && tab !== this.app.overlayKind && this.app.results[tab]) this.app.setOverlay(tab);
     this.render();
   }
 
@@ -87,7 +93,7 @@ export class Dock {
       } else if (id === 'contingency' && app.results.contingency) {
         const bad = app.results.contingency.result.cases.filter((/** @type {any} */ c) => !c.converged || c.violations.length).length;
         badge = `<span class="count ${bad ? 'bad' : ''}">${bad}</span>`;
-      } else if (app.results[id]) badge = `<span class="count">${app.resultsStale(id) ? 'old' : '✓'}</span>`;
+      } else if (isResult(id) && app.results[id]) badge = `<span class="count">${app.resultsStale(id) ? 'old' : '✓'}</span>`;
       return h('button', { type: 'button', role: 'tab', class: 'dock-tab', 'data-tab': id, 'aria-selected': String(this.tab === id), html: `${icon(ic, 15)}<span>${label}</span>${badge}` });
     });
     const tools = [h('span', { class: 'dock-spacer' }),
@@ -104,6 +110,7 @@ export class Dock {
     const scroll = this.body.scrollTop;
     if (this.tab !== 'rms') this.plot = null;
     if (this.tab === 'output') this.renderLog();
+    else if (this.tab === 'data') { const { toolbar, sheet } = this.sheet.render(this.body); this.mount([toolbar], sheet); }
     else if (!app.results[this.tab]) this.renderEmpty(this.tab);
     else if (this.tab === 'loadflow') this.renderLoadFlow();
     else if (this.tab === 'shortcircuit') this.renderShortCircuit();
@@ -123,13 +130,12 @@ export class Dock {
     this.body.scrollTop = this.body.scrollHeight;
   }
 
-  /** @param {DockTab} tab */
+  /** @param {CalcKind} tab */
   renderEmpty(tab) {
     const what = { loadflow: ['loadflow', 'No load flow yet', 'calc.loadflow', 'Run load flow'], shortcircuit: ['shortcircuit', 'No short-circuit calculation yet', 'calc.shortcircuit', 'Run short circuit'],
-      contingency: ['contingency', 'No contingency analysis yet', 'calc.contingency', 'Run N-1 analysis'], rms: ['rms', 'No stability simulation yet', 'calc.rms', 'Run simulation'], output: ['info', '', '', ''] }[tab];
-    const keys = this.app.commands.get(what[2])?.keys?.[0];
+      contingency: ['contingency', 'No contingency analysis yet', 'calc.contingency', 'Run N-1 analysis'], rms: ['rms', 'No stability simulation yet', 'calc.rms', 'Run simulation'] }[tab];
     this.body.replaceChildren(h('div', { class: 'dock-empty' }, h('div', { class: 'inner' }, h('span', { html: icon(what[0], 26) }), h('div', { text: what[1] }),
-      h('button', { type: 'button', class: 'btn primary', 'data-cmd': what[2], html: `${icon('play', 14)}<span>${what[3]}</span>${keys ? '' : ''}` }))));
+      h('button', { type: 'button', class: 'btn primary', 'data-cmd': what[2], html: `${icon('play', 14)}<span>${what[3]}</span>` }))));
   }
 
   /** @param {string} key @param {string} def @param {1 | -1} [dir] */
@@ -179,7 +185,7 @@ export class Dock {
   /** @param {string} id */
   nameOf(id) { return this.app.store.get(id)?.name || id; }
 
-  staleNote() { return this.tab !== 'output' && this.app.resultsStale(this.tab) ? h('span', { class: 'pill warn', html: `${icon('warning', 13)}Calculated before the last edit` }) : null; }
+  staleNote() { return isResult(this.tab) && this.app.resultsStale(this.tab) ? h('span', { class: 'pill warn', html: `${icon('warning', 13)}Calculated before the last edit` }) : null; }
 
   renderLoadFlow() {
     const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').LoadFlowResult, ms: number }} */ (app.results.loadflow);
@@ -401,6 +407,7 @@ export class Dock {
 
   /** CSV of the table on screen. */
   csv() {
+    if (this.tab === 'data') return this.sheet.csv();
     if (!this.current) return null;
     return { name: this.current.name, text: toCSV(this.current.columns, this.current.rows) };
   }

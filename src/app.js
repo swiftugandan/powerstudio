@@ -356,7 +356,9 @@ export class App {
     this.viewport.invalidate();
     this.dock.renderTabs();
     if (change.network || change.study) {
-      if (this.dock.tab !== 'output') this.dock.render();
+      // The data sheet keeps its toolbar (and a filter being typed) unless elements came or went.
+      if (this.dock.tab === 'data' && !change.structural) this.dock.sheet.refresh();
+      else if (this.dock.tab !== 'output') this.dock.render();
       if (change.source !== 'load') this.maybeAutoLoadFlow();
     }
     this.updateStatus();
@@ -402,7 +404,8 @@ export class App {
     this.tree.render();
     this.inspector.schedule();
     this.viewport.invalidate('overlay');
-    if (this.dock.tab !== 'output' && this.dock.tab !== 'rms') this.dock.render();
+    if (this.dock.tab === 'data') this.dock.sheet.selectionChanged();
+    else if (this.dock.tab !== 'output' && this.dock.tab !== 'rms') this.dock.render();
     this.updateStatus();
     this.commands.changed();
     if (this.selection.size === 1 && this.root.dataset.sheet === 'left') this.root.dataset.sheet = '';
