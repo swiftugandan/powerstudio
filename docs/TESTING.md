@@ -9,7 +9,7 @@ npm run lint:engine    # rustfmt and Clippy on the engine, warnings denied
 node scripts/fetch-reference.mjs  # once: the CGMES, PSS/E and MATPOWER files the engine tests read (checksums pinned)
 npm run test:engine    # the engine's tests, native: oracle goldens, CGMES, PSS/E and large MATPOWER cases against PowSyBl
 npm test               # builds the WebAssembly engine, then the Node test runner (see below)
-npm run test:browser   # Playwright against dist/PowerStudio.html over HTTP (builds first)
+npm run test:browser   # Playwright against dist/PowerStudio.html over HTTP (builds first), four browser projects
 ```
 
 The oracle checks run twice, once in each build of the engine: natively in `engine/crates/ps-study/tests/` and as
@@ -28,6 +28,15 @@ fresh one, to give identical reports.
 
 Pixel checks decode Playwright screenshots (`tests/browser/png.mjs`) and look for the diagram's voltage-level colours,
 so a blank canvas fails.
+
+Two more projects, **firefox** and **webkit**, run every scenario in Playwright's builds of those engines (`npx
+playwright install firefox webkit`); they draw with whatever the build offers. Firefox removes the data from paste
+events a page makes itself, so the data sheet's paste test skips there.
+
+`tests/browser/a11y.spec.mjs` audits the app with axe-core (WCAG 2.1 A and AA rules) in the workspace with results,
+the short-circuit results, the data sheet, the study case dialog, the command palette, the File page and the phone
+layout, in both themes, and tabs through the workspace to check that every keyboard stop shows a focus mark. It runs
+in all four projects.
 
 ## Documentation screenshots
 

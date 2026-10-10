@@ -21,7 +21,7 @@ export async function openBackstage(app, page = 'home') {
   const main = h('main', { tabindex: '-1' });
   const nav = h('nav', { 'aria-label': 'File' });
   const panel = h('div', { class: 'backstage', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'File' }, nav, main);
-  const close = () => { panel.remove(); document.removeEventListener('keydown', onKey, true); previous?.focus?.(); };
+  const close = () => { closeBackstage(); document.removeEventListener('keydown', onKey, true); previous?.focus?.(); };
   /** @param {KeyboardEvent} e */
   const onKey = e => { if (e.key === 'Escape' && !document.querySelector('.scrim')) { e.preventDefault(); e.stopPropagation(); close(); } };
   document.addEventListener('keydown', onKey, true);
@@ -40,10 +40,21 @@ export async function openBackstage(app, page = 'home') {
     main.focus();
   };
   /** @type {HTMLElement} */ (document.getElementById('overlay-root')).append(panel);
+  // The page is modal: the workspace behind it takes neither focus nor clicks until it closes.
+  setWorkspaceInert(true);
   await show(page);
 }
 
-export function closeBackstage() { document.querySelector('.backstage')?.remove(); }
+export function closeBackstage() {
+  document.querySelector('.backstage')?.remove();
+  setWorkspaceInert(false);
+}
+
+/** @param {boolean} inert */
+function setWorkspaceInert(inert) {
+  const app = document.getElementById('app');
+  if (app) app.inert = inert;
+}
 
 /** @param {import('../app.js').App} app @param {Page} page @param {() => void} close @returns {Promise<HTMLElement[]>} */
 async function render(app, page, close) {

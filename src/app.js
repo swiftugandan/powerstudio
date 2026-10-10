@@ -44,6 +44,10 @@ import { REPO_URL } from './core/version.js';
 
 const CALC_LABEL = /** @type {Record<CalcKind, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'N-1 contingency analysis', rms: 'Stability simulation' });
 
+/** The panels' size limits in pixels: the side panels' widths, and the results panel's least height with its largest
+ * share of the window's height. */
+const SPLIT = { left: [180, 480], right: [240, 560], bottom: [120, 0.7] };
+
 export class App {
   /** @param {{ workerFactory: () => Worker, prefs: import('./ui/persistence.js').Prefs, library: import('./ui/persistence.js').DocumentLibrary, renderer: 'auto' | 'webgpu' | 'canvas' }} opt */
   constructor(opt) {
@@ -988,6 +992,16 @@ export class App {
     this.root.dataset.left = this.prefs.left ? 'open' : 'closed';
     this.root.dataset.right = this.prefs.right ? 'open' : 'closed';
     this.root.dataset.dock = this.prefs.dock ? 'open' : 'closed';
+    // The splitters announce the size they set, within its limits.
+    for (const sp of document.querySelectorAll('.splitter')) {
+      const which = /** @type {'left' | 'right' | 'bottom'} */ (/** @type {HTMLElement} */ (sp).dataset.split);
+      const [now, min, max] = which === 'left' ? [this.prefs.leftW, ...SPLIT.left] : which === 'right' ? [this.prefs.rightW, ...SPLIT.right]
+        : [this.prefs.dockH, SPLIT.bottom[0], Math.round(innerHeight * SPLIT.bottom[1])];
+      sp.setAttribute('aria-valuenow', String(now));
+      sp.setAttribute('aria-valuemin', String(min));
+      sp.setAttribute('aria-valuemax', String(max));
+      sp.setAttribute('aria-valuetext', `${now} pixels`);
+    }
   }
 
   /** @param {'left' | 'right' | 'dock'} which @param {boolean} [open] */
@@ -1003,9 +1017,9 @@ export class App {
     for (const sp of document.querySelectorAll('.splitter')) {
       const el = /** @type {HTMLElement} */ (sp), which = /** @type {'left' | 'right' | 'bottom'} */ (el.dataset.split);
       const apply = (/** @type {number} */ v) => {
-        if (which === 'left') this.prefs.leftW = Math.round(Math.min(480, Math.max(180, v)));
-        else if (which === 'right') this.prefs.rightW = Math.round(Math.min(560, Math.max(240, v)));
-        else this.prefs.dockH = Math.round(Math.min(innerHeight * 0.7, Math.max(120, v)));
+        if (which === 'left') this.prefs.leftW = Math.round(Math.min(SPLIT.left[1], Math.max(SPLIT.left[0], v)));
+        else if (which === 'right') this.prefs.rightW = Math.round(Math.min(SPLIT.right[1], Math.max(SPLIT.right[0], v)));
+        else this.prefs.dockH = Math.round(Math.min(innerHeight * SPLIT.bottom[1], Math.max(SPLIT.bottom[0], v)));
         this.applyLayout();
       };
       el.addEventListener('pointerdown', e => {

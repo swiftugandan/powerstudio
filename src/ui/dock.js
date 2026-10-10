@@ -55,8 +55,10 @@ export class Dock {
     this.rmsHidden = new Set();
     /** @type {{ columns: any[], rows: any[], name: string } | null} */
     this.current = null;
-    this.tabs = h('div', { class: 'dock-tabs', role: 'tablist', 'aria-label': 'Results' });
-    this.body = h('div', { class: 'dock-body', role: 'tabpanel' });
+    // The header: the tabs, which alone make the tab list, and the panel's tools beside them.
+    this.tabs = h('div', { class: 'dock-tabs' });
+    this.tabList = h('div', { class: 'dock-tablist', role: 'tablist', 'aria-label': 'Results' });
+    this.body = h('div', { class: 'dock-body', role: 'tabpanel', id: 'dock-panel', tabindex: '-1' });
     // Table headers stick below the result's toolbars, whose height changes as they wrap.
     this.headSize = new ResizeObserver(entries => {
       for (const e of entries) this.body.style.setProperty('--sticky-top', `${/** @type {HTMLElement} */ (e.target).offsetHeight}px`);
@@ -65,6 +67,16 @@ export class Dock {
     this.tabs.addEventListener('click', e => {
       const b = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest('[data-tab]'));
       if (b) this.show(/** @type {DockTab} */ (b.dataset.tab));
+    });
+    // Arrow keys, Home and End move between tabs, as the tab pattern has them; the tab list is one tab stop.
+    this.tabList.addEventListener('keydown', e => {
+      const ids = TABS.map(([id]) => id), at = ids.indexOf(this.tab);
+      const to = e.key === 'ArrowRight' ? (at + 1) % ids.length : e.key === 'ArrowLeft' ? (at - 1 + ids.length) % ids.length
+        : e.key === 'Home' ? 0 : e.key === 'End' ? ids.length - 1 : -1;
+      if (to < 0) return;
+      e.preventDefault();
+      this.show(/** @type {DockTab} */ (ids[to]));
+      /** @type {HTMLElement | null} */ (this.tabList.querySelector(`[data-tab="${ids[to]}"]`))?.focus();
     });
     /** @type {Plot | null} */
     this.plot = null;
@@ -104,12 +116,19 @@ export class Dock {
         const bad = app.results.contingency.result.cases.filter((/** @type {any} */ c) => !c.converged || c.violations.length).length;
         badge = `<span class="count ${bad ? 'bad' : ''}">${bad}</span>`;
       } else if (isResult(id) && app.results[id]) badge = `<span class="count">${app.resultsStale(id) ? 'old' : '✓'}</span>`;
-      return h('button', { type: 'button', role: 'tab', class: 'dock-tab', 'data-tab': id, 'aria-selected': String(this.tab === id), html: `${icon(ic, 15)}<span>${label}</span>${badge}` });
+      const on = this.tab === id;
+      return h('button', { type: 'button', role: 'tab', class: 'dock-tab', id: `dock-tab-${id}`, 'data-tab': id, 'aria-selected': String(on),
+        'aria-controls': 'dock-panel', tabindex: on ? '0' : '-1', html: `${icon(ic, 15)}<span>${label}</span>${badge}` });
     });
+    this.body.setAttribute('aria-labelledby', `dock-tab-${this.tab}`);
     const tools = [h('span', { class: 'dock-spacer' }),
       h('button', { type: 'button', class: 'icon-btn sm', title: 'Export table as CSV', 'aria-label': 'Export table as CSV', 'data-cmd': 'results.csv', html: icon('csv', 16) }),
       h('button', { type: 'button', class: 'icon-btn sm', title: app.prefs.dock ? 'Hide results' : 'Show results', 'aria-label': 'Toggle results panel', 'data-cmd': 'view.dock', html: icon('panelBottom', 16) })];
-    this.tabs.replaceChildren(...btns, ...tools);
+    // Focus stays on the tab the keyboard moved to when the tabs are drawn again.
+    const focused = this.tabList.contains(document.activeElement);
+    this.tabList.replaceChildren(...btns);
+    this.tabs.replaceChildren(this.tabList, ...tools);
+    if (focused) /** @type {HTMLElement | null} */ (this.tabList.querySelector('[aria-selected="true"]'))?.focus();
   }
 
   render() {

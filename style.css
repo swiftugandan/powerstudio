@@ -17,12 +17,16 @@
   --border-strong: #c5ccd5;
   --text: #18212e;
   --text-2: #4a5566;
-  --text-3: #778294;
+  --text-3: #606b7c;
   --accent: #0b7a83;
   --accent-hover: #08666e;
   --accent-soft: rgba(11, 122, 131, 0.11);
   --accent-text: #08666e;
   --on-accent: #ffffff;
+  /* The File page's navigation: its items darken the teal in the light theme, where its text is white. */
+  --nav-bg: #08666e;
+  --nav-hover: rgba(0, 0, 0, 0.14);
+  --nav-current: rgba(0, 0, 0, 0.24);
   --ok: #1d7f45;
   --warn: #a15c00;
   --danger: #c0352b;
@@ -76,12 +80,15 @@
     --border-strong: #353e4b;
     --text: #e5e9ef;
     --text-2: #a9b2be;
-    --text-3: #7c8693;
+    --text-3: #929ca9;
     --accent: #36c0cb;
     --accent-hover: #59d0d9;
     --accent-soft: rgba(54, 192, 203, 0.15);
     --accent-text: #6ad6de;
     --on-accent: #052a2e;
+    --nav-bg: var(--accent);
+    --nav-hover: rgba(255, 255, 255, 0.14);
+    --nav-current: rgba(255, 255, 255, 0.26);
     --ok: #4cc283;
     --warn: #e7a83d;
     --danger: #f06a5f;
@@ -125,12 +132,15 @@
   --border-strong: #353e4b;
   --text: #e5e9ef;
   --text-2: #a9b2be;
-  --text-3: #7c8693;
+  --text-3: #929ca9;
   --accent: #36c0cb;
   --accent-hover: #59d0d9;
   --accent-soft: rgba(54, 192, 203, 0.15);
   --accent-text: #6ad6de;
   --on-accent: #052a2e;
+  --nav-bg: var(--accent);
+  --nav-hover: rgba(255, 255, 255, 0.14);
+  --nav-current: rgba(255, 255, 255, 0.26);
   --ok: #4cc283;
   --warn: #e7a83d;
   --danger: #f06a5f;
@@ -329,6 +339,10 @@ kbd {
 .splitter-v:hover::after, .splitter-v:focus-visible::after, .splitter-v.dragging::after { left: 2px; top: 0; bottom: 0; width: 1px; }
 .splitter-h:hover::after, .splitter-h:focus-visible::after, .splitter-h.dragging::after { top: 2px; left: 0; right: 0; height: 1px; }
 .splitter:focus-visible { outline: none; }
+/* Focused from the keyboard, the splitter's line is solid and twice as wide. */
+.splitter:focus-visible::after { opacity: 1; }
+.splitter-v:focus-visible::after { left: 1.5px; width: 2px; }
+.splitter-h:focus-visible::after { top: 1.5px; height: 2px; }
 
 .center { display: grid; grid-template-rows: minmax(0, 1fr) 5px var(--dock-h); grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; }
 .app[data-dock="closed"] .center { grid-template-rows: minmax(0, 1fr) 0 34px; }
@@ -336,6 +350,8 @@ kbd {
 /* Viewport */
 .viewport { position: relative; min-height: 0; overflow: hidden; background: var(--dg-bg); outline: none; touch-action: none; }
 .viewport-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+/* Reached by the keyboard, the diagram shows an inset ring; a click on it shows none. */
+.viewport-canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .viewport[data-tool="pan"] .viewport-canvas, .viewport.panning .viewport-canvas { cursor: grab; }
 .viewport.panning .viewport-canvas { cursor: grabbing; }
 .viewport[data-tool="place"] .viewport-canvas { cursor: crosshair; }
@@ -382,6 +398,8 @@ kbd {
   border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface);
 }
 .input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+/* WebKit draws no shadow on a native select, so one reached by the keyboard takes an outline in every browser. */
+select.input:focus-visible { box-shadow: none; outline: 2px solid var(--accent); outline-offset: -1px; }
 .input.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
 .tree { list-style: none; margin: 0; padding: 4px 0 12px; font-size: 12.5px; }
 .tree ul { list-style: none; margin: 0; padding: 0; }
@@ -392,6 +410,7 @@ kbd {
 }
 .tree-row:hover { background: var(--hover); }
 .tree-row[aria-selected="true"] { background: var(--accent-soft); color: var(--text); }
+.tree-row[aria-selected="true"] .meta { color: var(--text-2); }
 .tree-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .tree-row .twisty { width: 14px; height: 14px; color: var(--text-3); flex: none; transition: transform 0.12s; }
 .tree-row[aria-expanded="false"] .twisty { transform: rotate(-90deg); }
@@ -439,6 +458,7 @@ kbd {
 /* Dock */
 .dock { display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-top: 1px solid var(--border); }
 .dock-tabs { display: flex; align-items: stretch; height: 34px; border-bottom: 1px solid var(--border); flex: none; padding: 0 4px 0 6px; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.dock-tablist { display: flex; align-items: stretch; gap: 2px; flex: none; }
 .dock-tab { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 0; background: transparent; color: var(--text-2); position: relative; font-weight: 500; white-space: nowrap; }
 .dock-tab:hover { color: var(--text); }
 .dock-tab[aria-selected="true"] { color: var(--text); }
@@ -464,9 +484,9 @@ kbd {
 .dock-empty .icon { color: var(--text-3); width: 26px; height: 26px; }
 
 .pill { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
-.pill.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
-.pill.warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
-.pill.bad { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.pill.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: color-mix(in srgb, var(--ok) 80%, var(--text)); }
+.pill.warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: color-mix(in srgb, var(--warn) 80%, var(--text)); }
+.pill.bad { background: color-mix(in srgb, var(--danger) 14%, transparent); color: color-mix(in srgb, var(--danger) 80%, var(--text)); }
 .pill.neutral { background: var(--surface-3); color: var(--text-2); }
 
 /* Tables */
@@ -623,13 +643,15 @@ td.num .sheet-editor { text-align: right; font-family: var(--mono); font-size: 1
 
 /* Backstage (File tab) */
 .backstage { position: fixed; inset: calc(var(--titlebar-h)) 0 0 0; z-index: 40; display: grid; grid-template-columns: 220px minmax(0, 1fr); background: var(--surface); animation: fade 0.1s ease-out; }
-.backstage nav { background: var(--accent); color: var(--on-accent); padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+.backstage nav { background: var(--nav-bg); color: var(--on-accent); padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
 .backstage nav button { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius-sm); background: transparent; color: inherit; text-align: left; font-weight: 500; }
-.backstage nav button:hover { background: rgba(255, 255, 255, 0.12); }
-.backstage nav button[aria-current="true"] { background: rgba(255, 255, 255, 0.2); }
+.backstage nav button:hover { background: var(--nav-hover); }
+.backstage nav button[aria-current="true"] { background: var(--nav-current); }
+/* On the teal navigation and the teal File tab the focus ring takes their text colour, which the teal shows. */
+.backstage nav button:focus-visible, .ribbon-tab.file-tab:focus-visible { outline: 2px solid var(--on-accent); outline-offset: -3px; }
 .backstage nav .back { margin-bottom: 10px; }
 .backstage nav .spacer { flex: 1; }
-.backstage nav .fine { font-size: 11px; opacity: 0.8; padding: 8px 12px; line-height: 1.45; }
+.backstage nav .fine { font-size: 11px; opacity: 0.9; padding: 8px 12px; line-height: 1.45; }
 .backstage main { overflow: auto; padding: 28px 36px; }
 .backstage h1 { margin: 0 0 4px; font-size: 22px; font-weight: 650; letter-spacing: -0.01em; }
 .backstage .lead { margin: 0 0 22px; color: var(--text-2); max-width: 720px; }
