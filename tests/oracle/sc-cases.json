@@ -1,0 +1,86 @@
+{
+ "about": "Short-circuit cases from IEC TR 60909-4 as pandapower's test suite encodes them (pandapower is BSD-3; the test file is downloaded at a pinned commit by scripts/fetch-reference.mjs into .cache/reference and read by scripts/oracle/iec60909.py, which writes tests/oracle/golden/sc-<name>.json with each network, pandapower's results, and the values the test expects, read from its source). Each case names the test function whose network and expected values it takes, and the calculation: fault ('3ph', '2ph'), case ('max', 'min'), kappa method, and changes the test makes to the network before calculating.",
+ "archives": {
+  "pandapower-iec60909-4": {
+   "file": "pandapower-test_iec60909_4.py",
+   "url": "https://raw.githubusercontent.com/e2nIEE/pandapower/fe517927858f8ffb8ef28db5a15f1a175f57dbbd/pandapower/test/shortcircuit/test_iec60909_4.py",
+   "sha256": "b3d84b681b14824942b13ed36ab0be3586f1b6566d85676a45c03a0c0ee14c48"
+  }
+ },
+ "cases": [
+  {
+   "name": "tr60909-4-3ph-max",
+   "test": "test_iec_60909_4_3ph",
+   "network": "iec_60909_4",
+   "fault": "3ph",
+   "case": "max",
+   "about": "The full example network: three-phase faults, maximum currents, \u03ba by method C."
+  },
+  {
+   "name": "tr60909-4-3ph-min",
+   "test": "test_iec_60909_4_3ph_min",
+   "network": "iec_60909_4",
+   "fault": "3ph",
+   "case": "min",
+   "changes": {
+    "line_endtemp_degree": 80.0,
+    "ext_grid_min_from_max": 10.0
+   },
+   "about": "Minimum currents: line end temperature 80 \u00b0C, network feeders at a tenth of their maximum short-circuit power."
+  },
+  {
+   "name": "tr60909-4-2ph-max",
+   "test": "test_iec_60909_4_2ph",
+   "network": "iec_60909_4",
+   "fault": "2ph",
+   "case": "max",
+   "about": "Line-to-line faults, maximum currents."
+  },
+  {
+   "name": "tr60909-4-3ph-no-motors",
+   "test": "test_iec_60909_4_3ph_without_motor",
+   "network": "iec_60909_4",
+   "fault": "3ph",
+   "case": "max",
+   "changes": {
+    "no_motors": true
+   },
+   "about": "The full network without its asynchronous motors."
+  },
+  {
+   "name": "tr60909-4-small",
+   "test": "test_iec_60909_4_3ph_small_with_gen",
+   "network": "iec_60909_4_small",
+   "fault": "3ph",
+   "case": "max",
+   "about": "The reduced network with one power station unit."
+  },
+  {
+   "name": "tr60909-4-small-no-gen",
+   "test": "test_iec_60909_4_3ph_small_without_gen",
+   "network": "iec_60909_4_small",
+   "fault": "3ph",
+   "case": "max",
+   "changes": {
+    "no_gens": true
+   },
+   "about": "The reduced network without its generator."
+  },
+  {
+   "name": "tr60909-4-gen-only",
+   "test": "test_iec_60909_4_3ph_small_gen_only",
+   "network": "iec_60909_4_small_gen_only",
+   "fault": "3ph",
+   "case": "max",
+   "about": "One power station unit alone, without an on-load tap changer."
+  },
+  {
+   "name": "tr60909-4-2gen",
+   "test": "test_iec_60909_4_3ph_2gen",
+   "network": "iec_60909_4_2gen",
+   "fault": "3ph",
+   "case": "max",
+   "about": "Two power station units, with and without an on-load tap changer, joined by a line."
+  }
+ ]
+}

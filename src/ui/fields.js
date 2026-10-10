@@ -63,7 +63,7 @@ export function elementPicker(buses, value, id, pick, optional, noun = 'busbar')
  * Builds the label and editor of one field.
  * @param {FieldSpec} f @param {unknown} value
  * @param {(v: unknown) => string} commit returns an error message, or '' on success
- * @param {{ buses?: Array<{ id: string, name: string }>, id?: string, labelOverride?: string }} [ctx]
+ * @param {{ buses?: Array<{ id: string, name: string }>, trafos?: Array<{ id: string, name: string }>, id?: string, labelOverride?: string }} [ctx]
  * @returns {HTMLElement[]} label, field and an error row
  */
 export function fieldRow(f, value, commit, ctx = {}) {
@@ -85,10 +85,11 @@ export function fieldRow(f, value, commit, ctx = {}) {
     input = picker.input;
     input.addEventListener('change', () => showError(picker.apply()));
     input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); showError(picker.apply()); } });
-  } else if (f.type === 'enum' || f.type === 'bus') {
+  } else if (f.type === 'enum' || f.type === 'bus' || f.type === 'trafo') {
     input = h('select', { id, class: 'input' });
-    const options = f.type === 'bus' ? (ctx.buses ?? []).map(b => ({ value: b.id, label: b.name || b.id })) : (f.options ?? []).map(o => ({ value: o, label: enumLabel(f.key, o) }));
-    if (f.type === 'bus' && f.optional !== undefined) options.unshift({ value: '', label: f.optional });
+    const refs = f.type === 'bus' ? ctx.buses : f.type === 'trafo' ? ctx.trafos : undefined;
+    const options = refs ? refs.map(b => ({ value: b.id, label: b.name || b.id })) : (f.options ?? []).map(o => ({ value: o, label: enumLabel(f.key, o) }));
+    if (refs && f.optional !== undefined) options.unshift({ value: '', label: f.optional });
     for (const o of options) input.append(h('option', { value: o.value, text: o.label }));
     input.value = String(value);
     input.addEventListener('change', () => showError(commit(input.value)));

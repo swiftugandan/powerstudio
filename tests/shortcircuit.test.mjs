@@ -10,7 +10,7 @@ for (const name of ['ieee14', 'riverside']) {
     for (const mode of /** @type {const} */ (['max', 'min'])) {
       test(`${name} ${fault} ${mode}: Ik″, ip and Ith match pandapower at every busbar`, () => {
         const ref = golden(name).shortcircuit[`${fault}-${mode}`];
-        const r = studies.shortcircuit(input(name), { fault, mode, kappa: 'C', lvTolerance: '10', location: '' });
+        const r = studies.shortcircuit(input(name), { fault, mode, kappa: 'C', lvTolerance: '10', location: '', tK: 1, lineTemperature: 20 });
         assert.equal(r.buses.length, Object.keys(ref).length);
         for (const b of r.buses) {
           for (const k of /** @type {const} */ (['ikss', 'ip', 'ith'])) {

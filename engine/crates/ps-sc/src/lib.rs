@@ -2,61 +2,36 @@
 //! IEC 60909-0. This is an IEC 60909-style calculation, not a certified one: docs/ENGINE.md, "Short circuit", lists
 //! the clauses it implements, the simplifications it makes and the references it is checked against.
 //!
-//! For each faulted bus k the only source is c·Un/√3 at k; machines and grids become impedances. The Thévenin
-//! impedance Zkk is read from the solution of Y·z = e_k for the positive and, for earth faults, the zero sequence
-//! network. The negative-sequence network equals the positive one.
+//! For each faulted bus k the only source is c·Un/√3 at k; machines, motors and grids become impedances, corrected
+//! by the standard's factors. The Thévenin impedance Zkk is read from the solution of Y·z = e_k for the positive and,
+//! for earth faults, the zero sequence network; the negative-sequence network equals the positive one. A power station
+//! unit (a machine with its own transformer) meets a fault outside it with both impedances corrected by KS or KSO, and
+//! a fault at the machine's terminals through a network of its own, where the machine has its terminal factor and its
+//! transformer none.
 
-use ps_model::study::{FaultType, KappaMethod, LvTolerance, ScMode, ShortCircuitSettings};
-use ps_model::{Class, Generator, Model, Transformer2, Winding};
-use ps_net::{BuildOptions, Calc, Seq, TransformerOptions, line_pu, tap_factor, transformer2_pu, two_port};
+pub mod factors;
+
+use std::collections::{HashMap, HashSet};
+
+pub use factors::{
+    fictitious_resistance_ratio, generator_correction, kappa_of, mu, q_factor, three_winding_corrected,
+    transformer_correction, unit_correction, voltage_factor,
+};
+
+use ps_model::study::{FaultType, KappaMethod, ScMode, ShortCircuitSettings};
+use ps_model::{Class, Feeder, Line, Model, NodeRef, Transformer2, Transformer3, Winding, Winding3};
+use ps_net::{
+    BuildOptions, Calc, Seq, TransformerOptions, line_pu, tap_factor, transformer2_pu, transformer3_winding_pu,
+    two_port,
+};
 use ps_num::C64;
 use ps_sparse::ComplexLu;
 use ps_topology::{Outages, active};
 use serde::Serialize;
 
 const SQRT3: f64 = 1.732_050_807_568_877_2;
-
-/// Voltage factors (cmax, cmin) for a nominal voltage (IEC 60909-0 Table 1, as pandapower implements it).
-pub fn voltage_factor(kv: f64, lv: LvTolerance) -> (f64, f64) {
-    if kv < 1.0 {
-        match lv {
-            LvTolerance::Six => (1.05, 0.95),
-            LvTolerance::Ten => (1.1, 0.9),
-        }
-    } else {
-        (1.1, 1.0)
-    }
-}
-
-/// Transformer impedance correction factor KT = 0.95·cmax / (1 + 0.6·xT) (IEC 60909-0, 6.3.3), with xT the
-/// reactance in p.u. of the rating.
-pub fn transformer_correction(t: &Transformer2, cmax: f64) -> f64 {
-    let zb = t.rated_kv1 * t.rated_kv1 / t.rated_mva;
-    0.95 * cmax / (1.0 + 0.6 * t.x / zb)
-}
-
-/// Generator impedance correction factor KG = Un/UrG · cmax / (1 + x″d·sin φrG) (IEC 60909-0, 6.6.1).
-pub fn generator_correction(g: &Generator, un: f64, cmax: f64) -> f64 {
-    let cos = g.sc.cos_phi;
-    let sin = (1.0 - cos * cos).max(0.0).sqrt();
-    un / g.rated_kv * cmax / (1.0 + g.sc.xdss * sin)
-}
-
-/// Fictitious generator resistance for the peak current, as a fraction of X″d (IEC 60909-0, 6.6.1).
-pub fn fictitious_resistance_ratio(g: &Generator) -> f64 {
-    if g.rated_kv <= 1.0 {
-        0.15
-    } else if g.rated_mva >= 100.0 {
-        0.05
-    } else {
-        0.07
-    }
-}
-
-/// κ = 1.02 + 0.98·e^(−3R/X) (IEC 60909-0, 8.1).
-pub fn kappa_of(rx: f64) -> f64 {
-    1.02 + 0.98 * (-3.0 * rx).exp()
-}
+/// Temperature coefficient of the conductors' resistance, 1/K (IEC 60909-0, 6.4).
+const ALPHA: f64 = 0.004;
 
 /// Results at one faulted bus.
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -67,7 +42,9 @@ pub struct FaultResult {
     pub ikss: f64,
     /// Peak current ip, kA.
     pub ip: f64,
-    /// Thermal equivalent current Ith for 1 s, kA.
+    /// Symmetrical breaking current Ib at the minimum time delay, kA (Ik″ for an unbalanced fault).
+    pub ib: f64,
+    /// Thermal equivalent current Ith for the study case's duration, kA.
     pub ith: f64,
     /// Initial short-circuit power Sk″, MVA.
     pub skss: f64,
@@ -109,6 +86,10 @@ pub struct ShortCircuitReport {
     pub mode: ScMode,
     /// Peak factor method.
     pub kappa_method: KappaMethod,
+    /// Minimum time delay of the breaking currents, s.
+    pub t_min: f64,
+    /// Duration of the short circuit for the thermal equivalent currents, s.
+    pub t_k: f64,
     /// Results per faulted bus.
     pub buses: Vec<FaultResult>,
     /// The single fault location, or empty.
@@ -121,48 +102,177 @@ pub struct ShortCircuitReport {
     pub warnings: Vec<String>,
 }
 
-/// Duration for Ith, s.
-const TK: f64 = 1.0;
+/// A power station unit: a machine and its transformer.
+#[derive(Debug, Clone, Copy)]
+struct Unit {
+    machine: usize,
+    trafo: usize,
+    /// The machine's bus.
+    bus: usize,
+    factors: factors::UnitFactors,
+}
 
-/// Runs the short-circuit calculation at every bus or at the settings' location.
-pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
-    let calc = Calc::build(model, &Outages::none(), BuildOptions::default());
-    let n = calc.net.buses.len();
-    let sb = model.meta.base_mva;
-    let f = model.meta.frequency_hz;
-    let vbase: Vec<f64> = calc.net.buses.iter().map(|b| b.base_kv).collect();
-    let max = st.mode == ScMode::Max;
-    let c_bus: Vec<f64> = vbase
-        .iter()
-        .map(|&v| voltage_factor(v, st.lv_tolerance))
-        .map(|(cmax, cmin)| if max { cmax } else { cmin })
-        .collect();
-    let cmax_bus: Vec<f64> = vbase.iter().map(|&v| voltage_factor(v, st.lv_tolerance).0).collect();
-    let mut warnings: Vec<String> = calc
-        .warnings
-        .iter()
-        .filter(|w| !w.contains("reference machine"))
-        .cloned()
-        .collect();
-    let on = |class, row| active(model, &Outages::none(), class, row);
-    let fc = if f == 60.0 { 24.0 } else { 20.0 };
+/// Which network a fault is calculated on: the network as it meets faults outside every power station unit, or the
+/// network for a fault at the terminals of unit `k`'s machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Variant {
+    Normal,
+    Terminals(usize),
+}
 
-    // Assembles a sequence network as coordinate entries.
-    let assemble = |seq: Seq, freq_scale: f64, peak: bool| -> Vec<(usize, usize, C64)> {
-        let mut e: Vec<(usize, usize, C64)> = Vec::new();
+/// A machine or motor as the breaking current sees it: its bus, its admittance in the fault network, its rated
+/// current in kA at its bus, and for a motor its q factor.
+struct Rotating {
+    bus: usize,
+    y: C64,
+    rated_ka: f64,
+    q: f64,
+}
+
+struct Builder<'a> {
+    model: &'a Model,
+    calc: &'a Calc,
+    st: &'a ShortCircuitSettings,
+    sb: f64,
+    f: f64,
+    vbase: Vec<f64>,
+    c_bus: Vec<f64>,
+    cmax_bus: Vec<f64>,
+    max: bool,
+    units: Vec<Unit>,
+    /// The windings of three-winding transformers that a document carries as two-winding transformers to a star
+    /// busbar, with their impedances corrected per winding pair (maximum currents only).
+    star_windings: HashMap<usize, Transformer2>,
+    /// The lines that hold part of such a winding's impedance, corrected with it.
+    star_lines: HashMap<usize, Line>,
+    /// Lines that stand for part of a transformer's impedance, which conductor temperature does not change.
+    transformer_lines: HashSet<usize>,
+}
+
+type Entries = Vec<(usize, usize, C64)>;
+
+impl Builder<'_> {
+    fn on(&self, class: Class, row: usize) -> bool {
+        active(self.model, &Outages::none(), class, row)
+    }
+
+    fn unit_of_trafo(&self, k: usize) -> Option<(usize, &Unit)> {
+        self.units.iter().enumerate().find(|(_, u)| u.trafo == k)
+    }
+
+    /// Line `k`, with its pair correction when it holds part of a document star's winding.
+    fn line(&self, k: usize) -> &Line {
+        self.star_lines.get(&k).unwrap_or(&self.model.lines[k])
+    }
+
+    /// Two-winding transformer `k`, with its pair correction when it is a winding of a document's star.
+    fn trafo2(&self, k: usize) -> &Transformer2 {
+        self.star_windings.get(&k).unwrap_or(&self.model.transformers2[k])
+    }
+
+    /// The correction factor of transformer `k` in a variant (a star's winding carries its own).
+    fn trafo_correction(&self, k: usize, b: usize, variant: Variant) -> f64 {
+        if self.star_windings.contains_key(&k) {
+            return 1.0;
+        }
+        match self.unit_of_trafo(k) {
+            Some((u, unit)) => {
+                if variant == Variant::Terminals(u) {
+                    1.0
+                } else {
+                    unit.factors.outside
+                }
+            }
+            None if self.max => transformer_correction(&self.model.transformers2[k], self.cmax_bus[b]),
+            None => 1.0,
+        }
+    }
+
+    /// The machines and motors with their admittances in a variant's positive-sequence network.
+    fn rotating(&self, variant: Variant, peak: bool, freq_scale: f64) -> Vec<Rotating> {
+        let mut out = Vec::new();
+        let (sb, vbase) = (self.sb, &self.vbase);
+        for (k, g) in self.model.generators.iter().enumerate() {
+            let Some(i) = self.calc.topo.bus_of(g.node) else {
+                continue;
+            };
+            // A machine that stands for a network is a feeder, stamped with the external grids.
+            if !self.on(Class::Generator, k) || g.sc.feeder.is_some() {
+                continue;
+            }
+            let zb = vbase[i] * vbase[i] / sb;
+            let zr = g.rated_kv * g.rated_kv / g.rated_mva;
+            let x = g.sc.xdss * zr / zb;
+            let r = if peak {
+                fictitious_resistance_ratio(g) * x
+            } else {
+                g.sc.rs * zr / zb
+            };
+            let factor = match self.units.iter().enumerate().find(|(_, u)| u.machine == k) {
+                Some((u, unit)) if variant == Variant::Terminals(u) => unit.factors.terminals,
+                Some((_, unit)) => unit.factors.outside,
+                None => generator_correction(g, vbase[i], self.cmax_bus[i]),
+            };
+            let z = C64::new(r * factor, x * factor * freq_scale);
+            out.push(Rotating {
+                bus: i,
+                y: z.inv(),
+                rated_ka: g.rated_mva / (SQRT3 * g.rated_kv),
+                q: 1.0,
+            });
+        }
+        // Asynchronous motors feed maximum currents only (IEC 60909-0, 6.8).
+        if self.max {
+            for (k, l) in self.model.loads.iter().enumerate() {
+                let (Some(m), Some(i)) = (l.motor, self.calc.topo.bus_of(l.node)) else {
+                    continue;
+                };
+                if !self.on(Class::Load, k) || m.ilr <= 0.0 || m.rated_mw <= 0.0 {
+                    continue;
+                }
+                let s = m.rated_mva();
+                let z = (1.0 / m.ilr) * m.rated_kv * m.rated_kv / s / (vbase[i] * vbase[i] / sb);
+                let x = z / (1.0 + m.rx * m.rx).sqrt();
+                out.push(Rotating {
+                    bus: i,
+                    y: C64::new(m.rx * x, x * freq_scale).inv(),
+                    rated_ka: s / (SQRT3 * m.rated_kv),
+                    q: q_factor(&m, self.st.t_min),
+                });
+            }
+        }
+        out
+    }
+
+    /// A sequence network as coordinate entries.
+    fn assemble(&self, seq: Seq, variant: Variant, peak: bool) -> Entries {
+        let fc = if self.f == 60.0 { 24.0 } else { 20.0 };
+        let freq_scale = if peak { fc / self.f } else { 1.0 };
+        let (sb, vbase, model, calc) = (self.sb, &self.vbase, self.model, self.calc);
+        let n = calc.net.buses.len();
+        let mut e: Entries = Vec::new();
         let sx = |z: C64| C64::new(z.re, z.im * freq_scale);
-        let stamp = |e: &mut Vec<(usize, usize, C64)>, a: usize, b: usize, p: (C64, C64, C64, C64)| {
+        let stamp = |e: &mut Entries, a: usize, b: usize, p: (C64, C64, C64, C64)| {
             e.extend([(a, a, p.0), (a, b, p.1), (b, a, p.2), (b, b, p.3)]);
         };
-        for (k, l) in model.lines.iter().enumerate() {
+        // Lines: capacitances neglected in the positive sequence (IEC 60909-0, 6.4) and kept in the zero sequence;
+        // for minimum currents the resistance at the conductors' end temperature, except in the lines that hold part
+        // of a transformer's impedance.
+        let warmed = 1.0 + ALPHA * (self.st.line_temperature - 20.0);
+        for k in 0..model.lines.len() {
+            let l = self.line(k);
+            let warm = if self.max || self.transformer_lines.contains(&k) {
+                1.0
+            } else {
+                warmed
+            };
             let (Some(a), Some(b)) = (calc.topo.bus_of(l.node1), calc.topo.bus_of(l.node2)) else {
                 continue;
             };
-            if !on(Class::Line, k) {
+            if !self.on(Class::Line, k) {
                 continue;
             }
             let p = line_pu(l, vbase[a], vbase[b], sb, seq);
-            // Line capacitances are neglected in the positive sequence (IEC 60909-0, 6.4) and kept in the zero sequence.
             let keep = |y: C64| {
                 if seq == Seq::Zero {
                     C64::new(0.0, y.im * freq_scale)
@@ -170,25 +280,23 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
                     C64::ZERO
                 }
             };
+            let z = C64::new(p.z.re * warm, p.z.im);
             stamp(
                 &mut e,
                 a,
                 b,
-                two_port(sx(p.z), keep(p.y_from), keep(p.y_to), p.ratio, 0.0),
+                two_port(sx(z), keep(p.y_from), keep(p.y_to), p.ratio, 0.0),
             );
         }
-        for (k, t) in model.transformers2.iter().enumerate() {
+        for k in 0..model.transformers2.len() {
+            let t = self.trafo2(k);
             let (Some(a), Some(b)) = (calc.topo.bus_of(t.node1), calc.topo.bus_of(t.node2)) else {
                 continue;
             };
-            if !on(Class::Transformer2, k) {
+            if !self.on(Class::Transformer2, k) {
                 continue;
             }
-            let kt = if max {
-                transformer_correction(t, cmax_bus[b])
-            } else {
-                1.0
-            };
+            let kt = self.trafo_correction(k, b, variant);
             let opt = TransformerOptions {
                 taps: true,
                 correction: kt,
@@ -213,78 +321,425 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
                 _ => {}
             }
         }
-        for (k, g) in model.external_grids.iter().enumerate() {
-            let Some(i) = calc.topo.bus_of(g.node) else {
+        // Three-winding transformers: each winding from its bus to the star point, with KT per winding pair for
+        // maximum currents. In the zero sequence an earthed star winding connects its bus to the star point, a delta
+        // winding earths the star point through its impedance, and an unearthed star winding is open.
+        for (k, t) in model.transformers3.iter().enumerate() {
+            let Some(star) = calc.topo.star_bus.get(k).copied().flatten().map(|s| s as usize) else {
                 continue;
             };
-            if !on(Class::ExternalGrid, k) {
+            if !self.on(Class::Transformer3, k) {
                 continue;
             }
-            let (sk, rx) = if max {
-                (g.sk_max, g.rx_max)
+            let ends: Vec<Option<usize>> = t.windings.iter().map(|w| calc.topo.bus_of(w.node)).collect();
+            let corrected = if self.max {
+                let cmax = ends
+                    .iter()
+                    .flatten()
+                    .map(|&b| self.cmax_bus[b])
+                    .fold(f64::NEG_INFINITY, f64::max);
+                three_winding_corrected(t, if cmax.is_finite() { cmax } else { 1.1 })
             } else {
-                (g.sk_min, g.rx_min)
+                t.clone()
             };
-            let zq = c_bus[i] * sb / sk;
+            for (w, end) in ends.iter().enumerate() {
+                let Some(a) = *end else { continue };
+                if t.windings[w].open {
+                    continue;
+                }
+                let p = transformer3_winding_pu(&corrected, w, vbase[a], sb);
+                match seq {
+                    Seq::Positive => stamp(
+                        &mut e,
+                        a,
+                        star,
+                        two_port(sx(p.z), C64::ZERO, C64::ZERO, p.ratio, p.shift),
+                    ),
+                    Seq::Zero => match t.windings[w].conn {
+                        Winding::Yn | Winding::Zn => {
+                            stamp(&mut e, a, star, two_port(sx(p.z), C64::ZERO, C64::ZERO, p.ratio, 0.0))
+                        }
+                        Winding::D => e.push((star, star, sx(p.z).inv())),
+                        _ => {}
+                    },
+                }
+            }
+        }
+        // Network feeders: external grids, and machines that stand for a network (IEC 60909-0, 6.2).
+        let grids = model.external_grids.iter().enumerate().filter_map(|(k, g)| {
+            let feeder = Feeder {
+                sk_max: g.sk_max,
+                sk_min: g.sk_min,
+                rx_max: g.rx_max,
+                rx_min: g.rx_min,
+                x0x1: g.x0x1,
+                r0x0: g.r0x0,
+            };
+            self.on(Class::ExternalGrid, k).then_some((g.node, feeder))
+        });
+        let machines = model
+            .generators
+            .iter()
+            .enumerate()
+            .filter_map(|(k, g)| Some((g.node, g.sc.feeder.filter(|_| self.on(Class::Generator, k))?)));
+        for (node, f) in grids.chain(machines) {
+            let Some(i) = calc.topo.bus_of(node) else {
+                continue;
+            };
+            let (sk, rx) = if self.max {
+                (f.sk_max, f.rx_max)
+            } else {
+                (f.sk_min, f.rx_min)
+            };
+            if sk <= 0.0 {
+                continue;
+            }
+            let zq = self.c_bus[i] * sb / sk;
             let xq = zq / (1.0 + rx * rx).sqrt();
             let z = match seq {
                 Seq::Positive => C64::new(rx * xq, xq),
                 Seq::Zero => {
-                    let x0 = g.x0x1 * xq;
-                    C64::new(g.r0x0 * x0, x0)
+                    let x0 = f.x0x1 * xq;
+                    C64::new(f.r0x0 * x0, x0)
                 }
             };
             e.push((i, i, sx(z).inv()));
         }
         if seq == Seq::Positive {
-            for (k, g) in model.generators.iter().enumerate() {
-                let Some(i) = calc.topo.bus_of(g.node) else {
-                    continue;
-                };
-                if !on(Class::Generator, k) {
-                    continue;
-                }
-                let zb = vbase[i] * vbase[i] / sb;
-                let zr = g.rated_kv * g.rated_kv / g.rated_mva;
-                let x = g.sc.xdss * zr / zb;
-                let r = if peak {
-                    fictitious_resistance_ratio(g) * x
-                } else {
-                    g.sc.rs * zr / zb
-                };
-                let kg = generator_correction(g, vbase[i], cmax_bus[i]);
-                e.push((i, i, sx(C64::new(r * kg, x * kg)).inv()));
-            }
-        }
-        if seq == Seq::Zero {
+            e.extend(
+                self.rotating(variant, peak, freq_scale)
+                    .into_iter()
+                    .map(|r| (r.bus, r.bus, r.y)),
+            );
+        } else {
             // Keeps unearthed parts of the zero sequence solvable.
             e.extend((0..n).map(|i| (i, i, C64::new(1e-10, 0.0))));
         }
         e
-    };
+    }
+}
 
-    let factor = |entries: Vec<(usize, usize, C64)>| {
+/// The lines ps-io's document writer adds for the part of a transformer's impedance that a transformer element cannot
+/// hold: `<id>.z`, from the busbar `<id>.mid` behind the transformer `<id>`.
+fn transformer_lines(model: &Model) -> HashSet<usize> {
+    let mids: HashSet<NodeRef> = model
+        .nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.id.ends_with(".mid"))
+        .map(|(i, _)| NodeRef(i as u32))
+        .collect();
+    model
+        .lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.id.ends_with(".z") && (mids.contains(&l.node1) || mids.contains(&l.node2)))
+        .map(|(k, _)| k)
+        .collect()
+}
+
+/// One winding of a three-winding transformer that a document carries at a star busbar: its transformer, and the
+/// line that holds the part of its impedance a transformer element cannot (a negative reactance, as star
+/// equivalents often have).
+struct StarWinding {
+    trafo: usize,
+    line: Option<usize>,
+}
+
+/// A three-winding transformer as a document carries it: a star busbar `<id>.star` and two-winding transformers
+/// `<id>.w1` to `<id>.w3` from each winding's busbar to the star (two when a winding is open), each perhaps through
+/// a busbar `<id>.wN.mid` and a line `<id>.wN.z` (ps-io's document writer).
+struct Star {
+    node: NodeRef,
+    windings: Vec<StarWinding>,
+}
+
+fn document_stars(model: &Model) -> Vec<Star> {
+    let trafos: HashMap<&str, usize> = model
+        .transformers2
+        .iter()
+        .enumerate()
+        .map(|(k, t)| (t.id.as_str(), k))
+        .collect();
+    let lines: HashMap<&str, usize> = model
+        .lines
+        .iter()
+        .enumerate()
+        .map(|(k, l)| (l.id.as_str(), k))
+        .collect();
+    let nodes: HashMap<&str, NodeRef> = model
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.as_str(), NodeRef(i as u32)))
+        .collect();
+    let touches = |k: usize, n: NodeRef| model.transformers2[k].node1 == n || model.transformers2[k].node2 == n;
+    let mut stars = Vec::new();
+    for (i, node) in model.nodes.iter().enumerate() {
+        let Some(prefix) = node.id.strip_suffix(".star") else {
+            continue;
+        };
+        let star = NodeRef(i as u32);
+        let windings: Vec<StarWinding> = (1..=3)
+            .filter_map(|w| {
+                let id = format!("{prefix}.w{w}");
+                let &trafo = trafos.get(id.as_str())?;
+                if touches(trafo, star) {
+                    return Some(StarWinding { trafo, line: None });
+                }
+                let &mid = nodes.get(format!("{id}.mid").as_str())?;
+                let &line = lines.get(format!("{id}.z").as_str())?;
+                let l = &model.lines[line];
+                let joined = (l.node1 == mid && l.node2 == star) || (l.node1 == star && l.node2 == mid);
+                (touches(trafo, mid) && joined).then_some(StarWinding {
+                    trafo,
+                    line: Some(line),
+                })
+            })
+            .collect();
+        if windings.len() >= 2 {
+            stars.push(Star { node: star, windings });
+        }
+    }
+    stars
+}
+
+/// The windings of each document star with KT applied per winding pair, as `three_winding_corrected` does for a
+/// three-winding transformer: each winding's impedance on its own side, the pairs corrected on the smaller rating,
+/// and the result back in the transformer, or in the line where the winding has one. A transformer's
+/// zero-sequence impedance follows its reactance.
+fn star_corrections(
+    model: &Model,
+    calc: &Calc,
+    cmax_bus: &[f64],
+    stars: &[Star],
+) -> (HashMap<usize, Transformer2>, HashMap<usize, Line>) {
+    let (mut trafos, mut lines) = (HashMap::new(), HashMap::new());
+    for star in stars {
+        // Each winding's transformer: its end away from the star, that side's rated voltage and the other side's.
+        let ends: Vec<(NodeRef, f64, f64)> = star
+            .windings
+            .iter()
+            .map(|w| {
+                let t = &model.transformers2[w.trafo];
+                let inner = match w.line {
+                    Some(l) => {
+                        let l = &model.lines[l];
+                        if l.node1 == star.node { l.node2 } else { l.node1 }
+                    }
+                    None => star.node,
+                };
+                if t.node1 == inner {
+                    (t.node2, t.rated_kv2, t.rated_kv1)
+                } else {
+                    (t.node1, t.rated_kv1, t.rated_kv2)
+                }
+            })
+            .collect();
+        let cmax = ends
+            .iter()
+            .filter_map(|e| calc.topo.bus_of(e.0))
+            .map(|b| cmax_bus[b])
+            .fold(f64::NEG_INFINITY, f64::max);
+        let cmax = if cmax.is_finite() { cmax } else { 1.1 };
+        // Each winding's transformer impedance and whole impedance, in ohms on its own side.
+        let head: Vec<(f64, f64)> = star
+            .windings
+            .iter()
+            .zip(&ends)
+            .map(|(w, e)| {
+                let t = &model.transformers2[w.trafo];
+                let refer = (e.1 / t.rated_kv1).powi(2);
+                (t.r * refer, t.x * refer)
+            })
+            .collect();
+        let own: Vec<(f64, f64)> = star
+            .windings
+            .iter()
+            .zip(&ends)
+            .zip(&head)
+            .map(|((w, e), h)| match w.line {
+                Some(l) => {
+                    let refer = (e.1 / e.2).powi(2);
+                    (h.0 + model.lines[l].r * refer, h.1 + model.lines[l].x * refer)
+                }
+                None => *h,
+            })
+            .collect();
+        let rating = |n: usize| model.transformers2[star.windings[n].trafo].rated_mva;
+        let corrected: Vec<(f64, f64)> = if own.len() == 3 {
+            let w = |n: usize| Winding3 {
+                rated_kv: ends[n].1,
+                rated_mva: rating(n),
+                r: own[n].0,
+                x: own[n].1,
+                ..Default::default()
+            };
+            let t3 = Transformer3 {
+                windings: [w(0), w(1), w(2)],
+                ..Default::default()
+            };
+            three_winding_corrected(&t3, cmax)
+                .windings
+                .iter()
+                .map(|w| (w.r, w.x))
+                .collect()
+        } else {
+            // Two windings: one pair, one factor.
+            let k1 = ends[0].1;
+            let x_pair = own[0].1 + own[1].1 * (k1 / ends[1].1).powi(2);
+            let kt = 0.95 * cmax / (1.0 + 0.6 * x_pair / (k1 * k1 / rating(0).min(rating(1))));
+            own.iter().map(|o| (o.0 * kt, o.1 * kt)).collect()
+        };
+        for (n, w) in star.windings.iter().enumerate() {
+            let t = &model.transformers2[w.trafo];
+            match w.line {
+                Some(l) => {
+                    // The transformer keeps its part; the line takes the rest of the corrected impedance.
+                    let back = (ends[n].2 / ends[n].1).powi(2);
+                    let mut c = model.lines[l].clone();
+                    c.r = (corrected[n].0 - head[n].0) * back;
+                    c.x = (corrected[n].1 - head[n].1) * back;
+                    lines.insert(l, c);
+                    // Listed as it is, so it takes no correction of its own.
+                    trafos.insert(w.trafo, t.clone());
+                }
+                None => {
+                    let back = (t.rated_kv1 / ends[n].1).powi(2);
+                    let mut c = t.clone();
+                    c.r = corrected[n].0 * back;
+                    c.x = corrected[n].1 * back;
+                    let ratio = if t.x != 0.0 { c.x / t.x } else { 1.0 };
+                    c.r0 *= ratio;
+                    c.x0 *= ratio;
+                    trafos.insert(w.trafo, c);
+                }
+            }
+        }
+    }
+    (trafos, lines)
+}
+
+/// The power station units the model declares: machines whose `unit_transformer` names a transformer in service
+/// with one end at the machine's bus.
+fn find_units(
+    model: &Model,
+    calc: &Calc,
+    vbase: &[f64],
+    cmax_bus: &[f64],
+    stars: &[Star],
+    warnings: &mut Vec<String>,
+) -> Vec<Unit> {
+    let index: HashMap<&str, usize> = model
+        .transformers2
+        .iter()
+        .enumerate()
+        .map(|(k, t)| (t.id.as_str(), k))
+        .collect();
+    let mut units = Vec::new();
+    for (k, g) in model.generators.iter().enumerate() {
+        let Some(id) = g.unit_transformer.as_deref() else {
+            continue;
+        };
+        let (Some(&tk), Some(bus)) = (index.get(id), calc.topo.bus_of(g.node)) else {
+            warnings.push(format!(
+                "{}: its unit transformer {id} is not in the network; the machine is treated as on its own.",
+                g.id
+            ));
+            continue;
+        };
+        if stars.iter().any(|s| s.windings.iter().any(|w| w.trafo == tk)) {
+            warnings.push(format!(
+                "{}: its unit transformer {id} is a winding of a three-winding transformer, which a power station unit \
+                 cannot have; the machine is treated as on its own.",
+                g.id
+            ));
+            continue;
+        }
+        let t = &model.transformers2[tk];
+        let (a, b) = (calc.topo.bus_of(t.node1), calc.topo.bus_of(t.node2));
+        // The machine's side is the transformer's low-voltage side.
+        let (ur_lv, ur_hv, other) = if b == Some(bus) {
+            (t.rated_kv2, t.rated_kv1, a)
+        } else if a == Some(bus) {
+            (t.rated_kv1, t.rated_kv2, b)
+        } else {
+            warnings.push(format!(
+                "{}: its unit transformer {id} does not connect to its busbar; the machine is treated as on its own.",
+                g.id
+            ));
+            continue;
+        };
+        let Some(other) = other else { continue };
+        units.push(Unit {
+            machine: k,
+            trafo: tk,
+            bus,
+            factors: unit_correction(g, t, ur_hv, ur_lv, vbase[other], cmax_bus[bus]),
+        });
+    }
+    units
+}
+
+/// Runs the short-circuit calculation at every bus or at the settings' location.
+pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
+    let calc = Calc::build(model, &Outages::none(), BuildOptions::default());
+    let n = calc.net.buses.len();
+    let sb = model.meta.base_mva;
+    let f = model.meta.frequency_hz;
+    let vbase: Vec<f64> = calc.net.buses.iter().map(|b| b.base_kv).collect();
+    let max = st.mode == ScMode::Max;
+    let c_bus: Vec<f64> = vbase
+        .iter()
+        .map(|&v| voltage_factor(v, st.lv_tolerance))
+        .map(|(cmax, cmin)| if max { cmax } else { cmin })
+        .collect();
+    let cmax_bus: Vec<f64> = vbase.iter().map(|&v| voltage_factor(v, st.lv_tolerance).0).collect();
+    let mut warnings: Vec<String> = calc
+        .warnings
+        .iter()
+        .filter(|w| !w.contains("reference machine"))
+        .cloned()
+        .collect();
+    let stars = document_stars(model);
+    let units = find_units(model, &calc, &vbase, &cmax_bus, &stars, &mut warnings);
+    // The pair correction is KT, which only maximum currents take.
+    let (star_windings, star_lines) = if max {
+        star_corrections(model, &calc, &cmax_bus, &stars)
+    } else {
+        (HashMap::new(), HashMap::new())
+    };
+    let b = Builder {
+        model,
+        calc: &calc,
+        st,
+        sb,
+        f,
+        vbase: vbase.clone(),
+        c_bus: c_bus.clone(),
+        cmax_bus,
+        max,
+        units,
+        star_windings,
+        star_lines,
+        transformer_lines: transformer_lines(model),
+    };
+    let fc = if f == 60.0 { 24.0 } else { 20.0 };
+    let factor = |entries: Entries| {
         if n == 0 {
             None
         } else {
             ComplexLu::factor(n, &entries).ok()
         }
     };
-    let mut f1 = factor(assemble(Seq::Positive, 1.0, false));
-    let mut f0 = if st.fault == FaultType::LineToEarth {
-        factor(assemble(Seq::Zero, 1.0, false))
+    // Factorisations per variant, made when a fault first needs them.
+    let mut positive: HashMap<Variant, Option<ComplexLu>> = HashMap::new();
+    let mut peak: HashMap<Variant, Option<ComplexLu>> = HashMap::new();
+    let mut zero = if st.fault == FaultType::LineToEarth {
+        factor(b.assemble(Seq::Zero, Variant::Normal, false))
     } else {
         None
     };
-    let mut fpk = if st.kappa == KappaMethod::C {
-        factor(assemble(Seq::Positive, fc / f, true))
-    } else {
-        None
-    };
-    if f1.is_none() && n > 0 {
-        warnings
-            .push("The positive-sequence network is singular; check for busbars without any impedance path.".into());
-    }
     let meshed_rx = if st.kappa == KappaMethod::B {
         branch_ratio(model)
     } else {
@@ -306,17 +761,26 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
         }
         hit.into_iter().collect()
     };
-    let zkk = |lu: &mut Option<ComplexLu>, k: usize| -> (C64, Option<Vec<C64>>) {
-        match lu.as_mut().map(|lu| lu.column(k)) {
-            Some(Ok(col)) => (col[k], Some(col)),
-            _ => (C64::new(f64::NAN, f64::NAN), None),
-        }
-    };
+    let column =
+        |lu: &mut Option<ComplexLu>, k: usize| -> Option<Vec<C64>> { lu.as_mut().and_then(|lu| lu.column(k).ok()) };
+    let mut singular = false;
     let mut buses = Vec::with_capacity(targets.len());
+    let mut fault_column: Option<(Variant, Vec<C64>)> = None;
     for &k in &targets {
-        let (z1, _) = zkk(&mut f1, k);
+        // A fault at a unit machine's terminals is calculated on that unit's network, at the machine's rated voltage.
+        let unit = b.units.iter().position(|u| u.bus == k);
+        let variant = unit.map_or(Variant::Normal, Variant::Terminals);
+        let voltage_scale = unit.map_or(1.0, |u| model.generators[b.units[u].machine].rated_kv / vbase[k]);
+        let lu = positive
+            .entry(variant)
+            .or_insert_with(|| factor(b.assemble(Seq::Positive, variant, false)));
+        let Some(col) = column(lu, k) else {
+            singular = true;
+            continue;
+        };
+        let z1 = col[k];
         let z0 = if st.fault == FaultType::LineToEarth {
-            zkk(&mut f0, k).0
+            column(&mut zero, k).map_or(C64::new(f64::NAN, f64::NAN), |c| c[k])
         } else {
             C64::new(f64::NAN, f64::NAN)
         };
@@ -324,15 +788,21 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
         let zb = vb * vb / sb;
         // In ohms with Un in kV the currents come out in kA: three-phase c·Un/(√3·|Z1|), line-to-line
         // c·Un/|Z1 + Z2|, line-to-earth √3·c·Un/|Z1 + Z2 + Z0|, with Z2 = Z1.
-        let ikss = match st.fault {
-            FaultType::ThreePhase => cc * vb / (SQRT3 * z1.abs() * zb),
-            FaultType::LineToLine => cc * vb / (2.0 * z1.abs() * zb),
-            FaultType::LineToEarth => SQRT3 * cc * vb / ((z1.scale(2.0) + z0).abs() * zb),
-        };
+        let ikss = voltage_scale
+            * match st.fault {
+                FaultType::ThreePhase => cc * vb / (SQRT3 * z1.abs() * zb),
+                FaultType::LineToLine => cc * vb / (2.0 * z1.abs() * zb),
+                FaultType::LineToEarth => SQRT3 * cc * vb / ((z1.scale(2.0) + z0).abs() * zb),
+            };
         let kappa = match st.kappa {
             KappaMethod::C => {
-                let (zc, _) = zkk(&mut fpk, k);
-                kappa_of(zc.re / zc.im * (fc / f))
+                let lu = peak
+                    .entry(variant)
+                    .or_insert_with(|| factor(b.assemble(Seq::Positive, variant, true)));
+                match column(lu, k) {
+                    Some(c) => kappa_of(c[k].re / c[k].im * (fc / f)),
+                    None => f64::NAN,
+                }
             }
             KappaMethod::B => {
                 let limit = if vb < 1.0 { 1.8 } else { 2.0 };
@@ -341,19 +811,31 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
             }
         };
         let ip = kappa * std::f64::consts::SQRT_2 * ikss;
+        let ib = if st.fault == FaultType::ThreePhase {
+            voltage_scale * breaking(&b, variant, &col, k, cc, voltage_scale) * sb / (SQRT3 * vb)
+        } else {
+            ikss
+        };
         let lk = (kappa - 1.0).ln();
         let m = if kappa > 1.99 {
             0.0
         } else {
-            ((4.0 * f * TK * lk).exp() - 1.0) / (2.0 * f * TK * lk)
+            ((4.0 * f * st.t_k * lk).exp() - 1.0) / (2.0 * f * st.t_k * lk)
         };
         let earth = st.fault == FaultType::LineToEarth;
+        // Sk″ is √3·Un·Ik″ for a three-phase fault; for a line-to-line fault pandapower, whose definition the
+        // reference values follow, takes Un·Ik″/√3.
+        let skss = match st.fault {
+            FaultType::LineToLine => vb * ikss / SQRT3,
+            _ => SQRT3 * vb * ikss,
+        };
         buses.push(FaultResult {
             id: calc.bus_id(model, k),
             ikss,
             ip,
+            ib,
             ith: ikss * (m + 1.0).sqrt(),
-            skss: SQRT3 * vb * ikss,
+            skss,
             kappa,
             rx: z1.re / z1.im,
             c: cc,
@@ -362,58 +844,28 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
             r0: earth.then_some(z0.re * zb),
             x0: earth.then_some(z0.im * zb),
         });
+        if targets.len() == 1 {
+            fault_column = Some((variant, col));
+        }
+    }
+    if singular {
+        warnings
+            .push("The positive-sequence network is singular; check for busbars without any impedance path.".into());
     }
 
     let mut contributions = Vec::new();
-    if !st.location.is_empty() && targets.len() == 1 && st.fault == FaultType::ThreePhase {
-        let k = targets[0];
-        if let (zk, Some(col)) = zkk(&mut f1, k) {
-            // Fault current If = c / Zkk; voltage change at every bus ΔV = −Z(:,k)·If.
-            let i_f = C64::new(c_bus[k], 0.0) / zk;
-            let dv: Vec<C64> = col.iter().map(|&z| -(z * i_f)).collect();
-            let ka = |bus: usize| sb / (SQRT3 * vbase[bus]);
-            for (r, l) in model.lines.iter().enumerate() {
-                let (Some(a), Some(b)) = (calc.topo.bus_of(l.node1), calc.topo.bus_of(l.node2)) else {
-                    continue;
-                };
-                if !on(Class::Line, r) {
-                    continue;
-                }
-                let lp = line_pu(l, vbase[a], vbase[b], sb, Seq::Positive);
-                let p = two_port(lp.z, C64::ZERO, C64::ZERO, lp.ratio, 0.0);
-                contributions.push(contribution(&l.id, p, dv[a], dv[b], ka(a), ka(b)));
-            }
-            for (r, t) in model.transformers2.iter().enumerate() {
-                let (Some(a), Some(b)) = (calc.topo.bus_of(t.node1), calc.topo.bus_of(t.node2)) else {
-                    continue;
-                };
-                if !on(Class::Transformer2, r) {
-                    continue;
-                }
-                let kt = if max {
-                    transformer_correction(t, cmax_bus[b])
-                } else {
-                    1.0
-                };
-                let tp = transformer2_pu(
-                    t,
-                    vbase[a],
-                    vbase[b],
-                    sb,
-                    TransformerOptions {
-                        correction: kt,
-                        ..Default::default()
-                    },
-                );
-                let p = two_port(tp.z, C64::ZERO, C64::ZERO, tp.ratio, tp.shift);
-                contributions.push(contribution(&t.id, p, dv[a], dv[b], ka(a), ka(b)));
-            }
-        }
+    if let (Some((variant, col)), true) = (
+        fault_column.filter(|_| !st.location.is_empty()),
+        st.fault == FaultType::ThreePhase,
+    ) {
+        contributions = branch_contributions(&b, variant, &col, targets[0]);
     }
     ShortCircuitReport {
         fault: st.fault,
         mode: st.mode,
         kappa_method: st.kappa,
+        t_min: st.t_min,
+        t_k: st.t_k,
         buses,
         location: st.location.clone(),
         contributions,
@@ -425,6 +877,69 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
             .collect(),
         warnings,
     }
+}
+
+/// The symmetrical breaking current at bus `k`, p.u. of the bus's base current, for a three-phase fault on a
+/// variant's network whose impedance column is `col` (IEC 60909-0, 9.1.2.2): the initial current less, for every
+/// machine and motor, its share of the voltage (the drop across its own impedance over c·Un/√3) times the part of
+/// its current that has decayed by the minimum time delay, (1 − μ) or (1 − μ·q).
+fn breaking(b: &Builder, variant: Variant, col: &[C64], k: usize, c: f64, voltage_scale: f64) -> f64 {
+    let i_f = C64::new(c, 0.0) / col[k];
+    let mut ib = i_f.abs();
+    for r in b.rotating(variant, false, 1.0) {
+        // The machine's terminal voltage in the fault network is the drop across its impedance; per unit, its
+        // current is referred to the fault's voltage level through the nominal voltages.
+        let dv = col[r.bus] * i_f;
+        let i_m = (r.y * dv).abs();
+        // At a unit machine's terminals the currents are those at its rated voltage.
+        let ratio = voltage_scale * i_m * b.sb / (SQRT3 * b.vbase[r.bus]) / r.rated_ka;
+        ib -= dv.abs() / c * (1.0 - mu(ratio, b.st.t_min) * r.q) * i_m;
+    }
+    ib
+}
+
+/// Branch currents for a three-phase fault at bus `k` on a variant's network.
+fn branch_contributions(b: &Builder, variant: Variant, col: &[C64], k: usize) -> Vec<BranchContribution> {
+    let (model, calc, sb, vbase) = (b.model, b.calc, b.sb, &b.vbase);
+    // Fault current If = c / Zkk; voltage change at every bus ΔV = −Z(:,k)·If.
+    let i_f = C64::new(b.c_bus[k], 0.0) / col[k];
+    let dv: Vec<C64> = col.iter().map(|&z| -(z * i_f)).collect();
+    let ka = |bus: usize| sb / (SQRT3 * vbase[bus]);
+    let mut out = Vec::new();
+    for r in 0..model.lines.len() {
+        let l = b.line(r);
+        let (Some(a), Some(bb)) = (calc.topo.bus_of(l.node1), calc.topo.bus_of(l.node2)) else {
+            continue;
+        };
+        if !b.on(Class::Line, r) {
+            continue;
+        }
+        let lp = line_pu(l, vbase[a], vbase[bb], sb, Seq::Positive);
+        let p = two_port(lp.z, C64::ZERO, C64::ZERO, lp.ratio, 0.0);
+        out.push(contribution(&l.id, p, dv[a], dv[bb], ka(a), ka(bb)));
+    }
+    for r in 0..model.transformers2.len() {
+        let t = b.trafo2(r);
+        let (Some(a), Some(bb)) = (calc.topo.bus_of(t.node1), calc.topo.bus_of(t.node2)) else {
+            continue;
+        };
+        if !b.on(Class::Transformer2, r) {
+            continue;
+        }
+        let tp = transformer2_pu(
+            t,
+            vbase[a],
+            vbase[bb],
+            sb,
+            TransformerOptions {
+                correction: b.trafo_correction(r, bb, variant),
+                ..Default::default()
+            },
+        );
+        let p = two_port(tp.z, C64::ZERO, C64::ZERO, tp.ratio, tp.shift);
+        out.push(contribution(&t.id, p, dv[a], dv[bb], ka(a), ka(bb)));
+    }
+    out
 }
 
 fn contribution(id: &str, p: (C64, C64, C64, C64), va: C64, vb: C64, ka: f64, kb: f64) -> BranchContribution {
@@ -446,36 +961,4 @@ fn branch_ratio(model: &Model) -> f64 {
         .filter(|&(_, x)| x > 0.0)
         .map(|(r, x)| r / x)
         .fold(0.0, f64::max)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn iec_factors_follow_their_formulas() {
-        assert!((kappa_of(0.0) - 2.0).abs() < 1e-12);
-        assert!((kappa_of(0.1) - (1.02 + 0.98 * (-0.3_f64).exp())).abs() < 1e-12);
-        // uk = 10 %, uR = 0.6 % on a 110 kV, 40 MVA rating.
-        let zb = 110.0 * 110.0 / 40.0;
-        let t = Transformer2 {
-            rated_kv1: 110.0,
-            rated_mva: 40.0,
-            unrated: false,
-            x: (0.01_f64 - 0.000_036).sqrt() * zb,
-            ..Default::default()
-        };
-        assert!(
-            (transformer_correction(&t, 1.1) - 0.95 * 1.1 / (1.0 + 0.6 * (0.01_f64 - 0.000_036).sqrt())).abs() < 1e-12
-        );
-        let mut g = Generator {
-            rated_kv: 10.5,
-            ..Default::default()
-        };
-        g.sc.xdss = 0.2;
-        g.sc.cos_phi = 0.8;
-        assert!((generator_correction(&g, 10.0, 1.1) - 10.0 / 10.5 * 1.1 / (1.0 + 0.2 * 0.6)).abs() < 1e-12);
-        assert_eq!(voltage_factor(20.0, LvTolerance::Ten), (1.1, 1.0));
-        assert_eq!(voltage_factor(0.4, LvTolerance::Six), (1.05, 0.95));
-    }
 }

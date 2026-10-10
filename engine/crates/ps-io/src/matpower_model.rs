@@ -84,6 +84,7 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 q: r[bus::QD],
                 p_zip: [0.0, 0.0, 1.0],
                 q_zip: [0.0, 0.0, 1.0],
+                motor: None,
             });
         }
         if r[bus::GS] != 0.0 || r[bus::BS] != 0.0 {
@@ -147,6 +148,7 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
             reference_priority: 0,
             sc: TYPICAL_SC,
             dynamics: TYPICAL_DYNAMICS,
+            unit_transformer: None,
         });
     }
     if typical_machines > 0 {
@@ -263,6 +265,8 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 ratio_taps: Vec::new(),
                 phase_tap: None,
                 limits: Vec::new(),
+                on_load_taps: false,
+                tap_range_pct: 0.0,
             });
         }
     }
@@ -281,6 +285,8 @@ pub const TYPICAL_SC: MachineShortCircuit = MachineShortCircuit {
     rs: 0.0024,
     cos_phi: 0.85,
     earthed: false,
+    pg: 0.0,
+    feeder: None,
 };
 /// Typical classical dynamic data for machines whose source gives none.
 pub const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics::classical(0.25, 4.0, 0.0);

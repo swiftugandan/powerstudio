@@ -77,6 +77,9 @@ struct ShortCircuitOptions {
     kappa: Option<ps_model::study::KappaMethod>,
     lv_tolerance: Option<ps_model::study::LvTolerance>,
     location: Option<String>,
+    t_min: Option<f64>,
+    t_k: Option<f64>,
+    line_temperature: Option<f64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -202,6 +205,9 @@ pub fn handle(
             st.mode = o.mode.unwrap_or(st.mode);
             st.kappa = o.kappa.unwrap_or(st.kappa);
             st.lv_tolerance = o.lv_tolerance.unwrap_or(st.lv_tolerance);
+            st.t_min = o.t_min.unwrap_or(st.t_min);
+            st.t_k = o.t_k.unwrap_or(st.t_k);
+            st.line_temperature = o.line_temperature.unwrap_or(st.line_temperature);
             if let Some(l) = o.location {
                 st.location = l;
             }

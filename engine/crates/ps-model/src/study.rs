@@ -134,7 +134,7 @@ pub enum LvTolerance {
 }
 
 /// Short-circuit settings.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ShortCircuitSettings {
     /// Fault type.
@@ -147,6 +147,27 @@ pub struct ShortCircuitSettings {
     pub lv_tolerance: LvTolerance,
     /// Identifier of the faulted node; empty for a fault at every node in turn.
     pub location: String,
+    /// Minimum time delay to the breaking of the current, s (tmin for the breaking current Ib).
+    pub t_min: f64,
+    /// Duration of the short circuit for the thermal equivalent current, s (Tk for Ith).
+    pub t_k: f64,
+    /// Conductor temperature at the end of the short circuit, °C, for the lines' resistance in the minimum case.
+    pub line_temperature: f64,
+}
+
+impl Default for ShortCircuitSettings {
+    fn default() -> Self {
+        Self {
+            fault: FaultType::default(),
+            mode: ScMode::default(),
+            kappa: KappaMethod::default(),
+            lv_tolerance: LvTolerance::default(),
+            location: String::new(),
+            t_min: 0.1,
+            t_k: 1.0,
+            line_temperature: 80.0,
+        }
+    }
 }
 
 /// A contingency: elements that fail together, by identifier.

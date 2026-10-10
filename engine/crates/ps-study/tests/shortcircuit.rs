@@ -15,6 +15,10 @@ fn settings(fault: FaultType, mode: ScMode, kappa: KappaMethod, location: &str) 
         kappa,
         lv_tolerance: LvTolerance::Ten,
         location: location.into(),
+        // The oracle (scripts/oracle/oracle.py) runs pandapower with tk_s = 1 and lines at 20 °C.
+        t_min: 0.1,
+        t_k: 1.0,
+        line_temperature: 20.0,
     }
 }
 

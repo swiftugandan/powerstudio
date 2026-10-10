@@ -41,6 +41,18 @@ test('an optional busbar field can be emptied, and deleting the busbar it names 
   assert.equal(s.get(gen.id)?.regBus, '');
 });
 
+test('a unit transformer must have an end at the machine\u2019s busbar, and deleting it leaves the machine on its own', () => {
+  const s = new DocumentStore(riverside());
+  assert.throws(() => s.transact('Unit', tx => tx.set('G1', 'unitTrafo', 'T1')), /end at the machine/);
+  assert.throws(() => s.transact('Unit', tx => tx.set('G1', 'unitTrafo', 'B6')), /must be a transformer/);
+  s.transact('Unit', tx => tx.set('G1', 'unitTrafo', 'T3'));
+  assert.equal(s.get('G1')?.unitTrafo, 'T3');
+  s.transact('Delete transformer', tx => tx.remove('T3'));
+  assert.equal(s.get('G1')?.unitTrafo, '');
+  s.undo();
+  assert.equal(s.get('G1')?.unitTrafo, 'T3');
+});
+
 test('edits with the same coalescing key become one undo step', () => {
   const s = new DocumentStore(riverside());
   const x0 = /** @type {number} */ (s.get('B3')?.x);

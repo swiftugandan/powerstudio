@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = join(root, '.cache', 'reference');
-const lists = ['cgmes-cases.json', 'psse-cases.json', 'matpower-cases.json', 'dyn-cases.json'];
+const lists = ['cgmes-cases.json', 'psse-cases.json', 'matpower-cases.json', 'dyn-cases.json', 'sc-cases.json'];
 /** @type {Record<string, {file: string, url: string, sha256: string}>} */
 const archives = Object.assign({}, ...lists.map((f) => JSON.parse(readFileSync(join(root, 'tests', 'oracle', f), 'utf8')).archives));
 mkdirSync(dir, { recursive: true });

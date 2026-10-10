@@ -16,7 +16,9 @@ const collator = new Intl.Collator(undefined, { numeric: true });
 /**
  * @template R
  * @typedef {{ key: string, label: string, unit?: string, num?: boolean, value: (r: R) => number | string,
- *   text?: (r: R) => string, cls?: (r: R) => string, bar?: (r: R) => { pct: number, color: string } | null, title?: (r: R) => string }} Column
+ *   text?: (r: R) => string, cls?: (r: R) => string, bar?: (r: R) => { pct: number, color: string } | null, title?: (r: R) => string,
+ *   help?: string }} Column
+ * `title` is a cell's tooltip; `help` the header's.
  */
 
 /**
@@ -41,7 +43,7 @@ export function dataTable(spec) {
   });
   const rows = order.map(i => spec.rows[i]);
   const head = h('tr', {}, ...columns.map(c => h('th', {
-    class: c.num ? 'num' : '', scope: 'col', 'data-key': c.key, tabindex: '0',
+    class: c.num ? 'num' : '', scope: 'col', 'data-key': c.key, tabindex: '0', title: c.help,
     'aria-sort': c.key === sort.key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined,
     html: `${esc(c.label)}${c.unit ? `<span class="unit">${esc(c.unit)}</span>` : ''}${c.key === sort.key ? `<span class="arrow">${sort.dir === 1 ? '▲' : '▼'}</span>` : ''}`,
   })));

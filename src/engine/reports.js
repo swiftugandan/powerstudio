@@ -28,10 +28,12 @@
  *   state: { vm: Float64Array, va: Float64Array }, busIds: string[], timing: EngineTiming,
  * }} LoadFlowResult
  * @typedef {'3ph' | '2ph' | '1ph'} FaultType
- * @typedef {{ id: string, ikss: number, ip: number, ith: number, skss: number, kappa: number, rx: number, c: number,
- *   r1: number, x1: number, r0: number, x0: number }} FaultResult
+ * @typedef {{ id: string, ikss: number, ip: number, ib: number, ith: number, skss: number, kappa: number, rx: number, c: number,
+ *   r1: number, x1: number, r0: number, x0: number }} FaultResult Ib is the breaking current at the minimum time delay
+ *   `tMin` (Ik″ for unbalanced faults), which IEC 60909 defines for maximum currents; Ith the thermal equivalent
+ *   current for the duration `tK`.
  * @typedef {{ id: string, iFrom: number, iTo: number }} BranchContribution
- * @typedef {{ fault: FaultType, mode: 'max' | 'min', kappaMethod: 'B' | 'C', buses: FaultResult[], location: string,
+ * @typedef {{ fault: FaultType, mode: 'max' | 'min', kappaMethod: 'B' | 'C', tMin: number, tK: number, buses: FaultResult[], location: string,
  *   contributions: BranchContribution[], deenergized: string[], warnings: string[] }} ShortCircuitResult
  * @typedef {{ kind: 'loading' | 'undervoltage' | 'overvoltage', id: string, value: number, limit: number, inBase: boolean }} Violation
  * @typedef {{ id: string, cls: string, elements: string[], converged: boolean, message: string, maxLoading: number,

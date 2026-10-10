@@ -147,6 +147,11 @@ export class Tx {
       const others = busesOf(el).filter((_, i) => CLASSES[el.cls].ends[i] !== key);
       if (others.includes(/** @type {string} */ (value))) throw new Error('Both ends cannot connect to the same busbar.');
     }
+    if (spec.type === 'trafo' && value !== '') {
+      const t = this.store.get(/** @type {string} */ (value));
+      if (!t || t.cls !== 'trafo') throw new Error(`${spec.label} must be a transformer.`);
+      if (t.hv !== el.bus && t.lv !== el.bus) throw new Error(`${spec.label} must have an end at the machine\u2019s busbar.`);
+    }
     if (Object.is(el[key], value)) return;
     this.run({ type: 'set', id, key, before: el[key], after: value });
   }
@@ -169,6 +174,12 @@ export class Tx {
       // Optional busbar references (a regulated busbar) fall back to their default.
       for (const other of this.store.doc.elements) {
         for (const f of CLASSES[other.cls].fields) if (f.type === 'bus' && f.optional !== undefined && other[f.key] === id) this.set(other.id, f.key, '');
+      }
+    }
+    // A machine's unit transformer reference falls back to none.
+    if (el.cls === 'trafo') {
+      for (const other of this.store.doc.elements) {
+        for (const f of CLASSES[other.cls].fields) if (f.type === 'trafo' && other[f.key] === id) this.set(other.id, f.key, '');
       }
     }
     // The study case forgets the element: simulation events on it, a zone's slack busbar, and it in contingencies

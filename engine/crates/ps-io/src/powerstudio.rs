@@ -10,9 +10,9 @@
 use ps_model::dynamics::TYPICAL_ROUND_ROTOR;
 use ps_model::study::StudyCase;
 use ps_model::{
-    Area, Class, Controller, ControllerKind, CurrentLimit, ExternalGrid, FlowControl, Generator, Line, Load,
-    MachineControl, MachineDynamics, MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap,
-    RotorModel, RoundRotor, Shunt, Slot, Transformer2, VoltageControl, Winding,
+    Area, AsyncMotor, Class, Controller, ControllerKind, CurrentLimit, ExternalGrid, Feeder, FlowControl, Generator,
+    Line, Load, MachineControl, MachineDynamics, MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap,
+    RatioTap, RotorModel, RoundRotor, Shunt, Slot, Transformer2, VoltageControl, Winding,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -442,6 +442,8 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     ratio_taps,
                     phase_tap,
                     limits: Vec::new(),
+                    on_load_taps: e.flag("onLoadTaps", false),
+                    tap_range_pct: e.num("tapRange", 0.0),
                 });
             }
             Class::Generator => {
@@ -482,8 +484,19 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                         rs: e.num("rs", 0.0024),
                         cos_phi,
                         earthed: false,
+                        pg: e.num("pg", 0.0),
+                        // A machine that stands for a network meets short circuits as a feeder (IEC 60909-0, 6.2).
+                        feeder: e.flag("feeder", false).then(|| Feeder {
+                            sk_max: e.num("skMax", 5000.0),
+                            sk_min: e.num("skMin", 4000.0),
+                            rx_max: e.num("rxMax", 0.1),
+                            rx_min: e.num("rxMin", 0.1),
+                            x0x1: e.num("x0x1", 1.0),
+                            r0x0: e.num("r0x0", 0.1),
+                        }),
                     },
                     dynamics,
+                    unit_transformer: Some(e.text("unitTrafo").to_string()).filter(|t| !t.is_empty()),
                 });
             }
             Class::ExternalGrid => m.external_grids.push(ExternalGrid {
@@ -509,6 +522,19 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                 q: e.num("q", 3.0),
                 p_zip: zip(e.num("pZ", 0.0), e.num("pI", 0.0)),
                 q_zip: zip(e.num("qZ", 0.0), e.num("qI", 0.0)),
+                // Zero rated voltage means the busbar's nominal voltage.
+                motor: e.flag("motor", false).then(|| AsyncMotor {
+                    rated_mw: e.num("motorP", 1.0),
+                    rated_kv: match e.num("motorVn", 0.0) {
+                        v if v > 0.0 => v,
+                        _ => m.nominal_kv(nodes[0]),
+                    },
+                    efficiency: e.num("motorEff", 95.0) / 100.0,
+                    cos_phi: e.num("motorCosphi", 0.85),
+                    ilr: e.num("motorIlr", 5.0),
+                    rx: e.num("motorRx", 0.1),
+                    pole_pairs: e.int("motorPoles", 0).max(0) as u32,
+                }),
             }),
             Class::Shunt => {
                 let vn = e.num("vn", 110.0);

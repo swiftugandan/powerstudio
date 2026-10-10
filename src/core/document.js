@@ -20,7 +20,8 @@ import { checkContingencies } from './contingencies.js';
  *     balance: 'reference' | 'maxP' | 'targetP' | 'factor' | 'margin' | 'load', slackTolerance: number, remoteVoltage: boolean,
  *     voltageDependentLoads: boolean, tapControl: boolean, shuntControl: boolean, phaseControl: boolean, areaInterchange: boolean,
  *     areas: AreaTarget[] },
- *   shortcircuit: { fault: '3ph' | '2ph' | '1ph', mode: 'max' | 'min', kappa: 'B' | 'C', lvTolerance: '6' | '10', location: string },
+ *   shortcircuit: { fault: '3ph' | '2ph' | '1ph', mode: 'max' | 'min', kappa: 'B' | 'C', lvTolerance: '6' | '10', location: string,
+ *     tMin: number, tK: number, lineTemperature: number },
  *   contingency: { lines: boolean, trafos: boolean, gens: boolean, busbars: boolean, maxLoading: number, acceptableS: number,
  *     screening: boolean, screeningMargin: number, screeningVoltage: number,
  *     list: import('./contingencies.js').Contingency[], remedial: import('./contingencies.js').RemedialAction[] },
@@ -63,6 +64,12 @@ export const STUDY_FIELDS = {
     { key: 'kappa', label: 'Peak factor method', type: 'enum', group: 'shortcircuit', default: 'C', options: ['B', 'C'] },
     { key: 'lvTolerance', label: 'LV voltage tolerance', type: 'enum', group: 'shortcircuit', default: '10', options: ['6', '10'] },
     { key: 'location', label: 'Fault location', type: 'string', group: 'shortcircuit', default: '', help: 'Empty runs a fault at every busbar in turn.' },
+    { key: 'tMin', label: 'Minimum time delay', type: 'number', group: 'shortcircuit', default: 0.1, unit: 's', min: 0.02, max: 10,
+      help: 'The shortest time from the fault to the first contacts parting, for the breaking current Ib. Machines\u2019 currents decay by then.' },
+    { key: 'tK', label: 'Short-circuit duration', type: 'number', group: 'shortcircuit', default: 1, unit: 's', min: 0.01, max: 10,
+      help: 'How long the current flows, for the thermal equivalent current Ith.' },
+    { key: 'lineTemperature', label: 'Line temperature at fault end', type: 'number', group: 'shortcircuit', default: 80, unit: '°C', min: 20, max: 250,
+      help: 'Minimum currents only: lines\u2019 resistance rises from its 20 °C value to this conductor temperature.' },
   ],
   contingency: [
     { key: 'lines', label: 'Line outages', type: 'bool', group: 'loadflow', default: true },
@@ -215,6 +222,18 @@ export function* normalizeSteps(input) {
     if (ends.some(b => !buses.has(b))) issues.push(`${el.id}: removed, it connects to a missing busbar.`);
     else if (new Set(ends).size < ends.length) issues.push(`${el.id}: removed, both ends are on the same busbar.`);
     else doc.elements.push(el);
+  }
+  // A unit transformer must be a transformer with an end at the machine's busbar.
+  const kept = new Map(doc.elements.map(e => [e.id, e]));
+  for (const el of doc.elements) {
+    for (const f of CLASSES[el.cls].fields) {
+      if (f.type !== 'trafo' || el[f.key] === '') continue;
+      const t = kept.get(/** @type {string} */ (el[f.key]));
+      if (!t || t.cls !== 'trafo' || (t.hv !== el.bus && t.lv !== el.bus)) {
+        issues.push(`${el.id}: ${f.label.toLowerCase()} "${String(el[f.key])}" is not a transformer at its busbar. Using none.`);
+        el[f.key] = '';
+      }
+    }
   }
 
   const study = raw.study && typeof raw.study === 'object' ? /** @type {Record<string, Record<string, unknown>>} */ (raw.study) : {};

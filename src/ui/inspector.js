@@ -5,7 +5,7 @@ import { h, esc } from './dom.js';
 import { icon } from './icons.js';
 import { fieldRow } from './fields.js';
 import { fixed } from './format.js';
-import { CLASSES, CLASS_ORDER, rotorIssue } from '../core/catalog.js';
+import { CLASSES, CLASS_ORDER, rotorIssue, unitTrafoChoices } from '../core/catalog.js';
 import { CLASS_ICON } from './tree.js';
 import { minOf, maxOf } from '../core/extent.js';
 
@@ -105,13 +105,14 @@ export class Inspector {
     const results = this.resultsFor(el);
     if (results) out.push(results);
     const buses = app.store.doc.elements.filter(e => e.cls === 'bus').map(b => ({ id: b.id, name: b.name || b.id }));
+    const trafos = el.cls === 'gen' ? unitTrafoChoices(app.store.doc.elements, el).map(t => ({ id: t.id, name: t.name || t.id })) : [];
     for (const [group, label] of GROUPS) {
       const fields = spec.fields.filter(f => f.group === group && (!f.when || f.when(el)));
       if (!fields.length) continue;
       const props = h('div', { class: 'props' });
       for (const f of fields) {
         if (f.when && !f.when(el)) continue;
-        props.append(...fieldRow(f, el[f.key], v => app.tryEdit(`Edit ${f.label.toLowerCase()}`, () => app.store.transact(`Edit ${f.label.toLowerCase()}`, tx => tx.set(el.id, f.key, f.key === 'name' ? String(v).trim() : v), { coalesce: `field-${el.id}-${f.key}` })), { buses }));
+        props.append(...fieldRow(f, el[f.key], v => app.tryEdit(`Edit ${f.label.toLowerCase()}`, () => app.store.transact(`Edit ${f.label.toLowerCase()}`, tx => tx.set(el.id, f.key, f.key === 'name' ? String(v).trim() : v), { coalesce: `field-${el.id}-${f.key}` })), { buses, trafos }));
       }
       // Round-rotor data that cannot be simulated, said where they are edited.
       const issue = group === 'rms' ? rotorIssue(el) : '';
@@ -160,7 +161,8 @@ export class Inspector {
       /** @type {import('../engine/reports.js').ShortCircuitResult} */
       const r = R.shortcircuit.result;
       const b = r.buses.find(x => x.id === el.id);
-      if (b) rows.push(['Ik″', `${fixed(b.ikss, 3)} kA`], ['ip', `${fixed(b.ip, 3)} kA`], ['Ith (1 s)', `${fixed(b.ith, 3)} kA`], ['Sk″', `${fixed(b.skss, 1)} MVA`],
+      if (b) rows.push(['Ik″', `${fixed(b.ikss, 3)} kA`], ['ip', `${fixed(b.ip, 3)} kA`], ...(r.fault === '3ph' && r.mode === 'max' ? [/** @type {[string, string]} */ ([`Ib (${fixed(r.tMin, 2)} s)`, `${fixed(b.ib, 3)} kA`])] : []),
+        [`Ith (${fixed(r.tK, 2)} s)`, `${fixed(b.ith, 3)} kA`], ['Sk″', `${fixed(b.skss, 1)} MVA`],
         ['κ', fixed(b.kappa, 3)], ['R/X', fixed(b.rx, 3)], ['Z1', `${fixed(b.r1, 4)} + j${fixed(b.x1, 4)} Ω`]);
       if (b && r.fault === '1ph') rows.push(['Z0', Number.isFinite(b.r0) ? `${fixed(b.r0, 4)} + j${fixed(b.x0, 4)} Ω` : '—']);
       const c = r.contributions.find(x => x.id === el.id);

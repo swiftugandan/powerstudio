@@ -332,6 +332,12 @@ pub struct Transformer2 {
     pub phase_tap: Option<PhaseTap>,
     /// Current limits.
     pub limits: Vec<CurrentLimit>,
+    /// Its taps change on load (for the correction factor of a power station unit, IEC 60909-0, 6.7).
+    #[serde(default)]
+    pub on_load_taps: bool,
+    /// The tap range used for a power station unit without on-load tap changer, ±%.
+    #[serde(default)]
+    pub tap_range_pct: f64,
 }
 
 /// One winding of a three-winding transformer, with its share of the star-equivalent impedance.
@@ -415,6 +421,31 @@ pub struct MachineShortCircuit {
     pub cos_phi: f64,
     /// Neutral earthed (zero sequence).
     pub earthed: bool,
+    /// The range over which the machine's voltage is regulated, ±% (pG of IEC 60909-0, 6.6.1).
+    #[serde(default)]
+    pub pg: f64,
+    /// The source meets short circuits as a network feeder with these data instead of as a machine: an equivalent of
+    /// an external network that regulates voltage in the load flow, as CGMES external network injections are.
+    #[serde(default)]
+    pub feeder: Option<Feeder>,
+}
+
+/// A network feeder's short-circuit data (IEC 60909-0, 6.2), as an external grid has them.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Feeder {
+    /// Initial short-circuit power for maximum currents, MVA.
+    pub sk_max: f64,
+    /// Initial short-circuit power for minimum currents, MVA.
+    pub sk_min: f64,
+    /// R/X for maximum currents.
+    pub rx_max: f64,
+    /// R/X for minimum currents.
+    pub rx_min: f64,
+    /// X0/X1.
+    pub x0x1: f64,
+    /// R0/X0.
+    pub r0x0: f64,
 }
 
 /// A machine's dynamic data: inertia, damping and transient reactance, which every rotor model uses, the rotor model
@@ -497,6 +528,10 @@ pub struct Generator {
     pub sc: MachineShortCircuit,
     /// Classical dynamic data.
     pub dynamics: MachineDynamics,
+    /// The transformer of its power station unit, by identifier: the machine and this transformer meet the short
+    /// circuit as one unit (IEC 60909-0, 6.7).
+    #[serde(default)]
+    pub unit_transformer: Option<String>,
 }
 
 /// A load with optional voltage dependence (ZIP).
@@ -519,6 +554,36 @@ pub struct Load {
     pub p_zip: [f64; 3],
     /// Shares of constant impedance, current and power in Q.
     pub q_zip: [f64; 3],
+    /// The load is an asynchronous motor (or a group of them) that feeds a short circuit, with its rated data.
+    #[serde(default)]
+    pub motor: Option<AsyncMotor>,
+}
+
+/// An asynchronous motor's rated data, for its contribution to short-circuit currents (IEC 60909-0, 6.8).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AsyncMotor {
+    /// Rated mechanical power, MW.
+    pub rated_mw: f64,
+    /// Rated voltage, kV.
+    pub rated_kv: f64,
+    /// Rated efficiency, as a fraction.
+    pub efficiency: f64,
+    /// Rated power factor.
+    pub cos_phi: f64,
+    /// Locked-rotor current over rated current, ILR/IrM.
+    pub ilr: f64,
+    /// Locked-rotor resistance over reactance, RM/XM.
+    pub rx: f64,
+    /// Pairs of poles, for the decay of its breaking current.
+    pub pole_pairs: u32,
+}
+
+impl AsyncMotor {
+    /// Rated apparent power, MVA: the mechanical power over efficiency and power factor.
+    pub fn rated_mva(&self) -> f64 {
+        self.rated_mw / (self.efficiency * self.cos_phi)
+    }
 }
 
 /// A switchable shunt compensator (capacitor bank or reactor).

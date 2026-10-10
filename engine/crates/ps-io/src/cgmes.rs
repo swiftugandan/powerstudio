@@ -12,9 +12,9 @@
 use std::collections::{BTreeMap, HashMap};
 
 use ps_model::{
-    Area, CurrentLimit, Generator, Line, Load, MachineControl, MachineDynamics, MachineShortCircuit, Model, Node,
-    NodeKind, NodeRef, PhaseTap, RatioTap, Shunt, Substation, Svc, Switch, SwitchKind, TapPoint, Transformer2,
-    Transformer3, VoltageControl, VoltageLevel, Winding, Winding3,
+    Area, AsyncMotor, CurrentLimit, Feeder, Generator, Line, Load, MachineControl, MachineDynamics,
+    MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap, Shunt, Substation, Svc, Switch,
+    SwitchKind, TapPoint, Transformer2, Transformer3, VoltageControl, VoltageLevel, Winding, Winding3,
 };
 
 use crate::ParseError;
@@ -38,6 +38,8 @@ const TYPICAL_SC: MachineShortCircuit = MachineShortCircuit {
     rs: 0.0,
     cos_phi: 0.85,
     earthed: false,
+    pg: 0.0,
+    feeder: None,
 };
 const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics::classical(0.3, 4.0, 0.0);
 
@@ -156,6 +158,8 @@ struct Ctx<'g> {
     limits: HashMap<&'g str, Vec<(Option<f64>, f64)>>,
     /// Objects of a class grouped by the object a property refers to, built once per (class, property).
     groups: HashMap<(&'static str, &'static str), HashMap<&'g str, Vec<&'g Object>>>,
+    /// Two-winding transformers marked as part of a generating unit, by index, linked to their machine at the end.
+    unit_transformers: Vec<usize>,
 }
 
 impl<'g> Ctx<'g> {
@@ -257,6 +261,7 @@ pub fn import(files: &[File]) -> Result<Imported, ParseError> {
         term_connected: HashMap::new(),
         limits: HashMap::new(),
         groups: HashMap::new(),
+        unit_transformers: Vec::new(),
     };
     cx.m.meta.name = model_name(cx.g, files);
     cx.m.meta.description = "Imported from CGMES.".into();
@@ -267,6 +272,7 @@ pub fn import(files: &[File]) -> Result<Imported, ParseError> {
     transformers(&mut cx);
     injections(&mut cx);
     switches(&mut cx);
+    units(&mut cx);
     let report = report(&cx, &g);
     let mut model = cx.m;
     model.meta.frequency_hz = 50.0;
@@ -884,6 +890,8 @@ fn transformers(cx: &mut Ctx) {
                 ratio_taps: Vec::new(),
                 phase_tap: None,
                 limits,
+                on_load_taps: false,
+                tap_range_pct: 0.0,
             };
             for (end, e) in [(1u8, e1), (2u8, e2)] {
                 if let Some(tc) = ratio.get(&*e.id).copied() {
@@ -897,6 +905,26 @@ fn transformers(cx: &mut Ctx) {
                     };
                     t.phase_tap = Some(phase_tap(cx, tc, end, xtx));
                 }
+            }
+            // For a power station unit's correction factor (IEC 60909-0, 6.7): an on-load tap changer, or the range
+            // either way of an off-load one.
+            let changers: Vec<&Object> = [e1, e2]
+                .into_iter()
+                .filter_map(|e| ratio.get(&*e.id).copied())
+                .collect();
+            t.on_load_taps = changers
+                .iter()
+                .any(|tc| g.flag(tc, "TapChanger.ltcFlag").unwrap_or(false));
+            t.tap_range_pct = changers
+                .iter()
+                .map(|tc| {
+                    let (low, high, neutral) = steps(cx, tc);
+                    f64::from((high - neutral).max(neutral - low).max(0))
+                        * cx.numd(tc, "RatioTapChanger.stepVoltageIncrement").abs()
+                })
+                .fold(0.0, f64::max);
+            if g.flag(pt, "PowerTransformer.isPartOfGeneratorUnit").unwrap_or(false) {
+                cx.unit_transformers.push(cx.m.transformers2.len());
             }
             cx.m.transformers2.push(t);
             cx.mark("PowerTransformer", "two- and three-winding transformers");
@@ -954,6 +982,105 @@ fn transformers(cx: &mut Ctx) {
     }
 }
 
+/// An asynchronous machine's data for its contribution to short-circuit currents (IEC 60909-0, 6.8), when the files
+/// give its rated mechanical power and locked-rotor current. A drive fed through a static converter contributes only
+/// when it can return power to the network.
+fn motor_data(cx: &Ctx, o: &Object, node: NodeRef) -> Option<AsyncMotor> {
+    let g = cx.g;
+    if g.flag(o, "AsynchronousMachine.converterFedDrive").unwrap_or(false)
+        && !g.flag(o, "AsynchronousMachine.reversible").unwrap_or(false)
+    {
+        return None;
+    }
+    let rated_mw = cx
+        .num(o, "AsynchronousMachine.ratedMechanicalPower")
+        .filter(|p| *p > 0.0)?;
+    let ilr = cx.num(o, "AsynchronousMachine.iaIrRatio").filter(|r| *r > 0.0)?;
+    Some(AsyncMotor {
+        rated_mw,
+        rated_kv: cx
+            .num(o, "RotatingMachine.ratedU")
+            .filter(|u| *u > 0.0)
+            .unwrap_or_else(|| cx.m.nominal_kv(node)),
+        efficiency: cx.num(o, "AsynchronousMachine.efficiency").unwrap_or(100.0) / 100.0,
+        cos_phi: cx.num(o, "RotatingMachine.ratedPowerFactor").unwrap_or(1.0),
+        ilr,
+        rx: cx.num(o, "AsynchronousMachine.rxLockedRotorRatio").unwrap_or(0.1),
+        pole_pairs: cx
+            .num(o, "AsynchronousMachine.polePairNumber")
+            .map_or(0, |p| p.max(0.0) as u32),
+    })
+}
+
+/// An external network injection's short-circuit data as a network feeder (IEC 60909-0, 6.2), when the files give its
+/// maximum initial short-circuit current: the short-circuit powers from the currents (A) at the node's nominal
+/// voltage, and X0/X1 from the ratio of the impedances' magnitudes. Without a minimum current the maximum stands in
+/// for it, which `missing_minimum` counts.
+fn feeder(cx: &Ctx, o: &Object, node: NodeRef, missing_minimum: &mut usize) -> Option<Feeder> {
+    let kv = cx.nominal_kv(node);
+    let power = |ik: f64| 3_f64.sqrt() * kv * ik / 1000.0;
+    let ik_max = cx
+        .num(o, "ExternalNetworkInjection.maxInitialSymShCCurrent")
+        .filter(|i| *i > 0.0)?;
+    let rx_max = cx.numd(o, "ExternalNetworkInjection.maxR1ToX1Ratio");
+    let (sk_min, rx_min) = match cx
+        .num(o, "ExternalNetworkInjection.minInitialSymShCCurrent")
+        .filter(|i| *i > 0.0)
+    {
+        Some(ik) => (power(ik), cx.numd(o, "ExternalNetworkInjection.minR1ToX1Ratio")),
+        None => {
+            *missing_minimum += 1;
+            (power(ik_max), rx_max)
+        }
+    };
+    let r0x0 = cx.numd(o, "ExternalNetworkInjection.maxR0ToX0Ratio");
+    let x0x1 = match cx
+        .num(o, "ExternalNetworkInjection.maxZ0ToZ1Ratio")
+        .filter(|z| *z > 0.0)
+    {
+        Some(z0z1) => z0z1 * (1.0 + rx_max * rx_max).sqrt() / (1.0 + r0x0 * r0x0).sqrt(),
+        None => 1.0,
+    };
+    Some(Feeder {
+        sk_max: power(ik_max),
+        sk_min,
+        rx_max,
+        rx_min,
+        x0x1,
+        r0x0,
+    })
+}
+
+/// Links each two-winding transformer marked as part of a generating unit to the one machine at its lower-voltage
+/// end, through closed switches, so the two meet short circuits as a power station unit (IEC 60909-0, 6.7).
+fn units(cx: &mut Ctx) {
+    if cx.unit_transformers.is_empty() {
+        return;
+    }
+    let topo = ps_topology::Topology::build(&cx.m, &ps_topology::Outages::none());
+    let mut unlinked = 0;
+    for &k in &cx.unit_transformers {
+        let t = &cx.m.transformers2[k];
+        let low = if t.rated_kv2 <= t.rated_kv1 { t.node2 } else { t.node1 };
+        let Some(bus) = topo.bus_of(low) else {
+            unlinked += 1;
+            continue;
+        };
+        let machines: Vec<usize> = (0..cx.m.generators.len())
+            .filter(|&i| topo.bus_of(cx.m.generators[i].node) == Some(bus))
+            .collect();
+        match machines[..] {
+            [i] => cx.m.generators[i].unit_transformer = Some(t.id.clone()),
+            _ => unlinked += 1,
+        }
+    }
+    if unlinked > 0 {
+        cx.notes.push(format!(
+            "{unlinked} transformer(s) marked as part of a generating unit have no single machine at their lower-voltage end; short circuits treat them as ordinary transformers."
+        ));
+    }
+}
+
 /// Reactive limits from a capability curve at active power `p`.
 fn curve_limits(cx: &mut Ctx, sm: &Object, p: f64) -> Option<(f64, f64)> {
     let g = cx.g;
@@ -989,6 +1116,7 @@ fn injections(cx: &mut Ctx) {
     let mut typical_sc = 0;
     let mut typical_dyn = 0;
     let mut no_limits = 0;
+    let mut no_minimum = 0;
     let dynamics: HashMap<&str, &Object> = g
         .of_class("SynchronousMachineTimeConstantReactance")
         .filter_map(|d| Some((g.reference(d, "SynchronousMachineDynamics.SynchronousMachine")?, d)))
@@ -1044,16 +1172,34 @@ fn injections(cx: &mut Ctx) {
             let sc = match cx.num(o, "SynchronousMachine.satDirectSubtransX") {
                 Some(xdss) => MachineShortCircuit {
                     xdss,
-                    rs: cx.numd(o, "SynchronousMachine.r"),
+                    // RG is a resistance in ohms (CIM's SynchronousMachine.r); the model holds it in p.u. of the rating.
+                    rs: {
+                        let (sn, un) = (
+                            cx.numd(o, "RotatingMachine.ratedS"),
+                            cx.numd(o, "RotatingMachine.ratedU"),
+                        );
+                        let r = cx.numd(o, "SynchronousMachine.r");
+                        if sn > 0.0 && un > 0.0 { r * sn / (un * un) } else { 0.0 }
+                    },
                     cos_phi: cx
                         .num(o, "RotatingMachine.ratedPowerFactor")
                         .unwrap_or(TYPICAL_SC.cos_phi),
                     earthed: g.flag(o, "SynchronousMachine.earthing").unwrap_or(false),
+                    pg: cx.numd(o, "SynchronousMachine.voltageRegulationRange"),
+                    feeder: None,
                 },
                 None => {
                     typical_sc += usize::from(class == "SynchronousMachine");
                     TYPICAL_SC
                 }
+            };
+            let sc = MachineShortCircuit {
+                feeder: if class == "ExternalNetworkInjection" {
+                    feeder(cx, o, node, &mut no_minimum)
+                } else {
+                    None
+                },
+                ..sc
             };
             let dynamics = match dynamics.get(&*o.id) {
                 Some(d) => MachineDynamics::classical(
@@ -1095,6 +1241,7 @@ fn injections(cx: &mut Ctx) {
                 reference_priority: cx.num(o, prio).map_or(0, |v| v.max(0.0) as u32),
                 sc,
                 dynamics,
+                unit_transformer: None,
             });
             cx.mark(class, detail);
         }
@@ -1152,6 +1299,7 @@ fn injections(cx: &mut Ctx) {
                 q,
                 p_zip: [0.0, 0.0, 1.0],
                 q_zip: [0.0, 0.0, 1.0],
+                motor: None,
             });
             cx.mark("EquivalentInjection", "generators when regulating, loads otherwise");
         }
@@ -1195,6 +1343,11 @@ fn injections(cx: &mut Ctx) {
                     );
                 }
             }
+            let motor = if class == "AsynchronousMachine" {
+                motor_data(cx, o, node)
+            } else {
+                None
+            };
             cx.m.loads.push(Load {
                 id: o.id.to_string(),
                 name: cx.name(o),
@@ -1204,6 +1357,7 @@ fn injections(cx: &mut Ctx) {
                 q,
                 p_zip,
                 q_zip,
+                motor,
             });
             cx.mark(class, "loads");
         }
@@ -1325,6 +1479,11 @@ fn injections(cx: &mut Ctx) {
     if no_limits > 0 {
         cx.notes.push(format!(
             "{no_limits} machine(s) have no reactive power limits; they are treated as unlimited."
+        ));
+    }
+    if no_minimum > 0 {
+        cx.notes.push(format!(
+            "{no_minimum} external network injection(s) give no minimum short-circuit current; minimum currents use the maximum."
         ));
     }
     if exponential > 0 {

@@ -69,6 +69,8 @@ struct Doc<'a> {
     bus_of: Vec<Option<usize>>,
     counts: HashMap<&'static str, usize>,
     internal: Vec<(String, Internal)>,
+    /// The element each two-winding transformer was written as, by the model's identifier.
+    trafo_ids: HashMap<String, String>,
 }
 
 impl Doc<'_> {
@@ -129,10 +131,11 @@ impl Doc<'_> {
         );
     }
 
-    /// A transformer element from a branch's per-unit form between `hv` (base `vh`) and `lv` (base `vl`): the present
-    /// ratio as the rated HV voltage, the impedance as uk and uR on the rating, the magnetising admittance as iron
-    /// losses and no-load current, or as shunt elements where those cannot express it. `None` when the impedance has
-    /// a negative part.
+    /// A transformer element from a branch's per-unit form between `hv` (base `vh`) and `lv` (base `vl`): the LV
+    /// rated voltage `lv_rated` (the LV base when `None`), the present ratio in the rated HV voltage, the impedance as
+    /// uk and uR on the rating, the magnetising admittance as iron losses and no-load current, or as shunt elements
+    /// where those cannot express it. Keeping the rated voltages keeps uk as the nameplate gives it, which the
+    /// short-circuit correction factors read.
     #[allow(clippy::too_many_arguments)]
     fn transformer(
         &mut self,
@@ -145,6 +148,7 @@ impl Doc<'_> {
         on: bool,
         conns: Option<(Winding, Winding)>,
         extra: Value,
+        lv_rated: Option<f64>,
     ) -> Option<String> {
         if p.z.re < 0.0 || p.z.im <= 0.0 {
             // Negative resistance or no positive reactance, as star equivalents and some grid data have, which uk and
@@ -170,7 +174,18 @@ impl Doc<'_> {
                 y_to: C64::ZERO,
                 ..*p
             };
-            let id = self.transformer(wanted, name, hv, (&mid, lv.1), &head, rating, on, conns, extra)?;
+            let id = self.transformer(
+                wanted,
+                name,
+                hv,
+                (&mid, lv.1),
+                &head,
+                rating,
+                on,
+                conns,
+                extra,
+                lv_rated,
+            )?;
             let zb = lv.1 * lv.1 / self.sb;
             let (r, x) = (p.z.re.min(0.0) * zb, (p.z.im - X_HEAD) * zb);
             self.push(
@@ -189,9 +204,13 @@ impl Doc<'_> {
             return Some(id);
         }
         let sn = if rating > 0.0 { rating } else { self.sb };
-        let (vn_hv, vn_lv) = (p.ratio * hv.1, lv.1);
-        let uk = p.z.abs() * sn / self.sb * 100.0;
-        let ur = p.z.re * sn / self.sb * 100.0;
+        // Both rated voltages scale with the LV one, so the ratio stays; per-unit values on the rating scale with
+        // the square of it.
+        let vn_lv = lv_rated.filter(|v| *v > 0.0 && v.is_finite()).unwrap_or(lv.1);
+        let scale = vn_lv / lv.1;
+        let (vn_hv, on_rating) = (p.ratio * hv.1 * scale, sn / self.sb / (scale * scale));
+        let uk = p.z.abs() * on_rating * 100.0;
+        let ur = p.z.re * on_rating * 100.0;
         // Magnetising admittance: the document draws it half at each winding or all at one (behind the ratio on the
         // HV side), from iron losses and no-load current, which cannot be capacitive or negative. Whatever that cannot
         // hold goes into shunt elements, which is exact (the HV one moves outside the ratio).
@@ -225,8 +244,11 @@ impl Doc<'_> {
                 "transformer admittance(s) that iron losses and no-load current cannot express written as shunts",
             );
         }
-        let (g, b) = (held.re * self.sb / sn, held.im * self.sb / sn);
-        let (pfe, i0) = (held.re * self.sb * 1000.0, (g * g + b * b).sqrt() * 100.0);
+        let (g, b) = (
+            held.re * self.sb / sn * scale * scale,
+            held.im * self.sb / sn * scale * scale,
+        );
+        let (pfe, i0) = (g * sn * 1000.0, (g * g + b * b).sqrt() * 100.0);
         // The phase shift as a listed vector group where it is a whole clock number; otherwise a clock-0 group and
         // the rest as the additional shift.
         let shift = p.shift * DEG;
@@ -279,6 +301,7 @@ pub fn to_document(m: &Model) -> Converted {
         bus_of: view.bus_of.clone(),
         counts: HashMap::new(),
         internal: Vec::new(),
+        trafo_ids: HashMap::new(),
     };
     let mut notes = Vec::new();
     if !m.switches.is_empty() {
@@ -420,6 +443,7 @@ fn lines(d: &mut Doc) {
                 l.in_service,
                 None,
                 json!({}),
+                None,
             )
             .is_none()
             {
@@ -605,7 +629,11 @@ fn transformers2(d: &mut Doc) {
                 other => *other = json!({ "thermal": false }),
             }
         }
-        if d.transformer(
+        if let Value::Object(o) = &mut extra {
+            o.insert("onLoadTaps".into(), Value::Bool(t.on_load_taps));
+            o.insert("tapRange".into(), json!(t.tap_range_pct));
+        }
+        let written = d.transformer(
             &t.id,
             &t.name,
             (&a.0, a.1),
@@ -615,10 +643,13 @@ fn transformers2(d: &mut Doc) {
             t.in_service,
             conns,
             extra,
-        )
-        .is_none()
-        {
-            d.count("transformer(s) that could not be written left out");
+            Some(t.rated_kv2),
+        );
+        match written {
+            Some(id) => {
+                d.trafo_ids.insert(t.id.clone(), id);
+            }
+            None => d.count("transformer(s) that could not be written left out"),
         }
     }
 }
@@ -665,6 +696,7 @@ fn transformers3(d: &mut Doc) {
                 t.in_service,
                 conns,
                 json!({}),
+                None,
             );
         }
         d.count("three-winding transformer(s) written as a star busbar with three two-winding transformers");
@@ -708,8 +740,18 @@ fn injections(d: &mut Doc) {
             "vn": positive(g.rated_kv, bus.1), "cosphi": g.sc.cos_phi.clamp(0.01, 1.0), "xdss": positive(g.sc.xdss, 0.2),
             "rs": g.sc.rs.max(0.0), "xdt": positive(g.dynamics.xdt, 0.3), "h": positive(g.dynamics.h, 4.0),
             "damping": g.dynamics.d.max(0.0), "regBus": reg_bus, "pmin": g.p_min, "pmax": g.p_max.max(0.0),
-            "participation": g.participation.max(0.0),
+            "participation": g.participation.max(0.0), "pg": g.sc.pg,
+            "unitTrafo": g.unit_transformer.as_ref().and_then(|t| d.trafo_ids.get(t)).cloned().unwrap_or_default(),
         });
+        if let Some(f) = g.sc.feeder {
+            fields["feeder"] = json!(true);
+            fields["skMax"] = json!(f.sk_max);
+            fields["skMin"] = json!(f.sk_min);
+            fields["rxMax"] = json!(f.rx_max);
+            fields["rxMin"] = json!(f.rx_min);
+            fields["x0x1"] = json!(f.x0x1);
+            fields["r0x0"] = json!(f.r0x0);
+        }
         dynamics_fields(&g.dynamics, &mut fields);
         d.push("gen", &g.id, &g.name, fields);
     }
@@ -791,15 +833,21 @@ fn injections(d: &mut Doc) {
         }
         let Some(bus) = d.bus(l.node) else { continue };
         let pct = |x: f64| x * 100.0;
-        d.push(
-            "load",
-            &l.id,
-            &l.name,
-            json!({
-                "bus": bus.0, "inService": l.in_service, "p": l.p, "q": l.q, "pZ": pct(l.p_zip[0]), "pI": pct(l.p_zip[1]),
-                "qZ": pct(l.q_zip[0]), "qI": pct(l.q_zip[1]),
-            }),
-        );
+        let mut fields = json!({
+            "bus": bus.0, "inService": l.in_service, "p": l.p, "q": l.q, "pZ": pct(l.p_zip[0]), "pI": pct(l.p_zip[1]),
+            "qZ": pct(l.q_zip[0]), "qI": pct(l.q_zip[1]),
+        });
+        if let Some(mo) = l.motor {
+            fields["motor"] = json!(true);
+            fields["motorP"] = json!(mo.rated_mw);
+            fields["motorVn"] = json!(mo.rated_kv);
+            fields["motorEff"] = json!(mo.efficiency * 100.0);
+            fields["motorCosphi"] = json!(mo.cos_phi);
+            fields["motorIlr"] = json!(mo.ilr);
+            fields["motorRx"] = json!(mo.rx);
+            fields["motorPoles"] = json!(mo.pole_pairs);
+        }
+        d.push("load", &l.id, &l.name, fields);
     }
     for (k, s) in m.shunts.iter().enumerate() {
         if !m.alive(Class::Shunt, k) {

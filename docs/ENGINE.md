@@ -148,33 +148,74 @@ differs by 1.7e-4 Mvar.
 
 `ps-sc` implements the method of the equivalent voltage source at the fault location of IEC 60909-0. **It is
 IEC 60909-style, not certified**: the formulas follow pandapower 3.5.6's implementation of the standard (see
-`docs/research/sources.md`), and PowerStudio agrees with pandapower on both samples, maximum and minimum, to about
-1e-15 relative for three-phase and line-to-line faults and within 2e-8 for earth faults. The earth-fault difference
-comes from the tiny numerical earthing each program adds to otherwise isolated zero-sequence networks.
+`docs/research/sources.md`). PowerStudio agrees with pandapower on both samples, maximum and minimum, to about 1e-15
+relative for three-phase and line-to-line faults and within 2e-8 for earth faults; the earth-fault difference comes
+from the tiny numerical earthing each program adds to otherwise isolated zero-sequence networks. On the example
+network of IEC TR 60909-4 it meets the report's values (below).
 
-- The only source is c·Un/√3 at the faulted bus. Machines, grids and transformers become impedances; loads, shunts,
-  line capacitances (positive sequence) and transformer magnetising branches are left out.
-- Voltage factor: cmax 1.10 and cmin 1.00 above 1 kV; below 1 kV cmax 1.05 or 1.10 and cmin 0.95 or 0.90 for the
+The only source is c·Un/√3 at the faulted bus. Machines, motors, feeders and branches become impedances; loads,
+shunts, line capacitances (positive sequence) and transformer magnetising branches are left out.
+
+- **Voltage factor**: cmax 1.10 and cmin 1.00 above 1 kV; below 1 kV cmax 1.05 or 1.10 and cmin 0.95 or 0.90 for the
   6 % and 10 % tolerance settings.
-- Transformer correction KT = 0.95·cmax/(1 + 0.6·xT) in the maximum case, with cmax of the winding-2 bus.
-- Generator correction KG = Un/UrG · cmax/(1 + x″d·sin φrG), in both cases.
-- Thévenin impedances Zkk come from solving Y·z = e_k for each bus on the factorised sparse admittance matrix, in the
-  positive sequence and, for earth faults, the zero sequence. Ik″ = c·Un/(√3·|Z1|), c·Un/|2·Z1| and
-  √3·c·Un/|2·Z1 + Z0|.
-- Zero sequence: YNyn transformers pass zero-sequence current; Dyn and YNd provide an earth path on their earthed
-  side; other connections block it. Line B0 is kept. Generators are unearthed. Every bus gets 1e-10 p.u. to earth so
-  isolated zero-sequence networks stay solvable; their earth-fault current reads about zero.
-- Peak current ip = κ·√2·Ik″. Method C (default) evaluates R/X at the equivalent frequency (20 Hz for 50 Hz systems)
-  with the fictitious generator resistances (0.05, 0.07 or 0.15 of X″d). Method B uses κ of the fault R/X, multiplied
-  by 1.15 when any branch has R/X ≥ 0.3, capped at 2.0 (1.8 below 1 kV); method B is checked against its formula,
-  not against pandapower.
-- Thermal equivalent current Ith = Ik″·√(m + n) for Tk = 1 s with n = 1 (far from generators), as pandapower does.
+- **Feeders**: external grids, and machines marked as standing for a network (CGMES external network injections), are
+  impedances c·Un²/Sk″ with their R/X, maximum or minimum, and X0/X1 and R0/X0 in the zero sequence.
+- **Network transformers**: KT = 0.95·cmax/(1 + 0.6·xT) in the maximum case, with cmax of the winding-2 bus. A
+  three-winding transformer gets KT per winding pair: the pair impedances, each corrected with its reactance on the
+  smaller of its two ratings, turned back into a star. Documents hold a three-winding transformer as a star busbar
+  `<id>.star` with transformers `<id>.w1` to `<id>.w3` (and, for a winding with negative reactance, a busbar
+  `<id>.wN.mid` and a line `<id>.wN.z`, which `ps-io`'s writer adds); `ps-sc` recognises that pattern and corrects
+  the windings per pair in the same way.
+- **Machines**: KG = Un/(UrG·(1 + pG)) · cmax/(1 + x″d·sin φrG), in both cases, with pG the machine's voltage
+  regulation range.
+- **Power station units**: a machine whose unit transformer is set meets faults outside the unit with both
+  impedances multiplied by KS = (UnQ²/UrG²)(UrTLV²/UrTHV²)·cmax/(1 + |x″d − xT|·sin φrG) when the transformer has an
+  on-load tap changer, or KSO = UnQ/(UrG(1 + pG)) · (UrTLV/UrTHV)(1 − pT) · cmax/(1 + x″d·sin φrG) without one (pT the
+  off-load tap range). A fault at the machine's busbar is calculated on a network of its own, where the machine's
+  impedance takes cmax/(1 + x″d·sin φrG) (divided by 1 + pG without an on-load tap changer), the transformer is
+  uncorrected, and the currents are scaled by UrG/Un.
+- **Asynchronous motors** (loads marked as motors) feed maximum currents only, through ZM = (1/(ILR/IrM))·UrM²/SrM
+  with SrM = PrM/(ηrM·cos φrM) and their R/X.
+- **Lines** in the minimum case have their resistance at the conductors' end temperature θe:
+  R·(1 + 0.004·(θe − 20 °C)), θe a study case setting (80 °C by default). Lines that stand for part of a
+  transformer's impedance (`<id>.z`) are not warmed.
+- **Initial current**: Thévenin impedances Zkk come from solving Y·z = e_k for each bus on the factorised sparse
+  admittance matrix, in the positive sequence and, for earth faults, the zero sequence. Ik″ = c·Un/(√3·|Z1|),
+  c·Un/|2·Z1| and √3·c·Un/|2·Z1 + Z0|. Sk″ = √3·Un·Ik″, except for line-to-line faults, where it is Un·Ik″/√3 as
+  pandapower defines it.
+- **Zero sequence**: YNyn transformers pass zero-sequence current; Dyn and YNd provide an earth path on their earthed
+  side; other connections block it. A three-winding transformer's earthed star windings connect their busbars to its
+  star point and a delta winding earths the star point. Line B0 is kept. Machines are unearthed. Every bus gets
+  1e-10 p.u. to earth so isolated zero-sequence networks stay solvable; their earth-fault current reads about zero.
+- **Peak current** ip = κ·√2·Ik″. Method C (default) evaluates R/X at the equivalent frequency (20 Hz for 50 Hz
+  systems) with the fictitious generator resistances (0.05, 0.07 or 0.15 of X″d). Method B uses κ of the fault R/X,
+  multiplied by 1.15 when any branch has R/X ≥ 0.3, capped at 2.0 (1.8 below 1 kV); method B is checked against its
+  formula, not against pandapower.
+- **Breaking current** Ib for three-phase faults at the minimum time delay tmin (a setting, 0.1 s by default), by
+  the meshed-network formula of IEC 60909-0, 9.1.2.2: Ib = Ik″ − Σ (ΔU″G/(c·Un/√3))·(1 − μ)·I″kG − Σ (ΔU″M/(c·Un/√3))
+  ·(1 − μ·q)·I″kM, over machines and motors, with ΔU″ the voltage across a machine's own impedance and I″k its
+  current, both read from the same impedance column. μ depends on I″k/Ir and tmin and is 1 up to I″k/Ir = 2; q
+  depends on the motor's rated power per pole pair and tmin, is at most 1, and is 1 when the pole pairs are not known
+  (no decay of the motor's own current, which errs high). Between the tabulated delays (0.02, 0.05, 0.1 and 0.25 s)
+  both are linear in tmin. pandapower does not compute Ib; the reference is the report. Unbalanced faults report
+  Ib = Ik″, and the app shows Ib for maximum currents, the case IEC 60909 defines it for.
+- **Thermal equivalent current** Ith = Ik″·√(m + n) for the fault duration Tk (a setting, 1 s by default), with
+  n = 1 (far from generators), as pandapower does.
 - With a single fault location, the contribution of every branch comes from the voltage changes −Z(:,k)·If.
 
 **Checked by** `engine/crates/ps-study/tests/shortcircuit.rs` and `tests/shortcircuit.test.mjs`: Ik″, ip and Ith
 against pandapower at every bus of both samples for all twelve combinations of fault type and case (pandapower
 reports no ip or Ith for earth faults); a hand calculation for a single infeed; Kirchhoff's current law at the fault
 for the branch contributions; the correction factors against their formulas (`ps-sc` unit tests).
+`engine/crates/ps-study/tests/iec60909.rs` checks the IEC TR 60909-4 example network (380/110/30/10 kV, power
+station units with and without on-load tap changers, three-winding transformers, motors) in eight variants from
+pandapower's test of it: the report's Ik″, ip, Sk″ and Ith to the test's own tolerances (worst 1e-4 kA), pandapower's
+results at every bus, and the report's Ib where only synchronous machines contribute (to 0.01 kA). The same network
+written as a document and read back gives the same currents to 1e-9, which checks the star recognition and the
+document fields. MiniGrid, CGMES's conformity configuration of the same network, imported from its files, meets the
+report's Ik″ and ip to 1e-4 relative at all eight fault locations and Ib to 0.1 % (0.25 % at the motors' busbars),
+read from the workbook that comes with it; one rating in the files differs from the report and the test uses the
+report's (docs/TEST-REPORT.md).
 
 ## Contingency analysis
 
@@ -411,7 +452,13 @@ and tabular, with the reactance variation of the asymmetrical and symmetrical ki
 stays on winding 2. Machines and external network injections keep their regulating controls and reactive capability
 curves; loads keep their load-response characteristics; linear and non-linear shunts, equivalent shunts and
 injections, and static var compensators are mapped. Equipment whose SSH `Equipment.inService` is false is out of
-service. Starting voltages come from SV. Vector group clocks are read but not applied, as PowSyBl does not apply them
+service. Short-circuit data come across where the files give them: machines' subtransient reactance, resistance RG
+(ohms in CIM, converted to p.u. of the rating) and voltage regulation range; external network injections' maximum and
+minimum initial currents and impedance ratios, which make them feeders; asynchronous machines' rated mechanical power,
+efficiency, locked-rotor current ratio, R/X and pole pairs (a converter-fed drive that cannot return power is left
+out); transformers' on-load tap changer flag and tap range; and `PowerTransformer.isPartOfGeneratorUnit`, which links
+the transformer to the one machine at its lower-voltage end as a power station unit. Lines' own end temperatures are
+not read; the study case's applies to every line. Starting voltages come from SV. Vector group clocks are read but not applied, as PowSyBl does not apply them
 by default; the report says so.
 
 **Checked by** `engine/crates/ps-study/tests/cgmes.rs` against PowSyBl's import and OpenLoadFlow on twelve ENTSO-E
@@ -549,8 +596,12 @@ compensator becomes a machine without active power that holds its voltage, an HV
 injection its setpoint gives (a load or a machine), and a shunt with uneven sections keeps its present admittance.
 Machines keep their regulated busbars and active limits, loads their constant impedance and current shares, shunts
 with even sections their sections and voltage control, and transformers one tap changer on the HV winding with its
-control (a tabled changer as the even step between its end positions, exact at its present position). Electrical values come from the engine's per-unit form of each element, so the document reproduces what
-it holds exactly: a transformer's present ratio becomes its rated HV voltage, its phase shift a vector group or an
+control (a tabled changer as the even step between its end positions, exact at its present position). Short-circuit
+data come along: machines' voltage regulation range, unit transformers and the feeder data of machines that stand
+for a network, transformers' on-load tap changer flag and tap range, and loads' motor data. Electrical values come
+from the engine's per-unit form of each element, so the document reproduces what it holds exactly: a transformer
+keeps its rated LV voltage and its present ratio goes into its rated HV voltage, so uk stays the nameplate's (which
+the short-circuit correction factors read), its phase shift becomes a vector group or an
 additional shift, its magnetising admittance a branch at one or both windings; uneven line charging becomes shunt
 elements; an impedance with a negative part or no reactance, which uk and uR cannot express, gets a line from an
 intermediate busbar for that part. The engine then solves the model and the document, the document started from the

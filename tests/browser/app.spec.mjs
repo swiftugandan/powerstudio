@@ -350,6 +350,23 @@ test('short circuit, contingency and stability run from the palette and the ribb
   await expect(page.locator('.plot canvas')).toBeVisible();
 });
 
+test('a machine and its transformer made a power station unit change the short-circuit and breaking currents', async ({ page }) => {
+  await open(page, 'sample=riverside');
+  await page.keyboard.press('Alt+S');
+  const hilltop = page.locator('table.grid tbody tr[data-id="B5"]');
+  await expect(hilltop).toContainText('3.920');
+  await expect(page.locator('table.grid thead th[data-key="ib"]')).toHaveAttribute('title', 'Breaking current at 0.10 s');
+  await page.locator('.tree-row[data-id="G1"]').click();
+  // Only transformers with an end at the machine's busbar are offered.
+  const unit = page.locator('#inspector-panel select[data-key="unitTrafo"]');
+  await expect(unit.locator('option')).toHaveText(['None', 'CHP unit transformer']);
+  await unit.selectOption('T3');
+  await page.locator('#viewport canvas').click({ position: { x: 20, y: 20 } });
+  await page.keyboard.press('Alt+S');
+  await expect(hilltop).toContainText('3.912');
+  await expect(hilltop.locator('td').nth(4)).toHaveText('3.651');
+});
+
 test('defines a two-line contingency and a remedial action, and the analysis reports both', async ({ page }) => {
   await open(page);
   await palette(page, 'Contingencies');

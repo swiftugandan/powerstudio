@@ -200,6 +200,38 @@ documentation states that it is validated against the IEC TR 60909-4 examples. P
 pandapower's to about 1e-15 relative for three-phase and line-to-line faults and within 2e-8 for earth faults. That establishes agreement with pandapower, not certification against the
 standard.
 
+Power station units (KS with an on-load tap changer, KSO without, the machine's own factor for a fault at its
+terminals and the scaling by UrG/Un), the voltage regulation range pG in KG, the per-pair correction of three-winding
+transformers, asynchronous motors (impedance from the locked-rotor current ratio, maximum currents only) and the
+conductors' end temperature in the minimum case follow the same implementation (`shortcircuit/ppc_conversion.py`,
+`build_branch.py`, `build_gen.py`, pandapower 3.5.6). The reference values are those of IEC TR 60909-4's example
+network as pandapower's own test encodes them: `pandapower/test/shortcircuit/test_iec60909_4.py` at commit
+`fe517927858f8ffb8ef28db5a15f1a175f57dbbd` (BSD-3-Clause), downloaded by sha256 into `.cache/reference` and read by
+`scripts/oracle/iec60909.py`, which writes `tests/oracle/golden/sc-*.json` with pandapower's computed results and the
+values the test lists, parsed from its source rather than retyped.
+
+The breaking current Ib follows IEC 60909-0's formula for meshed networks, which pandapower 3.5.6 sketches but does not
+run (`shortcircuit/currents.py`, commented out). The coefficients of μ come from that code; that μ is 1 for
+I″kG/IrG ≤ 2, that q is at most 1 and that values between the tabulated minimum delays may be interpolated linearly
+come from PAC Basics, "IEC 60909: 'Near' Generator Short Circuit Calculation"
+(https://pacbasics.org/iec-60909-near-generator-short-circuit-calculation/). The coefficients of q (1.03, 0.79, 0.57
+and 0.26 with 0.12, 0.12, 0.12 and 0.10 times ln m at 0.02, 0.05, 0.1 and ≥ 0.25 s, m the motor's rated power in MW
+per pair of poles) are as Phase to Phase's Vision documents them
+(https://www.phasetophase.nl/help/vision/9.8.1/en/iec_60909__algemeen.htm). That page also states that breaking
+currents are calculated for maximum currents only, which the app follows in what it shows.
+
+The second reference for the same network is MiniGrid, a CGMES 3.0 conformity configuration in ENTSO-E's archive
+(`cgmes-tc-3.0.3.zip`, already listed for CGMES), whose `MiniGrid-RESULTS.xlsx` lists the report's three-phase values
+(sheet "Three phase - IEC 60909-4") and a tool's results with each node's CIM identifier (sheet "Three phase"). The
+engine test reads the workbook from the cached archive; nothing from it is copied into the repository. MiniGrid rates
+machine G2 at 150 MVA where the report has 100 MVA; the test uses the report's rating, read from the golden.
+
+CIM defines `SynchronousMachine.r` (the resistance RG of IEC 60909) as a Resistance in ohms, not per unit (TNO's
+rendering of the IEC CIM ontology, https://ontology.tno.nl/IEC_CIM/cim_SynchronousMachine.r.html, and the CIM17
+schema at https://modellen.netbeheernederland.nl/tc57cim/cim17/schema/class/SynchronousMachine.html). The CGMES
+importer converts it on the machine's rating; MiniGrid's values (0.002, 0.005 and 0.018) are the report's resistances
+in ohms, which confirms the reading.
+
 ## Stability
 
 The classical machine model and the equal-area criterion used by `tests/rms.test.mjs` are textbook material

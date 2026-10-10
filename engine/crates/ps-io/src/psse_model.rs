@@ -44,6 +44,8 @@ const TYPICAL_SC: MachineShortCircuit = MachineShortCircuit {
     rs: 0.0,
     cos_phi: 0.85,
     earthed: false,
+    pg: 0.0,
+    feeder: None,
 };
 const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics::classical(0.3, 4.0, 0.0);
 
@@ -420,6 +422,7 @@ fn loads(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
             q,
             p_zip: share(yp, ip, pl, p),
             q_zip: share(-yq, iq, ql, q),
+            motor: None,
         });
     }
     if zip > 0 {
@@ -621,6 +624,7 @@ fn generators(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 ..TYPICAL_SC
             },
             dynamics: TYPICAL_DYNAMICS,
+            unit_transformer: None,
         });
     }
     if step_up > 0 {
@@ -740,6 +744,8 @@ fn branches(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 ratio_taps: Vec::new(),
                 phase_tap: None,
                 limits: limits(rate, kv1, kv2),
+                on_load_taps: false,
+                tap_range_pct: 0.0,
             });
             continue;
         }
@@ -1023,6 +1029,8 @@ fn transformers(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 ratio_taps: vec![taps.ratio, fixed_tap(2, t2)],
                 phase_tap: taps.phase,
                 limits: limits(rate, kv1, kv2),
+                on_load_taps: false,
+                tap_range_pct: 0.0,
             });
         } else {
             let (n3, kv3, ide3) = cx.at('3', k, &[i, j], &ckt, r)?;

@@ -53,3 +53,14 @@ test('a simulation needs consistent round-rotor data; other calculations do not'
   doc.elements[1].xl = 0.1;
   assert.deepEqual(validateForCalculation(doc, 'rms'), []);
 });
+
+test('an imported unit transformer that is not a transformer at the machine\u2019s busbar is dropped with a note', () => {
+  const doc = riverside();
+  const g = /** @type {any} */ (doc.elements.find(e => e.id === 'G1'));
+  g.unitTrafo = 'T1';
+  const { doc: out, issues } = normalizeDocument(JSON.parse(JSON.stringify(doc)));
+  assert.equal(out.elements.find(e => e.id === 'G1')?.unitTrafo, '');
+  assert.ok(issues.some(i => i.startsWith('G1: unit transformer "T1"')), issues.join('\n'));
+  g.unitTrafo = 'T3';
+  assert.equal(normalizeDocument(JSON.parse(JSON.stringify(doc))).doc.elements.find(e => e.id === 'G1')?.unitTrafo, 'T3');
+});

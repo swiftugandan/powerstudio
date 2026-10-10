@@ -168,7 +168,10 @@ function shortcircuit(r, name) {
       ['Location', r.location ? name(r.location) : `Every busbar (${r.buses.length})`],
     ]),
     h('h3', { text: 'Highest initial short-circuit currents' }),
-    table(['Busbar', 'Ik″ (kA)', 'ip (kA)', 'Sk″ (MVA)'], top.slice(0, ROWS).map(b => [name(b.id), fixed(b.ikss, 3), fixed(b.ip, 3), fixed(b.skss, 1)]), '', top.length),
+    r.fault === '3ph' && r.mode === 'max'
+      ? table(['Busbar', 'Ik″ (kA)', 'ip (kA)', `Ib at ${fixed(r.tMin, 2)} s (kA)`, 'Sk″ (MVA)'],
+        top.slice(0, ROWS).map(b => [name(b.id), fixed(b.ikss, 3), fixed(b.ip, 3), fixed(b.ib, 3), fixed(b.skss, 1)]), '', top.length)
+      : table(['Busbar', 'Ik″ (kA)', 'ip (kA)', 'Sk″ (MVA)'], top.slice(0, ROWS).map(b => [name(b.id), fixed(b.ikss, 3), fixed(b.ip, 3), fixed(b.skss, 1)]), '', top.length),
   ];
 }
 

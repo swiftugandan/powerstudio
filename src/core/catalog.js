@@ -5,7 +5,7 @@
  * engineer enters them; the engine converts them to its model on import (engine/crates/ps-io/src/powerstudio.rs). */
 
 /**
- * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus' | 'controller'} FieldType
+ * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus' | 'trafo' | 'controller'} FieldType
  * @typedef {'basic' | 'loadflow' | 'shortcircuit' | 'rms' | 'graphic'} FieldGroup
  * @typedef {{
  *   key: string, label: string, type: FieldType, group: FieldGroup, default: unknown,
@@ -15,7 +15,8 @@
  * }} FieldSpec
  * A `controller` field holds a machine's control of one `slot`: `null`, or an object naming its `model` (a
  * [`CONTROLLERS`] entry) with each parameter under its PSS/E name.
- * `optional` lets a busbar field be empty and names that choice ("Own busbar"); `when` shows a field only when it
+ * A `trafo` field names a transformer with an end at the element's busbar, or is empty.
+ * `optional` lets a busbar or transformer field be empty and names that choice ("Own busbar"); `when` shows a field only when it
  * applies to the element's other values (a control's target only while the control is on). `operating` marks a value
  * of the operating point (switching state, setpoints, loads, generation, taps), which a scenario may set; every other
  * field describes the equipment as built.
@@ -181,6 +182,16 @@ export function completeController(value) {
 
 /** @param {Record<string, unknown>} el */
 const isRoundRotor = el => el.machineModel === 'roundRotor';
+/** @param {Record<string, unknown>} el */
+const isMotor = el => !!el.motor;
+/** @param {Record<string, unknown>} el */
+const isFeeder = el => !!el.feeder;
+
+/** The transformers that can be a machine's unit transformer: those with an end at its busbar.
+ * @param {readonly Element[]} elements @param {Element} machine @returns {Element[]} */
+export function unitTrafoChoices(elements, machine) {
+  return elements.filter(e => e.cls === 'trafo' && (e.hv === machine.bus || e.lv === machine.bus));
+}
 /** Round-rotor data (PSS/E GENROU); the engine's typical values (TYPICAL_ROUND_ROTOR) are the defaults. */
 const ROUND_ROTOR = /** @type {FieldSpec[]} */ ([
   num('xd', 'Synchronous reactance xd', 1.8, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'rms' }),
@@ -267,6 +278,10 @@ export const CLASSES = {
         help: 'Full width of the band the flow may lie in without a tap change.' }),
       num('uk0', 'Zero-sequence uk0', 12, { unit: '%', min: 0, exclusiveMin: true, group: 'shortcircuit' }),
       num('ur0', 'Zero-sequence uR0', 0.4, { unit: '%', min: 0, group: 'shortcircuit' }),
+      { key: 'onLoadTaps', label: 'On-load tap changer', type: 'bool', group: 'shortcircuit', default: false,
+        help: 'As the unit transformer of a power station unit: its correction factor is KS with an on-load tap changer, KSO without.' },
+      num('tapRange', 'Off-load tap range', 0, { unit: '%', min: 0, max: 50, group: 'shortcircuit', symbol: 'pT', when: el => !el.onLoadTaps,
+        help: 'As the unit transformer of a power station unit without an on-load tap changer: how far its taps may move the voltage either way, for KSO.' }),
       attach('hvPos', 'HV connection'), attach('lvPos', 'LV connection'),
       num('bend', 'Route offset', 0, { group: 'graphic', help: 'Moves the middle segment of the route.' }),
     ],
@@ -295,6 +310,18 @@ export const CLASSES = {
       num('cosphi', 'Rated power factor', 0.85, { min: 0, max: 1, exclusiveMin: true, symbol: 'cos φrG' }),
       num('xdss', 'Subtransient reactance xd″', 0.16, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'shortcircuit' }),
       num('rs', 'Stator resistance', 0.0024, { unit: 'p.u.', min: 0, group: 'shortcircuit' }),
+      num('pg', 'Voltage regulation range', 0, { unit: '%', min: 0, max: 20, group: 'shortcircuit', symbol: 'pG', when: el => !el.feeder,
+        help: 'How far above its rated voltage the machine holds its terminals, for the correction factor KG.' }),
+      { key: 'unitTrafo', label: 'Unit transformer', type: 'trafo', group: 'shortcircuit', default: '', optional: 'None', when: el => !el.feeder,
+        help: 'The transformer that connects the machine to the network as a power station unit. Short-circuit currents then correct the two together (KS or KSO), and a fault at the machine\u2019s terminals sees the transformer uncorrected.' },
+      { key: 'feeder', label: 'Stands for a network', type: 'bool', group: 'shortcircuit', default: false,
+        help: 'The source is the equivalent of a neighbouring network, as external network injections in CGMES are: it regulates like a machine in the load flow and meets short circuits as a network feeder with the short-circuit power below.' },
+      num('skMax', 'Short-circuit power max', 5000, { unit: 'MVA', min: 0, exclusiveMin: true, group: 'shortcircuit', symbol: 'Sk″max', when: isFeeder }),
+      num('skMin', 'Short-circuit power min', 4000, { unit: 'MVA', min: 0, exclusiveMin: true, group: 'shortcircuit', symbol: 'Sk″min', when: isFeeder }),
+      num('rxMax', 'R/X ratio max', 0.1, { min: 0, group: 'shortcircuit', when: isFeeder }),
+      num('rxMin', 'R/X ratio min', 0.1, { min: 0, group: 'shortcircuit', when: isFeeder }),
+      num('x0x1', 'X0/X1 ratio', 1, { min: 0, group: 'shortcircuit', when: isFeeder }),
+      num('r0x0', 'R0/X0 ratio', 0.1, { min: 0, group: 'shortcircuit', when: isFeeder }),
       { key: 'machineModel', label: 'Rotor model', type: 'enum', group: 'rms', default: 'classical', options: ROTOR_MODELS,
         help: 'Classical (PSS/E GENCLS): a voltage behind the transient reactance. Round rotor (PSS/E GENROU): transient and subtransient circuits on both axes with saturation, using the subtransient reactance and stator resistance of the short-circuit data.' },
       num('h', 'Inertia constant', 4, { unit: 's', min: 0, exclusiveMin: true, group: 'rms', symbol: 'H' }),
@@ -336,6 +363,18 @@ export const CLASSES = {
       num('pI', 'Constant current share of P', 0, { unit: '%', group: 'loadflow', min: 0, max: 100 }),
       num('qZ', 'Constant impedance share of Q', 0, { unit: '%', group: 'loadflow', min: 0, max: 100 }),
       num('qI', 'Constant current share of Q', 0, { unit: '%', group: 'loadflow', min: 0, max: 100 }),
+      { key: 'motor', label: 'Asynchronous motor', type: 'bool', group: 'shortcircuit', default: false,
+        help: 'The load is a motor, or a group of motors, and feeds maximum short-circuit currents.' },
+      num('motorP', 'Rated mechanical power', 1, { unit: 'MW', min: 0, exclusiveMin: true, group: 'shortcircuit', symbol: 'PrM', when: isMotor }),
+      num('motorVn', 'Rated voltage', 0, { unit: 'kV', min: 0, group: 'shortcircuit', symbol: 'UrM', when: isMotor,
+        help: 'Zero means the busbar\u2019s nominal voltage.' }),
+      num('motorEff', 'Rated efficiency', 95, { unit: '%', min: 0, max: 100, exclusiveMin: true, group: 'shortcircuit', symbol: 'ηrM', when: isMotor }),
+      num('motorCosphi', 'Rated power factor', 0.85, { min: 0, max: 1, exclusiveMin: true, group: 'shortcircuit', symbol: 'cos φrM', when: isMotor }),
+      num('motorIlr', 'Locked-rotor current', 5, { unit: '× IrM', min: 0, exclusiveMin: true, group: 'shortcircuit', symbol: 'ILR/IrM', when: isMotor }),
+      num('motorRx', 'R/X ratio', 0.1, { min: 0, group: 'shortcircuit', symbol: 'RM/XM', when: isMotor,
+        help: 'The ratio of resistance to reactance of the motor\u2019s short-circuit impedance, from its data.' }),
+      int('motorPoles', 'Pole pairs', 0, { min: 0, group: 'shortcircuit', when: isMotor,
+        help: 'For the decay of the motor\u2019s current by the breaking time. Zero when not known: the breaking current then takes no decay, which errs high.' }),
       attach('pos', 'Connection'),
       { key: 'side', label: 'Side', type: 'enum', group: 'graphic', default: 'below', options: SIDES },
     ],
@@ -392,7 +431,7 @@ export function checkValue(f, v) {
       if (f.max !== undefined && v > f.max) return `${f.label} must be at most ${f.max}${f.unit ? ' ' + f.unit : ''}.`;
       return '';
     }
-    case 'string': case 'bus': return typeof v === 'string' ? '' : `${f.label} must be text.`;
+    case 'string': case 'bus': case 'trafo': return typeof v === 'string' ? '' : `${f.label} must be text.`;
     case 'bool': return typeof v === 'boolean' ? '' : `${f.label} must be true or false.`;
     case 'enum': return f.options?.includes(/** @type {string} */ (v)) ? '' : `${f.label} must be one of ${f.options?.join(', ')}.`;
     case 'controller': {

@@ -225,7 +225,7 @@ export class DataSheet {
     if (c.type === 'number' || c.type === 'integer') return editable(/** @type {number} */ (v));
     if (c.type === 'bool') return v ? 'Yes' : 'No';
     if (c.type === 'enum') return enumLabel(c.key, String(v));
-    if (c.type === 'bus') return v ? (this.app.store.get(String(v))?.name || String(v)) : (c.optional ?? '');
+    if (c.type === 'bus' || c.type === 'trafo') return v ? (this.app.store.get(String(v))?.name || String(v)) : (c.optional ?? '');
     if (c.type === 'controller') return v && typeof v === 'object' ? String(/** @type {Record<string, unknown>} */ (v).model) : 'None';
     return String(v ?? '');
   }
@@ -250,13 +250,15 @@ export class DataSheet {
       if (o === undefined) throw new Error(`${c.label} must be one of: ${(c.options ?? []).map(x => enumLabel(c.key, x)).join(', ')}.`);
       return o;
     }
-    if (c.type === 'bus') {
+    if (c.type === 'bus' || c.type === 'trafo') {
       if (!t && c.optional !== undefined) return '';
+      if (c.optional !== undefined && t.toLowerCase() === c.optional.toLowerCase()) return '';
       const store = this.app.store;
-      if (store.get(t)?.cls === 'bus') return t;
-      const named = store.doc.elements.filter(e => e.cls === 'bus' && e.name === t);
+      const [cls, noun] = c.type === 'bus' ? ['bus', 'busbar'] : ['trafo', 'transformer'];
+      if (store.get(t)?.cls === cls) return t;
+      const named = store.doc.elements.filter(e => e.cls === cls && e.name === t);
       if (named.length === 1) return named[0].id;
-      throw new Error(named.length > 1 ? `Several busbars are called ${t}; use the identifier.` : `No busbar is called ${t}.`);
+      throw new Error(named.length > 1 ? `Several ${noun}s are called ${t}; use the identifier.` : `No ${noun} is called ${t}.`);
     }
     return c.key === 'name' ? t : text;
   }
