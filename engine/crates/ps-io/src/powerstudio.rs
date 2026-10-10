@@ -10,9 +10,9 @@
 use ps_model::dynamics::TYPICAL_ROUND_ROTOR;
 use ps_model::study::StudyCase;
 use ps_model::{
-    Area, AsyncMotor, Class, Controller, ControllerKind, CurrentLimit, ExternalGrid, Feeder, FlowControl, Generator,
-    Line, Load, MachineControl, MachineDynamics, MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap,
-    RatioTap, RotorModel, RoundRotor, Shunt, Slot, Transformer2, VoltageControl, Winding,
+    Area, AsyncMotor, Class, Controller, ControllerKind, ConverterSource, CurrentLimit, ExternalGrid, Feeder,
+    FlowControl, Generator, Line, Load, MachineControl, MachineDynamics, MachineShortCircuit, Model, Node, NodeKind,
+    NodeRef, PhaseTap, RatioTap, RotorModel, RoundRotor, Shunt, Slot, Transformer2, VoltageControl, Winding,
 };
 use serde_json::Value;
 use std::collections::HashMap;
@@ -487,14 +487,18 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                         cos_phi,
                         earthed: false,
                         pg: e.num("pg", 0.0),
-                        // A machine that stands for a network meets short circuits as a feeder (IEC 60909-0, 6.2).
-                        feeder: e.flag("feeder", false).then(|| Feeder {
+                        // A source that stands for a network meets short circuits as a feeder (IEC 60909-0, 6.2); one
+                        // fed through a converter as a current source.
+                        feeder: (e.text("scSource") == "feeder").then(|| Feeder {
                             sk_max: e.num("skMax", 5000.0),
                             sk_min: e.num("skMin", 4000.0),
                             rx_max: e.num("rxMax", 0.1),
                             rx_min: e.num("rxMin", 0.1),
                             x0x1: e.num("x0x1", 1.0),
                             r0x0: e.num("r0x0", 0.1),
+                        }),
+                        converter: (e.text("scSource") == "converter").then(|| ConverterSource {
+                            k: e.num("kConverter", 1.2),
                         }),
                     },
                     dynamics,

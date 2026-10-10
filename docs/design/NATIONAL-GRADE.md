@@ -217,24 +217,27 @@ need:
 
 ### 5.7 Short circuit
 
-0.1 implements an IEC 60909-style calculation checked against pandapower. National use needs the full standard:
+0.1 implemented an IEC 60909-style calculation checked against pandapower. Phase 6 extended it toward the full
+standard (docs/ENGINE.md, "Short circuit", lists every formula):
 
-- Breaking current Ib (with the μ and q factors), steady-state current Ik, the DC component and asymmetrical breaking
-  current, Ith with both m and n.
-- Power station unit correction factors (KS, KSO), all fault types including line-to-line-to-earth, fault impedance.
-- Converter-fed sources (wind, solar, HVDC) as current sources, as the 2016 edition allows.
-- The **superposition (complete) method** from a solved load flow, which many operators use alongside the equivalent
-  voltage source method.
+- Breaking current Ib (with the μ and q factors), Ith for a chosen duration.
+- Power station unit correction factors (KS, KSO) with their own network for faults at the machine's terminals,
+  three-winding transformers corrected per winding pair, asynchronous motors, network feeders, neutral earthing.
+- Converter-fed sources (wind, solar, batteries) as current sources, as the 2016 edition allows.
+- Fault impedance for every fault type.
+- Not implemented (ADR 15): the steady-state current Ik, the DC component and asymmetrical breaking current, n near
+  generators, line-to-line-to-earth faults and the superposition (complete) method, each for want of an open
+  reference to check it against.
 
-**Validation without the standard.** The IEC documents are not bought. The strongest free reference is
-pandapower's BSD-licensed test suite, which encodes the IEC TR 60909-4 example network (380, 110, 30 and 10 kV with
-power station units, a three-winding transformer, an asynchronous motor and two infeeds) together with the expected
-currents its authors take from the report, and a further VDE example
-([`test_iec60909_4.py`](https://github.com/e2nIEE/pandapower/blob/develop/pandapower/test/shortcircuit/test_iec60909_4.py)).
-Porting those networks and values, with attribution, gives second-hand access to the report's results. The
-calculation keeps the label "IEC 60909-style" permanently: agreement with the example as pandapower encodes it is
-evidence, not conformance, and the app says so. An operator that holds the standard can check further with the
-benchmark kit (section 9.4).
+**Validation without the standard.** The IEC documents are not bought. Two free sources give the IEC TR 60909-4
+example's values: pandapower's BSD-licensed test suite, which encodes the example network (380, 110, 30 and 10 kV
+with power station units, three-winding transformers, asynchronous motors and two infeeds) together with the expected
+currents its authors take from the report
+([`test_iec60909_4.py`](https://github.com/e2nIEE/pandapower/blob/develop/pandapower/test/shortcircuit/test_iec60909_4.py)),
+and the workbook that comes with CGMES's MiniGrid configuration, the same network in CGMES with the report's
+three-phase and earth-fault values. The calculation keeps the label "IEC 60909-style" permanently: agreement with
+the example is evidence, not conformance, and the app says so. An operator that holds the standard can check further
+with the benchmark kit (section 9.4).
 
 ### 5.8 Stability (RMS simulation)
 
@@ -469,6 +472,7 @@ writes a difference report. The design's own verification makes this comparison 
 | 12 | The workspace stays on the editor's bus-branch document for release 1. The canonical model serves node-breaker where calculations need it: imports, topology processing, per-unit conversion, busbar faults, the model hash. The editor expresses switching as in-service states, which scenarios hold, and as busbar contingencies; substation diagrams wait. A move to the canonical model is a later major version, once the catalogue has switch and terminal classes, a substation layout exists, and documents migrate | Moving the workspace in phase 4: everything validated sits on the editor document (the catalogue, the store's operations and the project router, the import gate, the data manager, the layout, the oracle inputs) and version 0.1 documents are deployed, so the move would re-derive all of it and take phases 5 to 7. Drawing substations from a retained import snapshot: a model the user's edits never reach, two truths in one project |
 | 13 | Dynamics wave D1 is the library ANDES can validate: GENCLS and GENROU; SEXS, IEEET1, EXDC2, ESDC2A, EXST1, ESST1A and ESST3A; TGOV1, IEEEG1 and HYGOV; IEEEST and ST2CUT; loads with constant power, current and impedance shares. GENSAL and PSS2A wait for an open reference (ANDES has neither). ESST1A's DYR order is OpenIPSL's, as ANDES's table departs from it. Models are Rust types whose equations are written once over a scalar type and differentiated with dual numbers, revising ADR 8's trait with hand-written Jacobians; the finite-difference check stays. At an event the algebraic variables are solved again before the next step | Hand-written Jacobians: a second statement of every model that can disagree with the first, where dual numbers give the exact derivative of the code that runs. ANDES's way across events (a 0.1 ms step whose trapezoid average spans the event): a first-order error, kept only as an option to compare with ANDES |
 | 14 | Dynamics waves D2 and D3 follow release 1.0; phases 6 and 7 come first. Sized at the end of D1: D2's validatable core (REGCA1, REECA1, REPCA1) is a structural change, not another model file. Units must read more than their terminal bus (REPCA1 measures a branch's current; the same change gives stabilisers their remote-bus modes); a converter becomes a third machine model with converter, electrical and plant slots; REECA1's post-dip hold timers need discrete state advanced per accepted step; ANDES's rate limiter bounds T·dx/dt where PSS/E bounds dx/dt. The DYR orders of all three agree between ANDES's table and OpenIPSL (commit `4df416b`). Validation: ANDES's `ieee14_solar` (a line trip with every REECA1 flag off) and a fault case still to be built, to reach the freeze and hold logic. D3: ANDES has grid-forming REGF1 to REGF3. GGOV1, HVDC and SVC dynamics, load shedding and protection have no open reference and are deferred until one exists | D2 before phases 6 and 7: a refactor and three large models whose distinctive logic the published case does not exercise, while the release's hardening and the short-circuit bar do not depend on it |
+| 15 | Short circuit is validated against the IEC TR 60909-4 example as two open sources give its values (pandapower's test, BSD-3, and the workbook of CGMES MiniGrid, read from the cached ENTSO-E archive) and against pandapower's implementation. The engine follows the report where pandapower departs from it (κ for earth faults from the fault loop). A machine's short-circuit source is a choice on the machine (synchronous machine, network feeder, converter), so CGMES external network injections and power electronics connections keep their load-flow behaviour. The breaking current uses the meshed-network formula everywhere. The steady-state current Ik, n near generators, the DC component in meshed networks and the superposition method are not implemented | Implementing Ik, n and the DC component from memory of the standard's curves and tables: values that cannot be cited. The superposition method against pandapower's `use_pre_fault_voltage`: it keeps the external grids' voltage factor and the machines' KG, so agreement would validate a mix of the two methods. External network injections as external grids: their reactive limits and set points would change the load flows the CGMES references check. IEC's single-fed formula for Ib where it applies: needs a test of which sources feed a fault separately, for a value the meshed formula only overstates |
 
 ## 11. Roadmap
 
@@ -482,7 +486,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | **3. Steady-state completeness** — done, two bars missed | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis. See the phase 3 results below |
 | **4. Workspace at scale** (runs alongside 2 and 3) — done | Projects, variants, scenarios, study cases; data manager; renderer at scale; result browser and comparison; reports. Substation diagrams deferred by ADR 12 | A 70,000-bus project is usable end to end with no frame over 100 ms. See the phase 4 results below |
 | **5. Dynamics** — wave D1 done; D2 and D3 after 1.0 (ADR 14) | DAE solver, events, DYR import, wave D1 (ADR 13), then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases. See the wave D1 results below |
-| **6. Short circuit** | Breaking and steady-state currents, DC component, power station units, converter sources, all fault types; the superposition method | The TR 60909-4 example network from pandapower's open test suite reproduced to its stated tolerances for three-phase and line-to-line faults, maximum and minimum, power station units included |
+| **6. Short circuit** — done (ADR 15) | Breaking currents, power station units, three-winding transformers per pair, motors, converter sources, neutral earthing, fault impedance, earth faults; steady-state current, DC component and the superposition method deferred | The TR 60909-4 example network from pandapower's open test suite reproduced to its stated tolerances for three-phase and line-to-line faults, maximum and minimum, power station units included. Met, and earth faults besides; see the phase 6 results below |
 | **7. Release hardening** | Reproducible builds, SBOM, attestations, Firefox and WebKit test projects, accessibility audit, user guide, operator benchmark kit | The assurance bar passes; 1.0.0 released |
 
 ### Phase 0 results (measured 2026-10-09)
@@ -676,6 +680,26 @@ Voltage-dependent loads (study-case shares of constant power, current and impeda
 both agree with ANDES to the same tolerances. Waves D2 and D3 follow release 1.0 (ADR 14, which records their sizing);
 GGOV1, HVDC and SVC dynamics, load shedding and protection wait for an open reference.
 
+### Phase 6 results (2026-10-10, local)
+
+The exit bar is met, and passed: on the IEC TR 60909-4 example network as pandapower's test encodes it, the engine
+meets the report's Ik″, ip and Sk″ for three-phase faults (maximum and minimum), line-to-line faults and the reduced
+networks to 1e-4 kA, against the test's 1e-3, with power station units with and without on-load tap changers. It also
+meets the report's earth-fault Ik″ at F1 to F5 and F8 to F10 and earth-fault ip at F2 to F5 to 1e-4, where pandapower
+itself skips earth faults on this network as unfinished, and the report's breaking currents where only synchronous
+machines contribute. MiniGrid, imported from its CGMES files, meets the report's three-phase Ik″ and ip to 1e-4 at
+all eight locations, Ib to 0.25 % and earth faults to 1e-3, once its one rating that differs from the report is
+replaced (docs/TEST-REPORT.md has every value).
+
+What was built: power station units (KS, KSO and the terminal-fault network), pG, three-winding transformers per
+winding pair in both sequences (also when a document holds them as a star), asynchronous motors, network feeders and
+converter-fed sources as choices on a machine, neutral earthing, the conductors' end temperature in the minimum case,
+breaking currents with μ and q, fault impedance, and κ for earth faults from the fault loop. The CGMES importer reads
+the short-circuit profile's data, which found that it had been reading the resistance RG as per unit where CIM has
+ohms, and that it left power electronics connections out altogether. The document writer keeps transformers' rated
+voltages, zero-sequence impedances, earthing and connections, so a network opened in the app gives the model's
+currents to 1e-9.
+
 ## 12. Risks
 
 | Risk | Effect | Mitigation | Where |
@@ -686,7 +710,7 @@ GGOV1, HVDC and SVC dynamics, load shedding and protection wait for an open refe
 | Native and wasm results diverge | Untrustworthy results | Differential testing with stated tolerances in CI | Phase 1 onward |
 | CGMES interpretation differs between tools | Fidelity bar missed on real data | PowSyBl as reference, conformity configurations, validation reports | Phase 2 |
 | Dynamic model library breadth | Stability studies incomplete for some models | Validated waves; unmapped models reported, never silently replaced | Phase 5 |
-| No access to the IEC texts | Details the open references do not cover may be interpreted wrongly | Open references only, documented assumptions per formula, the "IEC 60909-style" label kept; operators holding the standard can compare with the benchmark kit | Phase 6 |
+| No access to the IEC texts | Details the open references do not cover may be interpreted wrongly | Open references only, documented assumptions per formula, the "IEC 60909-style" label kept; the TR 60909-4 example's values through pandapower's test and CGMES MiniGrid's workbook; what no open source covers is not implemented (ADR 15); operators holding the standard can compare with the benchmark kit | Phase 6 |
 | Operator acceptance | No adoption despite correct results | Benchmark kit; the design's own verification published openly | Phase 7 |
 | Browser feature differences (WebGPU, OPFS, File System Access) | Uneven experience | Feature detection, Canvas 2D and IndexedDB fallbacks, three-engine test matrix | Phases 4, 7 |
 

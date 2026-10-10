@@ -804,8 +804,12 @@ fn injections(d: &mut Doc) {
             "participation": g.participation.max(0.0), "pg": g.sc.pg,
             "unitTrafo": g.unit_transformer.as_ref().and_then(|t| d.trafo_ids.get(t)).cloned().unwrap_or_default(),
         });
+        if let Some(c) = g.sc.converter {
+            fields["scSource"] = json!("converter");
+            fields["kConverter"] = json!(c.k);
+        }
         if let Some(f) = g.sc.feeder {
-            fields["feeder"] = json!(true);
+            fields["scSource"] = json!("feeder");
             fields["skMax"] = json!(f.sk_max);
             fields["skMin"] = json!(f.sk_min);
             fields["rxMax"] = json!(f.rx_max);

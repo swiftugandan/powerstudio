@@ -45,6 +45,7 @@ export const SIDES = /** @type {const} */ (['below', 'above']);
 export const MAGNETISING = /** @type {const} */ (['both', 'hv', 'lv']);
 export const TAP_KINDS = /** @type {const} */ (['ratio', 'phase']);
 export const ROTOR_MODELS = /** @type {const} */ (['classical', 'roundRotor']);
+export const SC_SOURCES = /** @type {const} */ (['machine', 'feeder', 'converter']);
 
 /**
  * @typedef {'exciter' | 'governor' | 'stabiliser'} Slot
@@ -154,7 +155,7 @@ export const CONTROLLERS = [
  * Xd ≥ X′d ≥ X″d > Xl and Xq ≥ X′q > Xl (X″d is the short-circuit subtransient reactance).
  * @param {Record<string, unknown>} el */
 export function rotorIssue(el) {
-  if (el.cls !== 'gen' || el.machineModel !== 'roundRotor') return '';
+  if (el.cls !== 'gen' || el.machineModel !== 'roundRotor' || el.scSource === 'converter') return '';
   const n = (/** @type {string} */ k) => /** @type {number} */ (el[k]);
   const order = [['xd', 'Xd'], ['xdt', 'X′d'], ['xdss', 'X″d']];
   for (let i = 1; i < order.length; i++) {
@@ -185,7 +186,14 @@ const isRoundRotor = el => el.machineModel === 'roundRotor';
 /** @param {Record<string, unknown>} el */
 const isMotor = el => !!el.motor;
 /** @param {Record<string, unknown>} el */
-const isFeeder = el => !!el.feeder;
+const isFeeder = el => el.scSource === 'feeder';
+/** @param {Record<string, unknown>} el */
+const isMachineSource = el => el.scSource !== 'feeder' && el.scSource !== 'converter';
+/** A converter-fed source has no rotor: the simulation injects its current. @param {Record<string, unknown>} el */
+const hasRotor = el => el.scSource !== 'converter';
+/** The subtransient data serve short circuits of a machine, and the round-rotor model of any rotating source.
+ * @param {Record<string, unknown>} el */
+const needsSubtransient = el => isMachineSource(el) || (hasRotor(el) && el.machineModel === 'roundRotor');
 
 /** The transformers that can be a machine's unit transformer: those with an end at its busbar.
  * @param {readonly Element[]} elements @param {Element} machine @returns {Element[]} */
@@ -314,29 +322,31 @@ export const CLASSES = {
       num('sn', 'Rated power', 60, { unit: 'MVA', min: 0, exclusiveMin: true, symbol: 'SrG' }),
       num('vn', 'Rated voltage', 10.5, { unit: 'kV', min: 0, exclusiveMin: true, symbol: 'UrG' }),
       num('cosphi', 'Rated power factor', 0.85, { min: 0, max: 1, exclusiveMin: true, symbol: 'cos φrG' }),
-      num('xdss', 'Subtransient reactance xd″', 0.16, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'shortcircuit' }),
-      num('rs', 'Stator resistance', 0.0024, { unit: 'p.u.', min: 0, group: 'shortcircuit' }),
-      num('pg', 'Voltage regulation range', 0, { unit: '%', min: 0, max: 20, group: 'shortcircuit', symbol: 'pG', when: el => !el.feeder,
+      { key: 'scSource', label: 'Short-circuit source', type: 'enum', group: 'shortcircuit', default: 'machine', options: SC_SOURCES,
+        help: 'How the source meets short circuits: as a synchronous machine behind its subtransient reactance; as a network feeder with a short-circuit power, for the equivalent of a neighbouring network; or as a current source of k times its rated current, for a wind or solar park or a battery fed through a converter. The load flow treats all three alike.' },
+      num('xdss', 'Subtransient reactance xd″', 0.16, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'shortcircuit', when: needsSubtransient }),
+      num('rs', 'Stator resistance', 0.0024, { unit: 'p.u.', min: 0, group: 'shortcircuit', when: needsSubtransient }),
+      num('pg', 'Voltage regulation range', 0, { unit: '%', min: 0, max: 20, group: 'shortcircuit', symbol: 'pG', when: isMachineSource,
         help: 'How far above its rated voltage the machine holds its terminals, for the correction factor KG.' }),
-      { key: 'unitTrafo', label: 'Unit transformer', type: 'trafo', group: 'shortcircuit', default: '', optional: 'None', when: el => !el.feeder,
+      { key: 'unitTrafo', label: 'Unit transformer', type: 'trafo', group: 'shortcircuit', default: '', optional: 'None', when: isMachineSource,
         help: 'The transformer that connects the machine to the network as a power station unit. Short-circuit currents then correct the two together (KS or KSO), and a fault at the machine\u2019s terminals sees the transformer uncorrected.' },
-      { key: 'feeder', label: 'Stands for a network', type: 'bool', group: 'shortcircuit', default: false,
-        help: 'The source is the equivalent of a neighbouring network, as external network injections in CGMES are: it regulates like a machine in the load flow and meets short circuits as a network feeder with the short-circuit power below.' },
+      num('kConverter', 'Short-circuit current', 1.2, { unit: '× Ir', min: 0, max: 10, group: 'shortcircuit', symbol: 'k', when: el => el.scSource === 'converter',
+        help: 'The largest current the converter feeds into a short circuit, as a multiple of its rated current. It adds to maximum currents only.' }),
       num('skMax', 'Short-circuit power max', 5000, { unit: 'MVA', min: 0, exclusiveMin: true, group: 'shortcircuit', symbol: 'Sk″max', when: isFeeder }),
       num('skMin', 'Short-circuit power min', 4000, { unit: 'MVA', min: 0, exclusiveMin: true, group: 'shortcircuit', symbol: 'Sk″min', when: isFeeder }),
       num('rxMax', 'R/X ratio max', 0.1, { min: 0, group: 'shortcircuit', when: isFeeder }),
       num('rxMin', 'R/X ratio min', 0.1, { min: 0, group: 'shortcircuit', when: isFeeder }),
       num('x0x1', 'X0/X1 ratio', 1, { min: 0, group: 'shortcircuit', when: isFeeder }),
       num('r0x0', 'R0/X0 ratio', 0.1, { min: 0, group: 'shortcircuit', when: isFeeder }),
-      { key: 'machineModel', label: 'Rotor model', type: 'enum', group: 'rms', default: 'classical', options: ROTOR_MODELS,
+      { key: 'machineModel', label: 'Rotor model', type: 'enum', group: 'rms', default: 'classical', options: ROTOR_MODELS, when: hasRotor,
         help: 'Classical (PSS/E GENCLS): a voltage behind the transient reactance. Round rotor (PSS/E GENROU): transient and subtransient circuits on both axes with saturation, using the subtransient reactance and stator resistance of the short-circuit data.' },
-      num('h', 'Inertia constant', 4, { unit: 's', min: 0, exclusiveMin: true, group: 'rms', symbol: 'H' }),
-      num('damping', 'Damping', 0, { unit: 'p.u.', min: 0, group: 'rms', symbol: 'D' }),
-      num('xdt', 'Transient reactance xd′', 0.25, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'rms' }),
-      ...ROUND_ROTOR.map(f => ({ ...f, when: isRoundRotor })),
-      { key: 'exciter', label: 'Exciter', type: 'controller', slot: 'exciter', group: 'rms', default: null },
-      { key: 'governor', label: 'Governor', type: 'controller', slot: 'governor', group: 'rms', default: null },
-      { key: 'stabiliser', label: 'Stabiliser', type: 'controller', slot: 'stabiliser', group: 'rms', default: null,
+      num('h', 'Inertia constant', 4, { unit: 's', min: 0, exclusiveMin: true, group: 'rms', symbol: 'H', when: hasRotor }),
+      num('damping', 'Damping', 0, { unit: 'p.u.', min: 0, group: 'rms', symbol: 'D', when: hasRotor }),
+      num('xdt', 'Transient reactance xd′', 0.25, { unit: 'p.u.', min: 0, exclusiveMin: true, group: 'rms', when: hasRotor }),
+      ...ROUND_ROTOR.map(f => ({ ...f, when: (/** @type {Record<string, unknown>} */ el) => hasRotor(el) && isRoundRotor(el) })),
+      { key: 'exciter', label: 'Exciter', type: 'controller', slot: 'exciter', group: 'rms', default: null, when: hasRotor },
+      { key: 'governor', label: 'Governor', type: 'controller', slot: 'governor', group: 'rms', default: null, when: hasRotor },
+      { key: 'stabiliser', label: 'Stabiliser', type: 'controller', slot: 'stabiliser', group: 'rms', default: null, when: hasRotor,
         help: 'A stabiliser acts through the exciter; without an exciter it has no effect.' },
       attach('pos', 'Connection'),
       { key: 'side', label: 'Side', type: 'enum', group: 'graphic', default: 'above', options: SIDES },

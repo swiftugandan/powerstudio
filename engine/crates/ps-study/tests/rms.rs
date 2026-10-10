@@ -215,3 +215,59 @@ fn the_bundled_ieee14_disturbance_applies_in_order_and_stays_stable() {
     assert_eq!(r.angle_reference, "coi");
     assert!(r.t.len() > 100 && r.t[r.t.len() - 1] == 3.0);
 }
+
+/// Converter-fed sources inject their load-flow current and have no rotor: Riverside with a solar park and a battery
+/// stays at its operating point, reports neither as a machine, and loses the solar park's output when it trips.
+#[test]
+fn converter_fed_sources_inject_current_and_can_trip() {
+    let imp = input("riverside-converters");
+    let run = |events: Vec<SimEvent>| {
+        rms::run(
+            &imp.model,
+            &imp.study,
+            &RmsSettings {
+                t_end: 1.0,
+                dt: 0.005,
+                events,
+                ..Default::default()
+            },
+            4000,
+            &mut Silent,
+        )
+        .unwrap()
+    };
+    let calm = run(Vec::new());
+    assert!(
+        calm.machines.iter().all(|m| m.id != "PV1" && m.id != "BAT1"),
+        "converters are not machines"
+    );
+    assert!(
+        calm.notes.iter().any(|n| n.contains("converter-fed")),
+        "{:?}",
+        calm.notes
+    );
+    for (bus, v) in calm.bus_ids.iter().zip(&calm.voltages) {
+        let (lo, hi) = v.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &x| {
+            (lo.min(x), hi.max(x))
+        });
+        assert!(hi - lo < 1e-5, "{bus} drifts {} p.u. without an event", hi - lo);
+    }
+    let trip = run(vec![SimEvent {
+        t: 0.2,
+        kind: EventKind::Trip,
+        target: "PV1".into(),
+        value: None,
+        r: None,
+        x: None,
+    }]);
+    assert!(trip.events[0].applied, "{}", trip.events[0].note);
+    // Brook Farm (B7) loses the solar park's 8 MW: its voltage falls.
+    let b7 = trip.bus_ids.iter().position(|b| b == "B7").unwrap();
+    let v = &trip.voltages[b7];
+    assert!(
+        v[v.len() - 1] < v[0] - 1e-3,
+        "B7 goes from {} to {} p.u.",
+        v[0],
+        v[v.len() - 1]
+    );
+}

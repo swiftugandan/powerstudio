@@ -175,6 +175,7 @@ export function enumLabel(key, v) {
   if (key === 'magnetising') return /** @type {Record<string, string>} */ ({ both: 'Both windings', hv: 'HV winding', lv: 'LV winding' })[v] ?? v;
   if (key === 'tapKind') return v === 'phase' ? 'Phase shift' : 'Voltage ratio';
   if (key === 'machineModel') return v === 'roundRotor' ? 'Round rotor' : 'Classical';
+  if (key === 'scSource') return /** @type {Record<string, string>} */ ({ machine: 'Synchronous machine', feeder: 'Network feeder', converter: 'Converter' })[v] ?? v;
   const signal = /^(exciter|governor|stabiliser)\.MODE2?$/.test(key) ? controllerOf('IEEEST')?.params[0].choices?.find(([c]) => String(c) === v) : undefined;
   if (signal) return signal[1];
   if (key === 'balance') return /** @type {Record<string, string>} */ ({

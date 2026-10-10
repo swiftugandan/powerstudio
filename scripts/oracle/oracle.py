@@ -91,6 +91,11 @@ def build_net(doc):
                 tap_min=e["tapMin"], tap_max=e["tapMax"], tap_changer_type="Ratio",
                 vector_group=re.sub(r"\d+$", "", e["vectorGroup"]), vk0_percent=e["uk0"], vkr0_percent=e["ur0"],
                 mag0_percent=1e12, mag0_rx=0, si0_hv_partial=0.5, in_service=on, name=e["id"])
+        elif c == "gen" and e.get("scSource") == "converter":
+            # A converter-fed source: a fixed injection in the load flow, a current source of k times its rated
+            # current in short circuits.
+            pp.create_sgen(net, bus[e["bus"]], p_mw=e["p"], q_mvar=e["q"], sn_mva=e["sn"], k=e["kConverter"],
+                           current_source=True, in_service=on, name=e["id"])
         elif c == "gen":
             pp.create_gen(
                 net, bus[e["bus"]], p_mw=e["p"], vm_pu=e["vset"], sn_mva=e["sn"], vn_kv=e["vn"],

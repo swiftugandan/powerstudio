@@ -5,7 +5,8 @@ import { makeElement } from '../src/core/catalog.js';
 import { emptyDocument } from '../src/core/document.js';
 import { riverside } from '../src/samples/riverside.js';
 
-for (const name of ['ieee14', 'riverside']) {
+// riverside-converters adds a solar park and a battery fed through converters (current sources).
+for (const name of ['ieee14', 'riverside', 'riverside-converters']) {
   for (const fault of /** @type {const} */ (['3ph', '2ph', '1ph'])) {
     // Maximum and minimum currents, and maximum currents through the oracle's fault impedance.
     for (const mode of /** @type {const} */ (['max', 'min', 'max-zf'])) {

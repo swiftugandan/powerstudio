@@ -46,6 +46,7 @@ const TYPICAL_SC: MachineShortCircuit = MachineShortCircuit {
     earthed: false,
     pg: 0.0,
     feeder: None,
+    converter: None,
 };
 const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics::classical(0.3, 4.0, 0.0);
 

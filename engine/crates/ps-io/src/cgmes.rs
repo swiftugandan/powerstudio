@@ -12,7 +12,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use ps_model::{
-    Area, AsyncMotor, CurrentLimit, Feeder, Generator, Line, Load, MachineControl, MachineDynamics,
+    Area, AsyncMotor, ConverterSource, CurrentLimit, Feeder, Generator, Line, Load, MachineControl, MachineDynamics,
     MachineShortCircuit, Model, Node, NodeKind, NodeRef, PhaseTap, RatioTap, Shunt, Substation, Svc, Switch,
     SwitchKind, TapPoint, Transformer2, Transformer3, VoltageControl, VoltageLevel, Winding, Winding3,
 };
@@ -40,6 +40,7 @@ const TYPICAL_SC: MachineShortCircuit = MachineShortCircuit {
     earthed: false,
     pg: 0.0,
     feeder: None,
+    converter: None,
 };
 const TYPICAL_DYNAMICS: MachineDynamics = MachineDynamics::classical(0.3, 4.0, 0.0);
 
@@ -1145,6 +1146,7 @@ fn injections(cx: &mut Ctx) {
     let mut typical_dyn = 0;
     let mut no_limits = 0;
     let mut no_minimum = 0;
+    let mut no_fault_current = 0;
     let dynamics: HashMap<&str, &Object> = g
         .of_class("SynchronousMachineTimeConstantReactance")
         .filter_map(|d| Some((g.reference(d, "SynchronousMachineDynamics.SynchronousMachine")?, d)))
@@ -1152,6 +1154,10 @@ fn injections(cx: &mut Ctx) {
     for (class, detail) in [
         ("SynchronousMachine", "generators"),
         ("ExternalNetworkInjection", "generators (external network injections)"),
+        (
+            "PowerElectronicsConnection",
+            "generators (fed through converters: wind, solar, batteries)",
+        ),
     ] {
         for o in g.of_class(class) {
             let Some(node) = cx.terms(o).first().and_then(|t| t.node) else {
@@ -1166,6 +1172,13 @@ fn injections(cx: &mut Ctx) {
                     "SynchronousMachine.maxQ",
                     "SynchronousMachine.referencePriority",
                 ),
+                "PowerElectronicsConnection" => (
+                    "PowerElectronicsConnection.p",
+                    "PowerElectronicsConnection.q",
+                    "PowerElectronicsConnection.minQ",
+                    "PowerElectronicsConnection.maxQ",
+                    "PowerElectronicsConnection.referencePriority",
+                ),
                 _ => (
                     "ExternalNetworkInjection.p",
                     "ExternalNetworkInjection.q",
@@ -1173,6 +1186,11 @@ fn injections(cx: &mut Ctx) {
                     "ExternalNetworkInjection.maxQ",
                     "ExternalNetworkInjection.referencePriority",
                 ),
+            };
+            let (rated_s, rated_u) = if class == "PowerElectronicsConnection" {
+                ("PowerElectronicsConnection.ratedS", "PowerElectronicsConnection.ratedU")
+            } else {
+                ("RotatingMachine.ratedS", "RotatingMachine.ratedU")
             };
             // Load sign convention in the files: a producing machine has negative p.
             let p = -cx.numd(o, pp);
@@ -1215,6 +1233,7 @@ fn injections(cx: &mut Ctx) {
                     earthed: g.flag(o, "SynchronousMachine.earthing").unwrap_or(false),
                     pg: cx.numd(o, "SynchronousMachine.voltageRegulationRange"),
                     feeder: None,
+                    converter: None,
                 },
                 None => {
                     typical_sc += usize::from(class == "SynchronousMachine");
@@ -1227,6 +1246,12 @@ fn injections(cx: &mut Ctx) {
                 } else {
                     None
                 },
+                // A converter feeds at most maxIFault times its rated current; without it, its rated current.
+                converter: (class == "PowerElectronicsConnection").then(|| {
+                    let k = cx.num(o, "PowerElectronicsConnection.maxIFault").filter(|k| *k > 0.0);
+                    no_fault_current += usize::from(k.is_none());
+                    ConverterSource { k: k.unwrap_or(1.0) }
+                }),
                 ..sc
             };
             let dynamics = match dynamics.get(&*o.id) {
@@ -1261,10 +1286,8 @@ fn injections(cx: &mut Ctx) {
                 p_max: unit
                     .and_then(|u| cx.num(u, "GeneratingUnit.maxOperatingP"))
                     .unwrap_or(0.0),
-                rated_mva: cx.num(o, "RotatingMachine.ratedS").unwrap_or(0.0),
-                rated_kv: cx
-                    .num(o, "RotatingMachine.ratedU")
-                    .unwrap_or_else(|| cx.nominal_kv(node)),
+                rated_mva: cx.num(o, rated_s).unwrap_or(0.0),
+                rated_kv: cx.num(o, rated_u).unwrap_or_else(|| cx.nominal_kv(node)),
                 participation: 0.0,
                 reference_priority: cx.num(o, prio).map_or(0, |v| v.max(0.0) as u32),
                 sc,
@@ -1507,6 +1530,11 @@ fn injections(cx: &mut Ctx) {
     if no_limits > 0 {
         cx.notes.push(format!(
             "{no_limits} machine(s) have no reactive power limits; they are treated as unlimited."
+        ));
+    }
+    if no_fault_current > 0 {
+        cx.notes.push(format!(
+            "{no_fault_current} power electronics connection(s) give no maximum fault current (maxIFault); short circuits take their rated current."
         ));
     }
     if no_minimum > 0 {

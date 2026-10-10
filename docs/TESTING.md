@@ -102,6 +102,34 @@ a load flow, which is the quickest way to look at a case that fails.
 `tests/oracle.test.mjs` fails when the committed inputs no longer match the samples, so a sample cannot drift away
 from its goldens unnoticed. Moving a busbar on the diagram changes the inputs but not the goldens.
 
+## Short circuit against IEC TR 60909-4
+
+`scripts/export-oracle-inputs.mjs` also writes a Riverside variant with a solar park and a battery fed through
+converters (`riverside-converters`), which `oracle.py` builds with pandapower static generators as current sources;
+`oracle.py` adds short circuits through a fault impedance (`max-zf`, the impedance under `faultImpedance`) to every
+sample's golden.
+
+The report's example network comes from pandapower's own test of it, downloaded by `node scripts/fetch-reference.mjs`
+at a pinned commit (`tests/oracle/sc-cases.json`). `scripts/oracle/iec60909.py` builds each case with the test's
+functions (pytest is stubbed when it is not installed), runs pandapower with the generator zero-sequence placeholder
+removed as `oracle.py` does, and writes `tests/oracle/golden/sc-<name>.json` with the network in pandapower's terms,
+pandapower's results and the values the test lists, read from its source by Python's parser:
+
+```sh
+node scripts/fetch-reference.mjs                    # once
+.venv/bin/python scripts/oracle/iec60909.py         # every case
+.venv/bin/python scripts/oracle/iec60909.py tr60909-4-1ph-max
+```
+
+`engine/crates/ps-study/tests/iec60909.rs` turns each golden's network into a model and checks the report's values,
+pandapower's results, a round trip through a document, and MiniGrid imported from CGMES against the report's values
+in the workbook that comes with it (`MiniGrid-RESULTS.xlsx`, read from the cached archive at test time). With
+`PS_SC_REPORT=1` it prints the worst difference per quantity and the report's breaking currents next to the engine's:
+
+```sh
+cd engine && PS_SC_REPORT=1 cargo test --release -p ps-study --test iec60909 -- --nocapture
+```
+
 ## Stability against ANDES
 
 The stability goldens (`tests/oracle/golden/dyn-*.json`) come from ANDES 2.0.0 (GPL-3.0), run on its own published

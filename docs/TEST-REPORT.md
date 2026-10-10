@@ -1,8 +1,73 @@
 # Test report
 
 Numbers are copied from the runs; nothing here is estimated. Re-run the commands in [TESTING.md](TESTING.md) to
-reproduce them. The first sections cover phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only: they have not
-been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+reproduce them. The first sections cover phase 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only: they
+have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+
+## Short circuit, phase 6 (2026-10-10, local)
+
+Same environment as phases 1 to 5. Local runs only. Engine tests 95, Node tests 108, browser tests 52 passed (16
+screenshot captures skipped), lints clean.
+
+**IEC TR 60909-4 as pandapower's test encodes it** (`engine/crates/ps-study/tests/iec60909.rs`). Worst difference from
+the report's values the test lists, and the test's tolerance:
+
+| Case | Ik″ (kA) | ip (kA) | Sk″ (MVA) |
+| --- | --- | --- | --- |
+| Three-phase, maximum | 4.8e-5 (1e-3) | 4.3e-5 (1e-3) | 7.6e-3 (1e-2) |
+| Three-phase, minimum | 4.5e-5 (1e-3) | | |
+| Line-to-line, maximum | 9.5e-5 (1e-3) | 4.9e-5 (1e-3) | 4.4e-3 (1e-1) |
+| Line-to-earth, maximum, F1 to F5 and F8 to F10 | 1.0e-4 (1e-4) | | |
+| Three-phase without motors | 8.7e-5 (1e-3) | 6.6e-5 (1e-3) | |
+| Reduced network | 3.6e-5 (1e-3) | 4.0e-5 (1e-3) | |
+| Reduced network without its generator | 8.5e-5 (1e-3) | 4.9e-5 (1e-3) | |
+| Generator unit only | 9.3e-5 (1e-3) | 9.8e-5 (1e-3) | |
+| Two generator units | 7.3e-5 (1e-3) | 2.1e-2 (1e-1) | |
+
+Every case also meets pandapower's own results at every bus to 1e-6 relative (Sk″ 1e-4), except one bus by design
+(the reduced network without its generator, where pandapower keeps the lone transformer flagged as a unit transformer
+and leaves it uncorrected). Earth faults at F6 and F7 are left out of the report comparison: pandapower's encoding
+earths transformer T6's 10 kV star point solidly, where the report earths it through 100 Ω (MiniGrid has the
+earthing; see below). The report's earth-fault peak currents at F2 to F5 are met exactly to the four decimals given
+(39.9641, 24.2635, 21.0415 and 41.4303 kA), with κ from the fault loop 2·Z1 + Z0; pandapower's positive-sequence κ
+gives 40.5086, 24.2424, 20.5464 and 42.8337 kA.
+
+Breaking currents, report against engine (kA), three-phase maximum, minimum time delay 0.1 s. pandapower's encoding
+has no pole pairs, so the motors' currents take no decay (q = 1) and Ib at the buses the motors feed is high:
+
+| | F1 | F2 | F3 | F4 | F5 | F6 | F7 | F8 | F9 | F10 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Report | 40.645 | 31.57 | 19.388 | 16.017 | 32.795 | 34.028 | 23.212 | 13.578 | 42.3867 | 68.4172 |
+| Engine | 40.6424 | 31.5968 | 19.4008 | 16.0151 | 32.8373 | 34.7259 | 23.9745 | 13.5778 | 42.3817 | 68.4149 |
+
+The test lists PowerFactory's breaking currents for the reduced networks. The engine meets them in the reduced
+network (40.4754, 29.7336, 15.9579, 30.2245 against 40.4754, 29.7337, 15.9593, 30.2245) and at the generator
+terminals, but is higher at the 110 kV buses fed by single units: 1.7650 against 1.6071 kA (generator unit only) and
+3.9687 and 4.1011 against 3.6605 and 3.7571 kA (two units). PowerFactory there applies the single-fed formula
+Ib = μ·I″k: with the generator's current through the unit transformer's rated ratio, I″kG/IrG = 4.106,
+μ = 0.8136 and μ·I″k = 1.607 kA. The engine applies the meshed-network formula everywhere, which the report uses for
+its own network and which errs high for single-fed faults.
+
+**MiniGrid from CGMES against the report** (the workbook that comes with the CGMES 3.0 conformity configurations;
+MiniGrid's rating of machine G2, 150 MVA, replaced by the report's 100 MVA):
+
+| | F1 | F2 | F3 | F4 | F5 | F6 | F7 | F8 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Ik″ report | 40.6447 | 31.7831 | 19.6730 | 16.2277 | 33.1894 | 37.5629 | 25.5895 | 13.5778 |
+| Ik″ engine | 40.6447 | 31.7821 | 19.6741 | 16.2274 | 33.1887 | 37.5629 | 25.5894 | 13.5777 |
+| ip report | 100.5677 | 80.6079 | 45.8111 | 36.8427 | 83.4033 | 98.1434 | 51.6899 | 36.9227 |
+| ip engine | 100.5677 | 80.6054 | 45.8138 | 36.8421 | 83.4016 | 98.1433 | 51.6897 | 36.9226 |
+| Ib report | 40.6450 | 31.5700 | 19.3880 | 16.0170 | 32.7950 | 34.0280 | 23.2120 | 13.5780 |
+| Ib engine | 40.6396 | 31.5662 | 19.3880 | 16.0056 | 32.7925 | 33.9806 | 23.1634 | 13.5763 |
+
+Earth faults (the workbook lists F2 to F5): Ik″ 15.9808, 10.4104, 9.0489, 17.0465 kA against the report's 15.9722,
+10.4106, 9.0498, 17.0452 (worst 5.4e-4 relative; MiniGrid's zero-sequence data for the three-winding transformers
+differ a little from the report's, which pandapower's encoding meets to 1e-4). Every location, three-phase and earth
+fault, gives the same currents to 1e-9 after the network is written as a document and read back.
+
+**pandapower on the samples**: Ik″, ip and Ith at every busbar of IEEE 14, Riverside and Riverside with a solar park
+and a battery fed through converters, for three-phase, line-to-line and line-to-earth faults, maximum, minimum and
+maximum through a 2 + j1 Ω fault impedance, to 1e-9 relative, natively and in WebAssembly.
 
 ## Dynamics, phase 5 wave D1 (2026-10-10, local)
 
@@ -296,12 +361,16 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Live site in a browser | Opened https://swiftugandan.github.io/powerstudio/ in local Chromium: the website showed the build-time figures (13.393 MW, 27.35 kA, 10 of 20, stays in step); its "Open PowerStudio" button opened `/app/`, which drew with WebGPU (Apple, metal-3) and converged the IEEE 14 load flow in 3 iterations, with no page errors |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
-## Not verified (as of phase 4)
+## Not verified (as of phase 6)
 
 - Firefox, Safari and Chromium on Windows; WebGPU on Linux with a real GPU.
 - Touch and pinch gestures on a real phone (the phone layout was tested at 390 × 844 in Chromium).
 - Screen readers.
-- The short-circuit method against the text of IEC 60909-0 or its TR 60909-4 examples (only against pandapower).
+- The short-circuit method against the text of IEC 60909-0: it is checked against pandapower and against the TR
+  60909-4 example's values as pandapower's test and CGMES MiniGrid give them, not against the documents themselves.
+- Breaking currents of single-fed faults by IEC's single-fed formula (the engine applies the meshed-network formula;
+  see the phase 6 section), the superposition method, the DC component and the steady-state current Ik.
+- Converter-fed sources against anything but pandapower's implementation of them.
 - Drawing by hand on a national network's diagram: ACTIVSg70k is laid out, drawn by level of detail and edited
   through the data sheet in the measurements, but no one has drawn new equipment on it at that scale.
 - Real operators' CGMES and RAW files: only the ENTSO-E conformity configurations, PowSyBl's test files and public

@@ -457,6 +457,18 @@ pub struct MachineShortCircuit {
     /// an external network that regulates voltage in the load flow, as CGMES external network injections are.
     #[serde(default)]
     pub feeder: Option<Feeder>,
+    /// The source is connected through a converter and meets short circuits as a current source (IEC 60909-0:2016,
+    /// as pandapower implements it for static generators): a wind or solar park, a battery.
+    #[serde(default)]
+    pub converter: Option<ConverterSource>,
+}
+
+/// A converter-fed source's short-circuit data.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ConverterSource {
+    /// The largest short-circuit current the converter feeds, times its rated current.
+    pub k: f64,
 }
 
 /// A network feeder's short-circuit data (IEC 60909-0, 6.2), as an external grid has them.

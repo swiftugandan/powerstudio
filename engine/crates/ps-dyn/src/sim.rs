@@ -805,12 +805,18 @@ pub fn simulate_detailed(
     let v0: Vec<C64> = (0..nb).map(|i| C64::from_polar(lf.vm[i], lf.va[i])).collect();
     let mut notes = Vec::new();
 
-    // Units: every generator with its controls. Static var compensators and converter stations are held at their
-    // load-flow output as admittances below.
+    // Units: every generator with its controls, but those fed through a converter, which inject a constant current
+    // (below). Static var compensators and converter stations are held at their load-flow output as admittances.
+    let converter_fed = |u: &&ps_lf::UnitOutput| model.generators[calc.machines[u.id] as usize].sc.converter.is_some();
     let mut units: Vec<Slotted> = Vec::new();
     let mut z0: Vec<f64> = Vec::new();
     let mut init: Vec<Vec<(String, f64)>> = Vec::new();
-    for u in lf.machines.iter().filter(|u| calc.unit(u.id).0 == Class::Generator) {
+    for u in lf
+        .machines
+        .iter()
+        .filter(|u| calc.unit(u.id).0 == Class::Generator)
+        .filter(|u| !converter_fed(u))
+    {
         let row = calc.machines[u.id] as usize;
         let bus = net.machines[u.id].bus;
         let name = model.name_of(Class::Generator, row).to_string();
@@ -930,6 +936,31 @@ pub fn simulate_detailed(
             });
         }
         load_ids.push(model.id_of(class, row).unwrap_or("").to_string());
+    }
+    // Converter-fed sources hold their load-flow current, as their controls limit it, turning into a constant
+    // impedance below the low-voltage threshold as loads do; a trip takes them out like a load.
+    let mut fed = 0;
+    for u in lf
+        .machines
+        .iter()
+        .filter(|u| calc.unit(u.id).0 == Class::Generator)
+        .filter(converter_fed)
+    {
+        let bus = net.machines[u.id].bus;
+        load_currents.push(LoadCurrent {
+            bus,
+            k: load_ids.len(),
+            power: C64::ZERO,
+            current: C64::new(-u.p, -u.q),
+            v0: v0[bus].abs(),
+        });
+        load_ids.push(model.generators[calc.machines[u.id] as usize].id.clone());
+        fed += 1;
+    }
+    if fed > 0 {
+        notes.push(format!(
+            "{fed} converter-fed source(s) inject a constant current at their load-flow output; they have no inertia."
+        ));
     }
     for u in lf.machines.iter().filter(|u| calc.unit(u.id).0 != Class::Generator) {
         let bus = net.machines[u.id].bus;

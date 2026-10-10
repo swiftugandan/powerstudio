@@ -26,7 +26,8 @@ fn settings(fault: FaultType, mode: ScMode, kappa: KappaMethod, location: &str) 
 
 #[test]
 fn every_fault_type_and_mode_matches_pandapower() {
-    for name in ["ieee14", "riverside"] {
+    // riverside-converters adds a solar park and a battery fed through converters (current sources).
+    for name in ["ieee14", "riverside", "riverside-converters"] {
         let imp = input(name);
         for (fault, key) in [
             (FaultType::ThreePhase, "3ph"),

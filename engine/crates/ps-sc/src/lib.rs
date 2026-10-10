@@ -194,6 +194,20 @@ impl Builder<'_> {
         }
     }
 
+    /// The converter-fed sources: each one's bus and current, p.u. (k times its rated power over the base power).
+    fn converter_sources(&self) -> Vec<(usize, f64)> {
+        self.model
+            .generators
+            .iter()
+            .enumerate()
+            .filter(|&(k, _)| self.on(Class::Generator, k))
+            .filter_map(|(_, g)| {
+                let c = g.sc.converter?;
+                Some((self.calc.topo.bus_of(g.node)?, c.k * g.rated_mva / self.sb))
+            })
+            .collect()
+    }
+
     /// The machines and motors with their admittances in a variant's positive-sequence network.
     fn rotating(&self, variant: Variant, peak: bool, freq_scale: f64) -> Vec<Rotating> {
         let mut out = Vec::new();
@@ -202,8 +216,9 @@ impl Builder<'_> {
             let Some(i) = self.calc.topo.bus_of(g.node) else {
                 continue;
             };
-            // A machine that stands for a network is a feeder, stamped with the external grids.
-            if !self.on(Class::Generator, k) || g.sc.feeder.is_some() {
+            // A machine that stands for a network is a feeder, stamped with the external grids; a converter-fed one
+            // is a current source.
+            if !self.on(Class::Generator, k) || g.sc.feeder.is_some() || g.sc.converter.is_some() {
                 continue;
             }
             let zb = vbase[i] * vbase[i] / sb;
@@ -787,6 +802,15 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
     let mut positive: HashMap<Variant, Option<ComplexLu>> = HashMap::new();
     let mut peak: HashMap<Variant, Option<ComplexLu>> = HashMap::new();
     let mut zero_peak: Option<Option<ComplexLu>> = None;
+    // Converter-fed sources feed maximum currents only; their voltages per network variant.
+    let sources = if max { b.converter_sources() } else { Vec::new() };
+    let mut converted: HashMap<Variant, Option<Vec<C64>>> = HashMap::new();
+    if !sources.is_empty() && !st.location.is_empty() && st.fault == FaultType::ThreePhase {
+        warnings.push(
+            "Branch contributions are those of the network's sources; converter-fed sources are left out of them."
+                .into(),
+        );
+    }
     let mut zero = if st.fault == FaultType::LineToEarth {
         factor(b.assemble(Seq::Zero, Variant::Normal, false))
     } else {
@@ -826,6 +850,14 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
         let lu = positive
             .entry(variant)
             .or_insert_with(|| factor(b.assemble(Seq::Positive, variant, false)));
+        let source_voltages = if sources.is_empty() {
+            None
+        } else {
+            converted
+                .entry(variant)
+                .or_insert_with(|| converter_voltages(lu, n, &sources, st.fault == FaultType::ThreePhase))
+                .clone()
+        };
         let Some(col) = column(lu, k) else {
             singular = true;
             continue;
@@ -887,12 +919,16 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
                 (safety * kappa_of(lp.re / lp.im)).clamp(1.0, limit)
             }
         };
-        let ip = kappa * std::f64::consts::SQRT_2 * ikss;
+        // Converter-fed sources: their current reaching the fault, (Z·I)k / (Zkk + ZF), added to the network's as
+        // pandapower adds it; it takes no peak factor and does not decay.
+        let i2 = source_voltages.map_or(0.0, |v| v[k].abs() / (z1 + zf).abs() * sb / (SQRT3 * vb));
+        let ip = std::f64::consts::SQRT_2 * (kappa * ikss + i2);
         let ib = if st.fault == FaultType::ThreePhase {
-            voltage_scale * breaking(&b, variant, &col, k, cc, zf, voltage_scale) * sb / (SQRT3 * vb)
+            voltage_scale * breaking(&b, variant, &col, k, cc, zf, voltage_scale) * sb / (SQRT3 * vb) + i2
         } else {
-            ikss
+            ikss + i2
         };
+        let ikss = ikss + i2;
         let lk = (kappa - 1.0).ln();
         let m = if kappa > 1.99 {
             0.0
@@ -957,6 +993,27 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
             .collect(),
         warnings,
     }
+}
+
+/// The voltages Z·I that converter-fed sources' currents raise in a network: each current at −arg(Zjj) of its bus for
+/// three-phase faults, at −90° otherwise, as pandapower places them.
+fn converter_voltages(
+    lu: &mut Option<ComplexLu>,
+    n: usize,
+    sources: &[(usize, f64)],
+    three_phase: bool,
+) -> Option<Vec<C64>> {
+    let lu = lu.as_mut()?;
+    let mut injected = vec![C64::ZERO; n];
+    for &(bus, current) in sources {
+        let angle = if three_phase {
+            -lu.column(bus).ok()?[bus].arg()
+        } else {
+            -std::f64::consts::FRAC_PI_2
+        };
+        injected[bus] += C64::from_polar(current, angle);
+    }
+    lu.solve(&injected).ok()
 }
 
 /// The symmetrical breaking current at bus `k`, p.u. of the bus's base current, for a three-phase fault on a
