@@ -60,6 +60,8 @@ export class DocumentLibrary {
     this.memoryRuns = new Map();
     /** @type {Map<string, { key: string, project: string, kind: string, report: Blob }>} */
     this.memoryResults = new Map();
+    /** @type {Map<string, Array<{ name: string, data: Blob }>>} */
+    this.memorySource = new Map();
     this.persistent = false;
   }
 
@@ -144,9 +146,10 @@ export class DocumentLibrary {
    * @param {string} id @returns {Promise<Map<string, string>>} */
   async parts(id) {
     const all = this.db
-      ? /** @type {Array<{ key: string, json: string }>} */ (await this.request('readonly', (_, __, parts) => parts.index('project').getAll(id)))
+      ? /** @type {Array<{ key: string, json?: string }>} */ (await this.request('readonly', (_, __, parts) => parts.index('project').getAll(id)))
       : [...this.memoryParts.values()].filter(p => p.project === id);
-    return new Map(all.map(p => [p.key.slice(id.length + 1), p.json]));
+    // The source files are a part of their own kind (`putSource`).
+    return new Map(all.filter(p => typeof p.json === 'string').map(p => [p.key.slice(id.length + 1), /** @type {string} */ (p.json)]));
   }
 
   /**
@@ -171,6 +174,21 @@ export class DocumentLibrary {
       touch.onsuccess = () => { if (touch.result) meta.put({ ...touch.result, updated: Date.now() }); };
       return touch;
     });
+  }
+
+  /** Keeps the files a project was imported from (each gzip-compressed), so its operating point can be exported back
+   * into them. @param {string} id @param {Array<{ name: string, data: Blob }>} files */
+  async putSource(id, files) {
+    const row = { key: `${id}/source`, project: id, files };
+    if (!this.db) { this.memorySource.set(id, files); return; }
+    await this.request('readwrite', (_, __, parts) => parts.put(row));
+  }
+
+  /** The files a project was imported from, or undefined. @param {string} id @returns {Promise<Array<{ name: string, data: Blob }> | undefined>} */
+  async getSource(id) {
+    if (!this.db) return this.memorySource.get(id);
+    const row = /** @type {{ files?: Array<{ name: string, data: Blob }> } | undefined} */ (await this.request('readonly', (_, __, parts) => parts.get(`${id}/source`)));
+    return row?.files;
   }
 
   /** Appends a run record to a project's run log. @param {string} id @param {RunRecord} record */
@@ -219,6 +237,7 @@ export class DocumentLibrary {
       for (const [k, p] of this.memoryParts) if (p.project === id) this.memoryParts.delete(k);
       for (const [k, r] of this.memoryRuns) if (r.project === id) this.memoryRuns.delete(k);
       for (const [k, r] of this.memoryResults) if (r.project === id) this.memoryResults.delete(k);
+      this.memorySource.delete(id);
       return;
     }
     await this.request('readwrite', (s, m, parts, runs, results) => {

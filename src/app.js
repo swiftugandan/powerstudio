@@ -427,9 +427,15 @@ export class App {
       if (!(await importDialog(summary, files.map(f => f.name)))) { this.log('info', `Import of “${label}” cancelled.`); return; }
       // The engine's document passes the same gate as any file; it should need no changes.
       const { doc, issues } = await this.normalize(raw);
-      await this.open(projectFromDocument(doc), newDocId(), { fresh: true });
+      const project = projectFromDocument(doc), id = newDocId();
+      // A CGMES model's files stay with the project, so its operating point can be exported back into them.
+      if (summary.format === 'cgmes') project.source = { format: 'cgmes', files: files.map(f => f.name) };
+      await this.open(project, id, { fresh: true });
       this.start = summary.fidelity.start.busIds.length ? summary.fidelity.start : null;
       await this.save();
+      if (summary.format === 'cgmes') {
+        await this.library.putSource(id, await Promise.all(files.map(async f => ({ name: f.name, data: await new Response(f.stream().pipeThrough(new CompressionStream('gzip'))).blob() }))));
+      }
       const z = summary.size;
       this.log('ok', `Imported “${label}” as “${doc.name}”: ${z.nodes} nodes and ${z.branches} branches as ${doc.elements.length} elements.`);
       for (const n of [...summary.study, ...summary.report.notes, ...summary.conversion]) this.log('info', n);
@@ -463,6 +469,32 @@ export class App {
     const head = JSON.stringify(projectFileHead(p, runs));
     download(new Blob([head.slice(0, -1), ',"base":', base, '}\n'], { type: 'application/json' }), fileName(p.base.name, '.powerstudio-project.json'));
     this.log('ok', `Exported the project “${p.base.name}”: ${p.cases.length} study case${p.cases.length === 1 ? '' : 's'}, ${p.scenarios.length} scenario${p.scenarios.length === 1 ? '' : 's'}, ${p.variants.length} variant${p.variants.length === 1 ? '' : 's'} and ${runs.length} run${runs.length === 1 ? '' : 's'}.`);
+  }
+
+  /** Exports the active study case's operating point as CGMES SSH and SV, in the files a CGMES project came from. */
+  async exportCgmes() {
+    const p = this.project;
+    if (p.source?.format !== 'cgmes') { toast('info', 'Only a project imported from CGMES files can export SSH and SV: they go back into those files.', { title: 'No CGMES source' }); return; }
+    const stored = await this.library.getSource(this.docId);
+    if (!stored) { toast('info', 'The CGMES files this project came from are not stored with it. Import them again to export SSH and SV.', { title: 'No CGMES source' }); return; }
+    this.setStatusMessage('Writing SSH and SV…');
+    try {
+      const files = await Promise.all(stored.map(async f => ({ name: f.name, bytes: new Uint8Array(await new Response(f.data.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()) })));
+      const doc = new TextEncoder().encode(await serialise(this.store.doc, () => true, yieldToBrowser) ?? '');
+      const payload = new Uint8Array(files.reduce((n, f) => n + f.bytes.length, 0) + doc.length);
+      let at = 0;
+      for (const f of files) { payload.set(f.bytes, at); at += f.bytes.length; }
+      payload.set(doc, at);
+      const { header, payload: zip } = await this.engine.call({ op: 'export_cgmes', created: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), files: files.map(f => ({ name: f.name, size: f.bytes.length })) }, payload);
+      download(new Blob([/** @type {Uint8Array<ArrayBuffer>} */ (zip)], { type: 'application/zip' }), fileName(`${this.store.doc.name}-${activeCase(p).name}-SSH-SV`, '.zip'));
+      this.log('ok', `Exported the operating point of “${activeCase(p).name}” as CGMES: ${header.changes} changed value${header.changes === 1 ? '' : 's'} in SSH, and the SV of its load flow (${header.converged ? `converged in ${header.iterations} iteration${header.iterations === 1 ? '' : 's'}` : 'not converged'}).`);
+      for (const n of /** @type {string[]} */ (header.notes ?? [])) this.log('warn', n);
+      this.setStatusMessage('');
+    } catch (error) {
+      this.setStatusMessage('');
+      this.log('error', `The CGMES export failed: ${error instanceof Error ? error.message : error}`);
+      toast('error', error instanceof Error ? error.message : String(error), { title: 'CGMES export failed' });
+    }
   }
 
   exportJSON() {
@@ -1096,6 +1128,7 @@ export class App {
     c.add({ id: 'file.open', label: 'Open saved network', icon: 'open', keys: ['Mod+O'], global: true, group: 'File', run: () => openBackstage(this, 'open') });
     c.add({ id: 'file.save', label: 'Save now', icon: 'save', keys: ['Mod+S'], global: true, group: 'File', hint: 'Networks save automatically; this saves immediately', run: async () => { await this.save(); toast('ok', this.library.persistent ? 'Saved in this browser.' : 'Kept for this session. Export to keep a copy.'); } });
     c.add({ id: 'file.import', label: 'Import file', icon: 'import', keys: ['Mod+Shift+O'], global: true, group: 'File', hint: 'Import a PowerStudio file, a CGMES model, a PSS/E RAW file or a MATPOWER case', run: () => this.importFile(`.json,${IMPORT_TYPES}`) });
+    c.add({ id: 'file.exportCgmes', label: 'Export CGMES SSH and SV', keywords: 'steady state hypothesis state variables operating point', icon: 'export', group: 'File', hint: 'The operating point of the active study case, in the CGMES files the project came from', enabled: () => this.project.source?.format === 'cgmes', run: () => { void this.exportCgmes(); } });
     c.add({ id: 'file.exportProject', label: 'Export project', keywords: 'backup archive variants scenarios runs', icon: 'layers', group: 'File', hint: 'The whole project with its run log, as one file', run: () => { void this.exportProject(); } });
     c.add({ id: 'file.export', label: 'Export PowerStudio file', icon: 'export', keys: ['Mod+Shift+S'], global: true, group: 'File', run: () => this.exportJSON() });
     c.add({ id: 'file.exportSvg', label: 'Export diagram as SVG', icon: 'image', group: 'File', run: () => { download(new Blob([this.viewport.exportSVG()], { type: 'image/svg+xml' }), fileName(this.store.doc.name, '.svg')); this.log('ok', 'Exported the diagram as SVG.'); } });

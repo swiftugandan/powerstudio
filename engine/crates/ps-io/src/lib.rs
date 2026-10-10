@@ -5,6 +5,7 @@
 
 pub mod busbranch;
 pub mod cgmes;
+pub mod cgmes_ssh;
 pub mod cgmes_sv;
 pub mod files;
 pub mod matpower;

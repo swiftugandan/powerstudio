@@ -32,9 +32,11 @@ import { DRAWING_KEYS } from './store.js';
  *   An operating point: values of operating fields by element and field.
  * @typedef {{ id: string, name: string, scenario: string, variants: string[], study: Study }} StudyCase What to
  *   calculate: a scenario ('' for the base values), the active variants and the settings.
+ * @typedef {{ format: 'cgmes', files: string[] }} Source The files a project was imported from, kept so its operating
+ *   point can be exported back into them.
  * @typedef {{ base: PowerDocument, variants: Variant[], scenarios: Scenario[], cases: StudyCase[], activeCase: string,
- *   recording: string }} Project `recording` is the variant edits to the equipment go to ('' for the base); it is one
- *   of the active case's variants.
+ *   recording: string, source?: Source }} Project `recording` is the variant edits to the equipment go to ('' for the
+ *   base); it is one of the active case's variants.
  * @typedef {'base' | 'manifest' | `variant:${string}` | `scenario:${string}`} Part A separately stored part.
  */
 
@@ -201,6 +203,7 @@ export function manifestOf(p) {
     variants: p.variants.map(({ ops: _, ...meta }) => meta),
     scenarios: p.scenarios.map(({ values: _, ...meta }) => meta),
     cases: p.cases, activeCase: p.activeCase, recording: p.recording,
+    ...(p.source ? { source: p.source } : {}),
   };
 }
 
@@ -238,6 +241,7 @@ export function projectFromParts(base, parts) {
     variants: m.variants.map(v => ({ ...v, ops: read(`variant/${v.id}`, []) })),
     scenarios: m.scenarios.map(s => ({ ...s, values: read(`scenario/${s.id}`, {}) })),
     cases: m.cases, activeCase: m.activeCase, recording: m.recording,
+    ...(m.source ? { source: m.source } : {}),
   });
   if (!p.cases.length) p.cases = projectFromDocument(base).cases;
   if (!p.cases.some(c => c.id === p.activeCase)) p.activeCase = p.cases[0].id;
@@ -289,5 +293,8 @@ export function projectFromFile(file, base) {
     if (!values || typeof values !== 'object') throw new Error(`The project file has no values for the scenario “${s.name}”.`);
     parts.set(`scenario/${s.id}`, JSON.stringify(values));
   }
-  return projectFromParts(base, parts);
+  const p = projectFromParts(base, parts);
+  // A project file does not carry the files a project was imported from.
+  delete p.source;
+  return p;
 }

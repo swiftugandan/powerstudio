@@ -3,7 +3,8 @@
  * Messages in: `{ type: 'init', module }` once; `{ type: 'doc', json, key }` (a document, as JSON text) and
  * `{ type: 'ops', ops, key }` (the store's edits); `{ id, kind, key, options, record }` for a study on the open document
  * (or `{ id, kind, doc, options, record }` on a document sent with it); `{ id, type: 'import', files }` to open other
- * tools' files; `{ id, type: 'layout', json }` to lay a document out. Messages out: `{ id, type: 'progress', done,
+ * tools' files; `{ id, type: 'layout', json }` to lay a document out; `{ id, type: 'call', header, payload }` for any
+ * other engine operation. Messages out: `{ id, type: 'progress', done,
  * total }`, then `{ id, type: 'result', bytes, record, ms }` (the JSON report, transferred, and with `record` the run
  * record's hashes; an import adds its `summary` and sends the laid-out document as `bytes`) or `{ id, type: 'error',
  * message, stale }`, where `stale` says the engine does not hold the document state the study named. */
@@ -47,6 +48,13 @@ self.onmessage = async (/** @type {MessageEvent} */ event) => {
     if (!engine) throw new Error('The calculation engine was not started.');
     const host = await engine;
     const t0 = performance.now();
+    if (msg.type === 'call') {
+      // Any other engine operation: the header and payload as given, the reply's header and payload back.
+      const reply = host.call(msg.header, msg.payload);
+      const bytes = reply.payload;
+      postMessage({ id, type: 'result', bytes, header: reply.header, ms: performance.now() - t0 }, [bytes.buffer]);
+      return;
+    }
     if (msg.type === 'layout') {
       const bytes = new TextEncoder().encode(JSON.stringify(drawingOf(laidOut(msg.json))));
       postMessage({ id, type: 'result', bytes, ms: performance.now() - t0 }, [bytes.buffer]);

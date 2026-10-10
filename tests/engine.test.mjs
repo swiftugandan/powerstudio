@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { root, engine, wasmPath } from './helpers.mjs';
-import { EngineHost, jsonPayload } from '../src/engine/host.js';
+import { root, engine, wasmPath, cgmesCase } from './helpers.mjs';
+import { EngineHost, jsonPayload, textPayload } from '../src/engine/host.js';
 import { request, requestOpen, openDocument, editDocument, study } from '../src/engine/studies.js';
 import { createHash } from 'node:crypto';
 import { applyOp } from '../src/core/store.js';
+import { normalizeDocument } from '../src/core/document.js';
 
 /** The requests compared: every study on every oracle input, with the simulation shortened to keep the run quick. */
 const REQUESTS = /** @type {Array<[string, Record<string, unknown>]>} */ ([
@@ -129,6 +130,26 @@ test('run records: the engine hashes the model, the study case and the report, t
   loaded.elements.find((/** @type {any} */ e) => e.cls === 'load').p += 1;
   assert.notEqual(study(engine, 'loadflow', loaded, {}, undefined, { record: true }).header.record.model, a.header.record.model);
   assert.equal(study(engine, 'loadflow', doc, {}).header.record, undefined, 'no record unless asked');
+});
+
+test('exports an edited CGMES operating point as SSH and SV in a ZIP', { skip: !cgmesCase('microgrid-be-2') && 'the CGMES conformity archive is not in .cache/reference' }, () => {
+  const files = /** @type {Array<{ name: string, bytes: Uint8Array }>} */ (cgmesCase('microgrid-be-2'));
+  const listed = files.map(f => ({ name: f.name, size: f.bytes.length }));
+  const concat = (/** @type {Uint8Array[]} */ parts) => { const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let at = 0; for (const p of parts) { out.set(p, at); at += p.length; } return out; };
+  const imported = engine.call({ op: 'import', files: listed }, concat(files.map(f => f.bytes)));
+  // The document as the app holds it: through the import gate, which fills in the catalogue's defaults.
+  const { doc } = normalizeDocument(jsonPayload(imported.payload));
+  const unchanged = engine.call({ op: 'export_cgmes', created: '2026-10-10T12:00:00Z', files: listed }, concat([...files.map(f => f.bytes), textPayload(JSON.stringify(doc))]));
+  assert.equal(unchanged.header.changes, 0, 'the import gate changes no operating value');
+  const load = /** @type {any} */ (doc.elements.find((/** @type {any} */ e) => e.cls === 'load' && !e.id.includes('~')));
+  load.p += 5;
+  const reply = engine.call({ op: 'export_cgmes', created: '2026-10-10T12:00:00Z', files: listed }, concat([...files.map(f => f.bytes), textPayload(JSON.stringify(doc))]));
+  assert.equal(reply.header.changes, 1);
+  assert.ok(reply.header.converged);
+  assert.equal(reply.header.files.length, 2, 'one SSH and the SV');
+  assert.ok(reply.header.files.some((/** @type {string} */ n) => /SSH.*_PowerStudio\.xml$/.test(n)));
+  // A ZIP: local file header first, end of central directory last.
+  assert.equal(Buffer.from(reply.payload).readUInt32LE(0), 0x04034b50);
 });
 
 /** @param {string} name */

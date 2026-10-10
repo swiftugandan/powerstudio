@@ -72,6 +72,7 @@ async function render(app, page, close) {
       h('div', { class: 'cards' },
         card('Project', 'Every study case, scenario and variant with the run log, in one file. Imports back as a new project.', 'layers', () => app.commands.run('file.exportProject')),
         card('PowerStudio file', 'The network as the active study case composes it, with its settings, as JSON. Opens in PowerStudio on any machine.', 'save', () => app.commands.run('file.export')),
+        ...(app.project.source?.format === 'cgmes' ? [card('CGMES SSH and SV', 'The active study case\u2019s operating point in the CGMES files the project came from: their SSH with the values you changed, and the SV of its load flow, in a ZIP.', 'export', () => app.commands.run('file.exportCgmes'))] : []),
         card('Diagram as SVG', 'Vector drawing of the single-line diagram with the current annotations.', 'image', () => app.commands.run('file.exportSvg')),
         card('Diagram as PNG', 'Bitmap of the whole diagram at twice screen resolution.', 'image', () => app.commands.run('file.exportPng')),
         card('Results table as CSV', 'The table currently shown in the results panel.', 'csv', () => app.commands.run('results.csv')))];

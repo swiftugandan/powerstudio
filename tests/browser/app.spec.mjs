@@ -2,6 +2,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { decodePNG, share } from './png.mjs';
+import { cgmesCase } from '../cgmes-files.mjs';
 
 const golden = JSON.parse(readFileSync(new URL('../oracle/golden/matpower-case30.json', import.meta.url), 'utf8'));
 
@@ -458,6 +459,34 @@ test('imports a PSS/E RAW file, shows what it read, and solves it to the MATPOWE
   await loadFlow(page);
   const k = case14.bus.indexOf(14);
   await expect(page.locator('table.grid tbody tr[data-id="B14"]')).toContainText(case14.vm[k].toFixed(4));
+});
+
+test('imports a CGMES model, edits its operating point and exports it as SSH and SV', async ({ page }) => {
+  const files = cgmesCase('microgrid-be-2');
+  test.skip(!files, 'the CGMES conformity archive is not in .cache/reference');
+  await open(page);
+  const chooser = page.waitForEvent('filechooser');
+  await page.keyboard.press('ControlOrMeta+Shift+O');
+  await (await chooser).setFiles(/** @type {Array<{ name: string, bytes: Uint8Array }>} */ (files).map(f => ({ name: f.name.split('/').pop() ?? f.name, mimeType: 'application/zip', buffer: Buffer.from(f.bytes) })));
+  await page.locator('.dialog .btn.primary').click();
+  await expect(page.locator('#app')).toContainText('Imported');
+  await page.locator('.dock-tab[data-tab="data"]').click();
+  await page.locator('.sheet-toolbar select').selectOption('load');
+  const p = page.locator('table.sheet tbody tr[data-id] td[data-key="p"]').first();
+  await p.click();
+  await page.keyboard.type('12');
+  await page.keyboard.press('Enter');
+  await expect(p).toHaveText('12');
+  const download = page.waitForEvent('download');
+  await palette(page, 'Export CGMES');
+  const zip = readFileSync(/** @type {string} */ (await (await download).path()));
+  expect(zip.readUInt32LE(0)).toBe(0x04034b50);
+  const names = zip.toString('latin1').match(/[\w.-]+_PowerStudio\.xml/g) ?? [];
+  expect(names.some(n => n.includes('SSH'))).toBe(true);
+  expect(names.some(n => n.includes('SV'))).toBe(true);
+  await expect(page.locator('.dock-tab[data-tab="output"]')).toBeVisible();
+  await page.locator('.dock-tab[data-tab="output"]').click();
+  await expect(page.locator('.log')).toContainText('1 changed value in SSH');
 });
 
 test('exports a PowerStudio file that imports again unchanged', async ({ page }) => {

@@ -576,7 +576,9 @@ is gone: one importer per format, in the engine. Automatic layout now takes 0.3 
 10,000, run in the worker.
 
 SSH export moves to phase 4. SSH carries the set points an operator edits, and edits on an imported model arrive
-with the workspace on the model; until then an exported SSH would repeat the input.
+with the workspace on the model; until then an exported SSH would repeat the input. (Phase 4 did it without moving
+the workspace, ADR 12: a CGMES project keeps its files, and the editor's operating values go back into their SSH by
+mRID; see docs/ENGINE.md.)
 
 ### Phase 3 results (2026-10-10, local)
 

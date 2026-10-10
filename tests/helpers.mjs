@@ -16,3 +16,5 @@ export const input = name => JSON.parse(read(`tests/oracle/inputs/${name}.json`)
 export const wasmPath = join(root, 'src/engine/powerstudio-engine.wasm');
 export const engine = await EngineHost.create(readFileSync(wasmPath));
 export const studies = new Studies(engine);
+
+export { cgmesCase } from './cgmes-files.mjs';

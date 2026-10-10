@@ -12,6 +12,7 @@
 //! | `load_matpower` | | MATPOWER case text | model size and conversion issues |
 //! | `solve_model` | `tolerance` (MVA), `warm_start`, `dc_start`, `q_limits`, `bump` (change the largest load by this factor first), `keep` (store the solution as the next warm start) | | load flow summary |
 //! | `import` | `files`: `[{ name, size }]` | the files' bytes, one after another | format, import report, validation, conversion notes, fidelity and size; the editor's document as payload |
+//! | `export_cgmes` | `files`: `[{ name, size }]`, `created` (ISO time) | the CGMES files the document was imported from, one after another, then the document (JSON) | changes, SSH edits, convergence, notes and the names of the files; a ZIP of the changed SSH files and the SV as payload |
 //!
 //! Reports travel as a payload, not in the header, so the header stays small and the host can parse them separately.
 
@@ -83,6 +84,32 @@ fn without_timing(v: &Value) -> Value {
         Value::Array(a) => Value::Array(a.iter().map(without_timing).collect()),
         other => other.clone(),
     }
+}
+
+/// The files a request's payload holds one after another, in the order and sizes its header's `files` lists, and the
+/// payload after them.
+fn listed_files(req: &Envelope) -> Result<(Vec<ps_io::files::File>, &[u8]), String> {
+    let list = req
+        .header
+        .get("files")
+        .and_then(Value::as_array)
+        .ok_or("the request lists no files")?;
+    let mut files = Vec::new();
+    let mut at = 0usize;
+    for f in list {
+        let name = f.get("name").and_then(Value::as_str).ok_or("a file has no name")?;
+        let size = f.get("size").and_then(Value::as_u64).ok_or("a file has no size")? as usize;
+        let end = at
+            .checked_add(size)
+            .filter(|&e| e <= req.payload.len())
+            .ok_or("the files exceed the payload")?;
+        files.push(ps_io::files::File {
+            name: name.to_string(),
+            data: req.payload[at..end].to_vec(),
+        });
+        at = end;
+    }
+    Ok((files, &req.payload[at..]))
 }
 
 /// The document the editor has open, and its conversion since the last edit.
@@ -282,27 +309,7 @@ impl Engine {
                 ))
             }
             "import" => {
-                // The payload holds the files one after another, in the order and sizes the header lists.
-                let list = req
-                    .header
-                    .get("files")
-                    .and_then(Value::as_array)
-                    .ok_or("the import request lists no files")?;
-                let mut files = Vec::new();
-                let mut at = 0usize;
-                for f in list {
-                    let name = f.get("name").and_then(Value::as_str).ok_or("a file has no name")?;
-                    let size = f.get("size").and_then(Value::as_u64).ok_or("a file has no size")? as usize;
-                    let end = at
-                        .checked_add(size)
-                        .filter(|&e| e <= req.payload.len())
-                        .ok_or("the files exceed the payload")?;
-                    files.push(ps_io::files::File {
-                        name: name.to_string(),
-                        data: req.payload[at..end].to_vec(),
-                    });
-                    at = end;
-                }
+                let (files, _) = listed_files(req)?;
                 let t0 = ps_num::clock::now_ms();
                 let result = ps_study::exchange::import_for_editor(files)?;
                 let mut header = serde_json::to_value(&result).map_err(|e| e.to_string())?;
@@ -310,6 +317,23 @@ impl Engine {
                     h.insert("ms".into(), json!(ps_num::clock::now_ms() - t0));
                 }
                 Ok(ok(header, result.doc.to_string().into_bytes()))
+            }
+            "export_cgmes" => {
+                // The CGMES files the project was imported from, then the document to export the operating point of.
+                let (files, rest) = listed_files(req)?;
+                let doc: Value =
+                    serde_json::from_slice(rest).map_err(|e| format!("the document is not valid JSON: {e}"))?;
+                let created = req.header.get("created").and_then(Value::as_str).unwrap_or("");
+                let export = ps_study::exchange::export_cgmes(files, &doc, created)?;
+                let entries: Vec<(&str, &[u8])> = export
+                    .files
+                    .iter()
+                    .map(|f| (f.name.as_str(), f.data.as_slice()))
+                    .collect();
+                let names: Vec<&str> = entries.iter().map(|e| e.0).collect();
+                let mut header = serde_json::to_value(&export).map_err(|e| e.to_string())?;
+                header["files"] = json!(names);
+                Ok(ok(header, ps_io::zip::write(&entries)))
             }
             other => Err(format!("unknown op \"{other}\"")),
         }

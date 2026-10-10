@@ -137,6 +137,49 @@ fn read_into(
     Ok(())
 }
 
+/// A ZIP archive of the files, stored without compression (exports are small next to what they describe, and stored
+/// entries need no inflater to read). Names are UTF-8; every entry carries 1 January 1980, the format's first date, so
+/// the same files give the same archive.
+pub fn write(files: &[(&str, &[u8])]) -> Vec<u8> {
+    // Version 2.0, UTF-8 names, stored, 00:00 on 1 January 1980.
+    const ENTRY: [u8; 10] = [20, 0, 0, 8, 0, 0, 0, 0, 0x21, 0];
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in files {
+        let offset = out.len() as u32;
+        let crc = crc32(data);
+        let size = data.len() as u32;
+        out.extend_from_slice(b"PK\x03\x04");
+        out.extend_from_slice(&ENTRY);
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&size.to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        central.extend_from_slice(b"PK\x01\x02");
+        central.extend_from_slice(&[20, 0]);
+        central.extend_from_slice(&ENTRY);
+        central.extend_from_slice(&crc.to_le_bytes());
+        central.extend_from_slice(&size.to_le_bytes());
+        central.extend_from_slice(&size.to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0; 12]);
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let cd_offset = out.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(b"PK\x05\x06\0\0\0\0");
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+    out.extend_from_slice(&cd_offset.to_le_bytes());
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
 /// CRC-32 (IEEE 802.3), as ZIP uses it.
 pub fn crc32(data: &[u8]) -> u32 {
     static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
@@ -160,49 +203,11 @@ pub fn crc32(data: &[u8]) -> u32 {
 mod tests {
     use super::*;
 
-    /// Builds a stored-only archive.
-    fn archive(files: &[(&str, &[u8])]) -> Vec<u8> {
-        let mut out = Vec::new();
-        let mut central = Vec::new();
-        for (name, data) in files {
-            let offset = out.len() as u32;
-            let crc = crc32(data);
-            let size = data.len() as u32;
-            out.extend_from_slice(b"PK\x03\x04");
-            out.extend_from_slice(&[20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-            out.extend_from_slice(&crc.to_le_bytes());
-            out.extend_from_slice(&size.to_le_bytes());
-            out.extend_from_slice(&size.to_le_bytes());
-            out.extend_from_slice(&(name.len() as u16).to_le_bytes());
-            out.extend_from_slice(&0u16.to_le_bytes());
-            out.extend_from_slice(name.as_bytes());
-            out.extend_from_slice(data);
-            central.extend_from_slice(b"PK\x01\x02");
-            central.extend_from_slice(&[20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-            central.extend_from_slice(&crc.to_le_bytes());
-            central.extend_from_slice(&size.to_le_bytes());
-            central.extend_from_slice(&size.to_le_bytes());
-            central.extend_from_slice(&(name.len() as u16).to_le_bytes());
-            central.extend_from_slice(&[0; 12]);
-            central.extend_from_slice(&offset.to_le_bytes());
-            central.extend_from_slice(name.as_bytes());
-        }
-        let cd_offset = out.len() as u32;
-        out.extend_from_slice(&central);
-        out.extend_from_slice(b"PK\x05\x06\0\0\0\0");
-        out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-        out.extend_from_slice(&(files.len() as u16).to_le_bytes());
-        out.extend_from_slice(&(central.len() as u32).to_le_bytes());
-        out.extend_from_slice(&cd_offset.to_le_bytes());
-        out.extend_from_slice(&[0, 0]);
-        out
-    }
-
     #[test]
     fn reads_nested_archives_and_checks_crcs() -> Result<(), ParseError> {
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
-        let inner = archive(&[("EQ.xml", b"<eq/>")]);
-        let outer = archive(&[("readme.txt", b"hello"), ("model.zip", &inner)]);
+        let inner = write(&[("EQ.xml", b"<eq/>")]);
+        let outer = write(&[("readme.txt", b"hello"), ("model.zip", &inner)]);
         let entries = read(&outer)?;
         assert_eq!(
             entries.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),

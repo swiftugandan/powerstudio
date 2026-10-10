@@ -24,7 +24,7 @@ import { yieldToBrowser } from './dom.js';
 /** @typedef {import('../engine/reports.js').CalcKind} CalcKind */
 /** @typedef {(done: number, total: number) => void} OnProgress */
 /** @typedef {{ engine: string, model?: string, study?: string, results: string }} Hashes A run record's hashes from the engine */
-/** @typedef {{ bytes: Uint8Array, ms: number, summary?: import('../engine/reports.js').ImportSummary, record?: Hashes }} Reply */
+/** @typedef {{ bytes: Uint8Array, ms: number, summary?: import('../engine/reports.js').ImportSummary, record?: Hashes, header?: Record<string, any> }} Reply */
 /** @typedef {{ id: number, resolve: (v: Reply) => void, reject: (e: Error) => void, onProgress?: OnProgress }} Pending */
 /** @typedef {{ worker: Worker, pending: Pending | null, key: string }} Slot A worker, its call in progress and the document state its copy holds */
 
@@ -127,7 +127,7 @@ export class EngineClient {
       if (!p || msg.id !== p.id) return;
       if (msg.type === 'progress') { p.onProgress?.(msg.done, msg.total); return; }
       s.pending = null;
-      if (msg.type === 'result') p.resolve({ bytes: msg.bytes, ms: msg.ms, summary: msg.summary, record: msg.record });
+      if (msg.type === 'result') p.resolve({ bytes: msg.bytes, ms: msg.ms, summary: msg.summary, record: msg.record, header: msg.header });
       else p.reject(msg.stale ? new StaleDocument(msg.message) : new Error(msg.message));
     };
     worker.onerror = e => {
@@ -264,6 +264,34 @@ export class EngineClient {
         s.worker.postMessage({ id, type: 'layout', json });
       });
       return jsonPayload(reply.bytes);
+    } finally {
+      this.active--;
+    }
+  }
+
+  /**
+   * Any other engine operation (such as `export_cgmes`), on the first worker or on this thread when there are none.
+   * The payload's buffer is transferred to the worker.
+   * @param {Record<string, unknown>} header @param {Uint8Array} payload
+   * @returns {Promise<{ header: Record<string, any>, payload: Uint8Array }>}
+   */
+  async call(header, payload) {
+    this.active++;
+    try {
+      const module = await engineModule();
+      const s = this.slot(0, module);
+      if (!s) {
+        this.host ??= await EngineHost.create(module);
+        const reply = this.host.call(header, payload);
+        return { header: reply.header, payload: reply.payload };
+      }
+      /** @type {Reply} */
+      const reply = await new Promise((resolve, reject) => {
+        const id = ++this.seq;
+        s.pending = { id, resolve, reject };
+        s.worker.postMessage({ id, type: 'call', header, payload }, [payload.buffer]);
+      });
+      return { header: reply.header ?? {}, payload: reply.bytes };
     } finally {
       this.active--;
     }

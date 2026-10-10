@@ -91,7 +91,9 @@ reference model into the editor's document and requires its load flow to reprodu
 
 CGMES state variables export is checked the same two ways: `engine/crates/ps-study/tests/cgmes_sv.rs` reads every
 exported SV back with PowerStudio's importer, and `scripts/oracle/sv_check.py` has PowSyBl read it in place of each
-configuration's own SV and compares the flows it takes with PowerStudio's.
+configuration's own SV and compares the flows it takes with PowerStudio's. CGMES SSH export is checked by
+`engine/crates/ps-study/tests/cgmes_ssh.rs`, which edits each configuration's operating point and reads it back, and
+by `scripts/oracle/ssh_check.py`, which has PowSyBl read the files that test writes when `PS_SSH_DIR` is set.
 
 A case whose files no load flow can solve is marked `"loadflow": false` with the reason in `why`; its import is
 still compared. `ps cgmes <files>` and `ps psse <file.raw>` print an import's report, validation and, with `--lf`,

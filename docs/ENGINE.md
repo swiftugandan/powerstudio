@@ -399,6 +399,38 @@ configuration, reads the configuration back with it in place of its own SV, and 
 solved voltage and the load flow to need no iteration from there. And by `scripts/oracle/sv_check.py`, in which PowSyBl
 reads the exported SV: it takes every flow PowerStudio wrote, on all eleven configurations, without difference.
 
+## CGMES steady-state hypothesis export
+
+A project imported from CGMES keeps its files, and exports the active study case's operating point back into them
+(`ps-study` `exchange::export_cgmes`, the engine operation `export_cgmes`). The engine converts the files again to
+the document the import produced and compares it with the user's, field by field: a field the conversion left out
+counts as the catalogue's default, which the editor's import gate fills in. Each operating value that differs becomes
+a change to an equipment by its mRID, and `ps-io` (`cgmes_ssh.rs`) writes it into the input's own SSH files, so every
+other byte stays as it was:
+
+| Value in the editor | SSH property |
+| --- | --- |
+| In service | `ACDCTerminal.connected` on every terminal; in CGMES 3 also `Equipment.inService` |
+| Load P and Q | `EnergyConsumer.p` and `.q` (all consumer classes), `RotatingMachine.p` and `.q` (asynchronous machines), `EquivalentInjection.p` and `.q`, in load sign |
+| Machine P and Q | `RotatingMachine.p` and `.q`, `EquivalentInjection.p` and `.q`, negated (load sign) |
+| Voltage target | `RegulatingControl.targetValue` of the equipment's control, in kV (the per-unit target times the regulated node's nominal voltage); `EquivalentInjection.regulationTarget` |
+| Shunt sections | `ShuntCompensator.sections` |
+| Tap position, tap control, tap voltage target | `TapChanger.step` (the file's step plus the editor's offset), `TapChanger.controlEnabled`, the control's `RegulatingControl.targetValue` |
+
+A file that changes gets a new model identifier (derived from the old one and the changes, so the same changes give
+the same file), the time it was written and `Model.Supersedes` the file it replaces. The engine then imports the files
+with the new SSH, solves them with the study case's settings and writes their SV, so the two agree. What SSH cannot
+carry is reported: changes to equipment data (that is EQ), elements added in PowerStudio, and elements its conversion
+made (a three-winding transformer's legs, shunts standing for line charging); removed elements are written as out of
+service. The app downloads the changed SSH files and the SV in a ZIP.
+
+**Checked by** `engine/crates/ps-study/tests/cgmes_ssh.rs` on all eleven configurations: an unchanged document
+exports no SSH; a load's power, a machine's voltage target, a transformer's tap and a line switched out read back
+from the new files exactly; and a load flow started from the exported SV stays where it is (2.7e-12 p.u. on Svedala,
+whose machines at reactive limits are found again in four iterations; no iteration on the others). And by
+`scripts/oracle/ssh_check.py`, in which PowSyBl reads the exported files and finds every edited value (three of the
+edited loads are boundary injections, which PowSyBl folds into dangling lines, so it has no element to compare).
+
 ## PSS/E RAW export
 
 `ps-io` (`psse_write.rs`) writes any model as a RAW file of version 33 or 35. RAW is bus-branch, so nodes joined by

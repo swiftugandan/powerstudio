@@ -408,3 +408,271 @@ pub fn import_for_editor(files: Vec<ps_io::files::File>) -> Result<ForEditor, St
         doc: converted.doc,
     })
 }
+
+/// CGMES files that carry an edited operating point back to the operator's toolchain: the input's SSH with the
+/// operating values the document changed, and the SV of a load flow on the files with that SSH.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CgmesExport {
+    /// The files: each changed SSH, then the SV (sent separately as the reply's payload).
+    #[serde(skip)]
+    pub files: Vec<ps_io::files::File>,
+    /// Operating values that differ from the files.
+    pub changes: usize,
+    /// SSH properties written.
+    pub edits: usize,
+    /// Whether the load flow on the new SSH converged.
+    pub converged: bool,
+    /// Its iterations.
+    pub iterations: usize,
+    /// What could not be carried, in plain words.
+    pub notes: Vec<String>,
+}
+
+/// Exports the operating point of `doc`, a document made from the CGMES `files` (and edited since), as SSH and SV.
+/// Values are compared with the document the files convert to, so only what the user changed is written.
+pub fn export_cgmes(
+    files: Vec<ps_io::files::File>,
+    doc: &serde_json::Value,
+    created: &str,
+) -> Result<CgmesExport, String> {
+    use ps_io::cgmes_ssh::{Change, Options, Setting};
+    let files = ps_io::files::expand(files).map_err(|e| e.to_string())?;
+    let model = ps_io::cgmes::import(&files).map_err(|e| e.to_string())?.model;
+    let original = ps_io::powerstudio_write::to_document(&model).doc;
+    let elements = |d: &serde_json::Value| -> std::collections::HashMap<String, serde_json::Value> {
+        d["elements"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|e| Some((e["id"].as_str()?.to_string(), e.clone())))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (was, now) = (elements(&original), elements(doc));
+    let kv = |n: ps_model::NodeRef| model.nodes.get(n.index()).map_or(0.0, |x| x.nominal_kv);
+    let mut changes = Vec::new();
+    let (mut equipment, mut added, mut removed) = (0usize, 0usize, 0usize);
+    let differs = |a: &serde_json::Value, b: &serde_json::Value| match (a.as_f64(), b.as_f64()) {
+        (Some(x), Some(y)) => (x - y).abs() > 1e-9 * x.abs().max(1.0),
+        _ => a != b,
+    };
+    for (id, e) in &now {
+        let Some(o) = was.get(id) else {
+            added += 1;
+            continue;
+        };
+        let cls = e["cls"].as_str().unwrap_or("");
+        let mut push = |setting: Setting| {
+            changes.push(Change {
+                id: id.clone(),
+                setting,
+            })
+        };
+        // A field the conversion left out holds the catalogue's default once the editor's import gate has filled it
+        // in (src/core/catalog.js; the engine test of this export checks the two agree).
+        let default = |k: &str| -> serde_json::Value {
+            match (cls, k) {
+                (_, "inService") => true.into(),
+                ("trafo", "tapControl") | ("shunt", "vControl") => false.into(),
+                ("trafo" | "shunt", "vTarget") | ("gen" | "extgrid", "vset") => 1.0.into(),
+                ("shunt", "sections") => 1.0.into(),
+                ("trafo", "tapPos") | (_, "angle") | ("gen", "q") => 0.0.into(),
+                _ => serde_json::Value::Null,
+            }
+        };
+        let before = |k: &str| o.get(k).cloned().unwrap_or_else(|| default(k));
+        let changed = |k: &str| e.get(k).is_some_and(|v| differs(v, &before(k)));
+        let number = |k: &str| e[k].as_f64().unwrap_or(0.0);
+        let mut operating: Vec<&str> = vec!["inService"];
+        if changed("inService") {
+            push(Setting::InService(e["inService"].as_bool().unwrap_or(true)));
+        }
+        match cls {
+            "load" => {
+                operating.extend(["p", "q"]);
+                if changed("p") {
+                    push(Setting::LoadP(number("p")));
+                }
+                if changed("q") {
+                    push(Setting::LoadQ(number("q")));
+                }
+            }
+            "gen" | "extgrid" => {
+                operating.extend(["p", "q", "vset", "angle"]);
+                if cls == "gen" && changed("p") {
+                    push(Setting::MachineP(number("p")));
+                }
+                if cls == "gen" && changed("q") {
+                    push(Setting::MachineQ(number("q")));
+                }
+                if changed("vset") {
+                    let node = model
+                        .generators
+                        .iter()
+                        .find(|g| g.id == *id)
+                        .map(|g| g.regulated_node.unwrap_or(g.node))
+                        .or_else(|| model.external_grids.iter().find(|g| g.id == *id).map(|g| g.node));
+                    match node {
+                        Some(n) => push(Setting::VoltageTargetKv(number("vset") * kv(n))),
+                        None => equipment += 1,
+                    }
+                }
+            }
+            "shunt" => {
+                operating.push("sections");
+                if changed("sections") {
+                    push(Setting::Sections(number("sections")));
+                }
+            }
+            "trafo" => {
+                operating.extend(["tapPos", "tapControl", "vTarget"]);
+                let t = model.transformers2.iter().find(|t| t.id == *id);
+                let tap = t.and_then(ps_io::powerstudio_write::written_tap);
+                if let (Some(tap), true) = (tap, changed("tapPos") || changed("tapControl") || changed("vTarget")) {
+                    if changed("tapPos") {
+                        push(Setting::TapStep {
+                            phase: tap.phase,
+                            end: tap.end,
+                            step: tap.position + number("tapPos").round() as i32,
+                        });
+                    }
+                    if changed("tapControl") {
+                        push(Setting::TapControl {
+                            phase: tap.phase,
+                            end: tap.end,
+                            on: e["tapControl"].as_bool().unwrap_or(false),
+                        });
+                    }
+                    let control = t
+                        .and_then(|t| t.ratio_taps.iter().find(|r| r.end == tap.end))
+                        .and_then(|r| r.control);
+                    if changed("vTarget") && !tap.phase {
+                        match control {
+                            Some(c) => push(Setting::TapTargetKv {
+                                end: tap.end,
+                                kv: number("vTarget") * kv(c.node),
+                            }),
+                            None => equipment += 1,
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        // Everything else the document describes is equipment (EQ), or the drawing.
+        let drawing = [
+            "x", "y", "len", "orient", "fromPos", "toPos", "hvPos", "lvPos", "pos", "side", "bend", "name", "id", "cls",
+        ];
+        let other = |(k, v): (&String, &serde_json::Value)| {
+            !operating.contains(&k.as_str())
+                && !drawing.contains(&k.as_str())
+                && o.get(k).is_some_and(|w| differs(v, w))
+        };
+        if e.as_object().is_some_and(|fields| fields.iter().any(other)) {
+            equipment += 1;
+        }
+    }
+    for id in was.keys().filter(|id| !now.contains_key(*id)) {
+        removed += 1;
+        changes.push(Change {
+            id: id.clone(),
+            setting: Setting::InService(false),
+        });
+    }
+    let ssh = ps_io::cgmes_ssh::write(
+        &files,
+        &changes,
+        &Options {
+            created: created.to_string(),
+        },
+    )?;
+    let mut notes = ssh.notes.clone();
+    if equipment > 0 {
+        notes.push(format!(
+            "{equipment} element(s) also changed equipment data (impedances, ratings and the like); that belongs to the EQ profile, which PowerStudio does not export."
+        ));
+    }
+    if added > 0 {
+        notes.push(format!(
+            "{added} element(s) added in PowerStudio are not in the CGMES files, so SSH cannot carry them."
+        ));
+    }
+    if removed > 0 {
+        notes.push(format!(
+            "{removed} element(s) removed in PowerStudio are written as out of service."
+        ));
+    }
+    // The files with the new SSH in place of the old ones, solved for the SV.
+    let solved: Vec<ps_io::files::File> = files
+        .iter()
+        .map(|f| ssh.files.iter().find(|n| n.name == f.name).unwrap_or(f).clone())
+        .collect();
+    let model = ps_io::cgmes::import(&solved).map_err(|e| e.to_string())?.model;
+    let settings = ps_io::powerstudio::from_value(doc)
+        .map_err(|e| e.to_string())?
+        .study
+        .loadflow;
+    let start: Vec<Option<(f64, f64)>> = model
+        .nodes
+        .iter()
+        .map(|n| (n.v0 > 0.0).then(|| (n.v0, n.angle0.to_radians())))
+        .collect();
+    let run = crate::LoadFlowRun {
+        settings,
+        start: start.iter().any(Option::is_some).then_some(start),
+        ..Default::default()
+    };
+    let (calc, sol, report) = crate::loadflow::solve(&model, &run);
+    if !report.converged {
+        notes.push(format!(
+            "The load flow on the new operating point did not converge ({}); the SV is its last state.",
+            report.message
+        ));
+    }
+    let state = sv_state(&model, &calc, &sol, &report);
+    let sv = ps_io::cgmes_sv::write(
+        &solved,
+        &model,
+        &state,
+        &ps_io::cgmes_sv::Options {
+            created: created.to_string(),
+            description: "PowerStudio: the load flow of the operating point in the accompanying SSH.".into(),
+        },
+    )?;
+    notes.extend(sv.notes);
+    let mut out: Vec<ps_io::files::File> = ssh
+        .files
+        .iter()
+        .map(|f| ps_io::files::File {
+            name: suffixed(&f.name, "PowerStudio"),
+            data: f.data.clone(),
+        })
+        .collect();
+    let base = ssh
+        .files
+        .first()
+        .map_or("SV.xml".to_string(), |f| f.name.replace("SSH", "SV"));
+    out.push(ps_io::files::File {
+        name: suffixed(&base, "PowerStudio"),
+        data: sv.text.into_bytes(),
+    });
+    Ok(CgmesExport {
+        files: out,
+        changes: changes.len(),
+        edits: ssh.edits,
+        converged: report.converged,
+        iterations: report.iterations,
+        notes,
+    })
+}
+
+/// A file name with a suffix before its extension, and the folders dropped.
+fn suffixed(name: &str, suffix: &str) -> String {
+    let name = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    match name.rsplit_once('.') {
+        Some((stem, ext)) => format!("{stem}_{suffix}.{ext}"),
+        None => format!("{name}_{suffix}"),
+    }
+}

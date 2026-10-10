@@ -459,7 +459,37 @@ fn lines(d: &mut Doc) {
 /// its range around it, its step and its control. The document holds one tap changer on the HV winding, so a changer
 /// with a control is preferred; a table becomes the even step between its end positions (exact at the present
 /// position), and a changer on the LV winding becomes the opposite step on the HV winding.
-fn taps(d: &mut Doc, t: &Transformer2, lv: &str) -> Value {
+/// The tap changer a transformer's document carries (one per transformer): a phase changer when it regulates and no
+/// ratio changer does, or has no ratio changer beside it; otherwise the ratio changer, a regulating one first. Its
+/// position is the document's tap position 0.
+pub fn written_tap(t: &Transformer2) -> Option<WrittenTap> {
+    let (ratio, phase, phase_first) = tap_choice(t);
+    if let (Some(p), true) = (phase, phase_first || ratio.is_none()) {
+        return Some(WrittenTap {
+            phase: true,
+            end: p.end,
+            position: p.position,
+        });
+    }
+    ratio.map(|r| WrittenTap {
+        phase: false,
+        end: r.end,
+        position: r.position,
+    })
+}
+
+/// The tap changer [`written_tap`] picks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WrittenTap {
+    /// A phase changer rather than a ratio changer.
+    pub phase: bool,
+    /// The winding it is on.
+    pub end: u8,
+    /// Its position in the model, which the document counts from.
+    pub position: i32,
+}
+
+fn tap_choice(t: &Transformer2) -> (Option<&ps_model::RatioTap>, Option<&ps_model::PhaseTap>, bool) {
     let ratio = t
         .ratio_taps
         .iter()
@@ -468,6 +498,11 @@ fn taps(d: &mut Doc, t: &Transformer2, lv: &str) -> Value {
     let phase = t.phase_tap.as_ref().filter(|p| p.high > p.low);
     let phase_first = phase.is_some_and(|p| p.control.is_some_and(|c| c.enabled))
         && !ratio.is_some_and(|r| r.control.is_some_and(|c| c.enabled));
+    (ratio, phase, phase_first)
+}
+
+fn taps(d: &mut Doc, t: &Transformer2, lv: &str) -> Value {
+    let (ratio, phase, phase_first) = tap_choice(t);
     let sign = |end: u8| if end == 2 { -1.0 } else { 1.0 };
     let span = |low: i32, high: i32, position: i32| json!({ "tapPos": 0, "tapNeutral": 0, "tapMin": low - position, "tapMax": high - position });
     if let (Some(p), true) = (phase, phase_first || ratio.is_none()) {
