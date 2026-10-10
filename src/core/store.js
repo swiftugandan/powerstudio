@@ -58,8 +58,11 @@ export class DocumentStore {
   }
 
   /**
-   * Runs an edit. The callback receives an editing API; if it throws, everything it did is rolled back.
-   * @param {string} label shown in the Undo and Redo tooltips @param {(tx: Tx) => void} fn @param {{ coalesce?: string }} [opt]
+   * Runs an edit. The callback receives an editing API; if it throws, everything it did is rolled back. Edits that
+   * share a coalescing key merge into one step while they come within a moment of each other (typing in a field);
+   * with `gesture`, they merge however long the pause (a drag is one step however slowly it moves).
+   * @param {string} label shown in the Undo and Redo tooltips @param {(tx: Tx) => void} fn
+   * @param {{ coalesce?: string, gesture?: boolean }} [opt]
    */
   transact(label, fn, opt = {}) {
     const tx = new Tx(this);
@@ -67,7 +70,7 @@ export class DocumentStore {
     catch (error) { tx.rollback(); throw error; }
     if (!tx.ops.length) return;
     const now = Date.now(), last = this.past[this.past.length - 1];
-    if (opt.coalesce && last && last.coalesce === opt.coalesce && now - last.time < COALESCE_MS) {
+    if (opt.coalesce && last && last.coalesce === opt.coalesce && (opt.gesture || now - last.time < COALESCE_MS)) {
       for (const op of tx.ops) last.ops.push(op);
       last.time = now;
     } else {
@@ -86,6 +89,16 @@ export class DocumentStore {
   get canRedo() { return this.future.length > 0; }
   get undoLabel() { return this.past[this.past.length - 1]?.label ?? ''; }
   get redoLabel() { return this.future[this.future.length - 1]?.label ?? ''; }
+
+  /** Undoes the last step if it has this coalescing key, and forgets it: a cancelled drag leaves no trace in the
+   * history. @param {string} coalesce @returns {boolean} whether there was such a step */
+  revert(coalesce) {
+    const last = this.past[this.past.length - 1];
+    if (!last || last.coalesce !== coalesce) return false;
+    this.undo();
+    this.future.pop();
+    return true;
+  }
 
   undo() {
     const t = this.past.pop();

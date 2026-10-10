@@ -167,24 +167,67 @@ export function hitTest(elements, p, zoom, selection, index) {
   return null;
 }
 
-/** Elements whose anchor lies inside a world rectangle (marquee selection). @param {Element[]} elements
- * @param {{ x0: number, y0: number, x1: number, y1: number }} r @returns {string[]} */
-export function inRect(elements, r) {
+/**
+ * Every element whose body lies under a point, topmost first (symbols, then busbars, then branches), for cycling
+ * through stacked elements. @param {Element[]} elements @param {{ x: number, y: number }} p @param {number} zoom
+ * @param {HitIndex} [index] @returns {string[]}
+ */
+export function hitAll(elements, p, zoom, index) {
+  const tol = 6 / zoom, out = [];
+  const buses = index?.buses ?? new Map(elements.filter(e => e.cls === 'bus').map(b => [b.id, b]));
+  if (index) elements = index.near(p, tol + 16);
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+    if (el.cls === 'bus' || el.cls === 'line' || el.cls === 'trafo') continue;
+    const b = buses.get(/** @type {string} */ (el.bus));
+    if (!b) continue;
+    const s = stub(el, b);
+    if (Math.hypot(p.x - s.centre.x, p.y - s.centre.y) < SYMBOL + tol || distToSegment(p, s.from, s.to) < tol) out.push(el.id);
+  }
+  for (const b of index ? elements.filter(e => e.cls === 'bus') : buses.values()) {
+    const g = bar(b);
+    if (distToSegment(p, { x: g.x0, y: g.y0 }, { x: g.x1, y: g.y1 }) < BAR_WIDTH / 2 + tol) out.push(b.id);
+  }
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+    if (el.cls !== 'line' && el.cls !== 'trafo') continue;
+    const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
+    if (!a || !b) continue;
+    const pts = route(el, a, b);
+    for (let j = 0; j < pts.length - 1; j++) if (distToSegment(p, pts[j], pts[j + 1]) < tol + 2) { out.push(el.id); break; }
+  }
+  return out;
+}
+
+/**
+ * The elements a marquee selects: dragged rightwards (a window), those lying wholly inside the rectangle; dragged
+ * leftwards (crossing), those it touches at all. Routes, bars and stubs are orthogonal, so a segment's bounding box is
+ * the segment. @param {Element[]} elements @param {{ x0: number, y0: number, x1: number, y1: number }} r
+ * @param {boolean} [crossing] @returns {string[]}
+ */
+export function inRect(elements, r, crossing = false) {
   const x0 = Math.min(r.x0, r.x1), x1 = Math.max(r.x0, r.x1), y0 = Math.min(r.y0, r.y1), y1 = Math.max(r.y0, r.y1);
-  const inside = (/** @type {{ x: number, y: number }} */ p) => p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1;
+  /** Whether a box is inside the rectangle (window) or touches it (crossing). @param {number} a0 @param {number} b0 @param {number} a1 @param {number} b1 */
+  const takes = (a0, b0, a1, b1) => {
+    const lx = Math.min(a0, a1), hx = Math.max(a0, a1), ly = Math.min(b0, b1), hy = Math.max(b0, b1);
+    return crossing ? lx <= x1 && hx >= x0 && ly <= y1 && hy >= y0 : lx >= x0 && hx <= x1 && ly >= y0 && hy <= y1;
+  };
   const buses = new Map(elements.filter(e => e.cls === 'bus').map(b => [b.id, b]));
   const out = [];
   for (const el of elements) {
-    if (el.cls === 'bus') { if (inside({ x: /** @type {number} */ (el.x), y: /** @type {number} */ (el.y) })) out.push(el.id); continue; }
+    if (el.cls === 'bus') { const g = bar(el); if (takes(g.x0, g.y0, g.x1, g.y1)) out.push(el.id); continue; }
     if (el.cls === 'line' || el.cls === 'trafo') {
       const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
       if (!a || !b) continue;
-      const pts = route(el, a, b);
-      if (pts.every(inside)) out.push(el.id);
+      const pts = route(el, a, b), parts = pts.slice(1).map((q, i) => takes(pts[i].x, pts[i].y, q.x, q.y));
+      if (crossing ? parts.some(Boolean) : parts.every(Boolean)) out.push(el.id);
       continue;
     }
     const b = buses.get(/** @type {string} */ (el.bus));
-    if (b && inside(stub(el, b).centre)) out.push(el.id);
+    if (!b) continue;
+    const s = stub(el, b), c = s.centre;
+    const stem = takes(s.from.x, s.from.y, s.to.x, s.to.y), symbol = takes(c.x - SYMBOL, c.y - SYMBOL, c.x + SYMBOL, c.y + SYMBOL);
+    if (crossing ? stem || symbol : stem && symbol) out.push(el.id);
   }
   return out;
 }

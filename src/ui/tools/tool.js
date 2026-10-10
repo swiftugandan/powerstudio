@@ -11,6 +11,14 @@
 
 /** A drag under way. */
 export class Gesture {
+  constructor() {
+    /** What the status bar shows while the drag runs (the movement, a length). */
+    this.status = '';
+  }
+
+  /** Escape: undoes what the drag did. */
+  cancel() {}
+
   /** @param {Pointer} _e */
   move(_e) {}
   /** @param {Pointer} _e */
@@ -34,6 +42,9 @@ export class Tool {
 
   /** A press; returns the gesture it starts, if any. @param {Pointer} _e @returns {Gesture | null} */
   down(_e) { return null; }
+
+  /** The press ended (after its gesture, if any). @param {Pointer} _e */
+  up(_e) {}
 
   /** The pointer moved with no gesture under way. @param {Pointer} _e */
   hover(_e) { this.vp.invalidate('overlay'); }

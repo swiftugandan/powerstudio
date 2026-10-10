@@ -209,6 +209,8 @@ export class WebGPURenderer {
     /** Held for the renderer's lifetime so the adapter (and the instance behind it) is not collected. */
     this.adapter = adapter;
     this.backend = /** @type {const} */ ('webgpu');
+    /** The background grid's step in world units: the snapping grid. */
+    this.gridStep = 20;
     this.label = 'WebGPU';
     this.detail = detail;
     this.canvas = canvas;
@@ -391,7 +393,7 @@ export class WebGPURenderer {
   /** @param {Camera} camera @param {Palette} palette @param {number} dpr @param {GPUTextureView} resolveTarget */
   encode(camera, palette, dpr, resolveTarget) {
     const w = this.canvas.width, h = this.canvas.height;
-    this.device.queue.writeBuffer(this.uniform, 0, new Float32Array([w, h, camera.cx, camera.cy, camera.zoom * dpr, dpr, 20, 0, ...palette.bg, ...palette.grid]));
+    this.device.queue.writeBuffer(this.uniform, 0, new Float32Array([w, h, camera.cx, camera.cy, camera.zoom * dpr, dpr, this.gridStep, 0, ...palette.bg, ...palette.grid]));
     const encoder = this.device.createCommandEncoder();
     const pass = encoder.beginRenderPass({ colorAttachments: [{
       view: /** @type {GPUTexture} */ (this.msaa).createView(), resolveTarget,

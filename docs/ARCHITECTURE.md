@@ -147,7 +147,12 @@ input to the active tool as normalised events (world and screen position, modifi
 decides what a press does and returns a gesture (`gestures.js`: pan, marquee, move, slide, resize, bend, reconnect,
 label), which receives the movements and the release; each edit gesture writes through `store.transact` with one
 coalescing key, so a whole drag is one step in the history. Panning with the middle button or Space, pinching and the
-wheel work the same in every tool.
+wheel work the same in every tool. `snap.js` (no DOM) snaps what a gesture proposes: to the lines of the busbars on
+screen (start, centre and end on either axis, within six screen pixels), to points a gesture prefers (a branch end in
+line with the branch's other end), or to the grid, and returns the guides the overlay draws; Alt turns it off. A
+cancelled drag reverts its own step (`store.revert`), and a drag's steps merge however long it pauses.
+`core/diagram-ops.js` holds the Arrange tab's operations (align, distribute, same length, rotate, flip, spread
+connections), each returning field changes the app applies as one transaction.
 
 **UI (`src/ui/`, `src/app.js`).** `App` owns the store, the selection, the active tool, calculation results and
 preferences, and defines every command. Ribbon buttons, palette entries, context menus and keyboard shortcuts all run

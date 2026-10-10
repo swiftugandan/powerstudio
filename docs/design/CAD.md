@@ -1,6 +1,6 @@
 # Diagram editing to professional CAD standard
 
-Status: approved 2026-10-10; C0 and C1 done locally on branch `cad` (docs/TEST-REPORT.md), C2 to C4 to follow.
+Status: approved 2026-10-10; C0 to C2 done locally on branch `cad` (docs/TEST-REPORT.md), C3 and C4 to follow.
 Follows release 1.0.0 (docs/design/NATIONAL-GRADE.md); planned as release 1.1.
 
 ## 1. Summary
@@ -238,7 +238,8 @@ layer, so they never rebuild the scene. While dragging, the status bar shows the
 
 ### 6.3 Arranging a selection
 
-A new **Arrange** group on the Home tab, also in the context menu for a selection of two or more busbars:
+A new **Arrange** tab (the Home tab had no room for a group this size, and the commands belong together), also in the
+context menu, which offers those that apply to the selection:
 
 | Command | Key | Does |
 | --- | --- | --- |
@@ -247,9 +248,10 @@ A new **Arrange** group on the Home tab, also in the context menu for a selectio
 | Same length | — | Every busbar takes the first selected one's length |
 | Rotate | R | Switches a busbar between horizontal and vertical about its centre; its connections keep their positions along it |
 | Flip side | X | Moves selected machines, loads and shunts to the other side of their bar |
-| Arrange connections | — | Spreads the selected busbars' connections evenly (today's `arrangeConnections`, for a selection) |
+| Spread connections | — | Spreads the selected busbars' connections evenly (`arrangeConnections`, for a selection) |
 
-Each is one transaction in `diagram-ops.js`. The existing whole-diagram Arrange stays.
+Each is one transaction in `diagram-ops.js`. The existing whole-diagram Arrange stays, renamed Lay out diagram so it no
+longer shares a name with the tab.
 
 ### 6.4 Moving
 
@@ -300,8 +302,8 @@ where the whole drawing fits on screen anyway.
 
 | Where | Adds |
 | --- | --- |
-| Home tab | Arrange group: align (menu), distribute (menu), same length, rotate, flip side, arrange connections, route around obstacles, straighten route; Select group: select connected, same class, voltage level |
-| View tab | Annotations: Disentangle labels, Reset label positions; Grid: step 10, 20, 40; Navigate: zoom to selection; Panels: overview map |
+| Arrange tab | Select: select connected, same kind, voltage level; Align: six commands; Spacing: distribute both ways, same length; Turn: rotate, flip side; Connections: spread connections, lay out diagram; Routes (C3): route around obstacles, straighten route |
+| View tab | Labels: Disentangle labels, Reset label positions; Grid: step 10, 20, 40; Navigate: zoom to selection; Panels: overview map |
 | Context menu | On a label: Reset label position. On a selection: the Arrange commands that apply; zoom to selection |
 | Inspector, Diagram group | Labels moved, with Reset; route kind and bends, with Straighten |
 | Status bar | Movement and length while dragging; snapping state |

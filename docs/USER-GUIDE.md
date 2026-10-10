@@ -33,12 +33,33 @@ Choose a tool on the Insert tab, or press its key:
 | Load | D | A load |
 | Shunt | C | A capacitor bank or reactor |
 
-Select (V) moves and selects; Pan (H), or holding Space, moves the view. Escape ends a tool. Drag a connection along
-its busbar to move it; drag a branch's middle to route it. Arrange (Home tab) lays the whole diagram out again from
-the network's topology, as one undoable step.
+Select (V) moves and selects; Pan (H), or holding Space, moves the view. Escape ends a tool, and during a drag puts
+everything back as it was. Drag a connection along its busbar to move it; drag a branch's middle to route it.
 
-Selected elements can be cut, copied, pasted, duplicated, deleted, nudged with the arrow keys and switched in or out of
-service (Shift+O). Every change can be undone (Ctrl+Z) and redone (Ctrl+Shift+Z).
+## Working on the diagram
+
+**Snapping.** A busbar you drag lines up with the busbars on screen: when its start, centre or end comes within a few
+pixels of another bar's, it snaps there and a dashed guide shows the line. Otherwise it lands on the grid, whose step
+you choose on the View tab (10, 20 or 40 units; the dots follow it). A connection dragged along its busbar snaps to the
+bar's centre, and a branch end into line with the branch's other end so the route runs straight. A new busbar lines
+up the same way. Hold Alt to place anything freely. While you drag, the status bar shows how far you have moved, or
+the busbar's length.
+
+**Selecting.** Click an element, or Shift-click (Ctrl-click) to add to the selection. A marquee dragged to the right
+selects what lies wholly inside it; dragged to the left (drawn dashed) it selects whatever it touches. Where elements
+lie on top of each other, click again at the same spot to select the one beneath. The Arrange tab adds what relates to
+the selection: Select connected (a busbar's connections, or an element's busbars), Select same kind, and Select
+voltage level.
+
+**Arranging.** The Arrange tab lines busbars up with the first one you selected (left, centre, right, top, middle,
+bottom), spaces three or more evenly (Distribute), gives them the first one's length, turns them between horizontal
+and vertical (Rotate, R), moves machines, loads and shunts to the other side of their busbar (Flip side, X), and spaces
+the connections of the selected busbars evenly (Spread connections). Lay out diagram lays the whole diagram out again
+from the network's topology. Each is one step you can undo; right-click a selection for the ones that apply.
+
+Selected elements can be cut, copied, pasted, duplicated, deleted, moved a grid step at a time with the arrow keys
+(five steps with Shift) and switched in or out of service (Shift+O). Every change can be undone (Ctrl+Z) and redone
+(Ctrl+Shift+Z).
 
 ## Element data
 
@@ -160,6 +181,9 @@ Press ? (or open Help, Keyboard shortcuts) for the full list. The ones used most
 | Ctrl+O, Ctrl+Shift+O, Ctrl+Shift+S | Open, import, export |
 | F | Fit the diagram |
 | Shift+T | Switch light and dark |
+| R, X | Rotate the selected busbars, flip the selected elements' side |
+| Shift+L | Disentangle labels on or off |
+| Alt (while dragging) | Place freely, without snapping |
 
 On a Mac, ⌘ stands for Ctrl. Tab moves through the panels; in the results tabs, the arrow keys move between tabs.
 

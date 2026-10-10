@@ -34,10 +34,18 @@ export const TABS = [
     { label: 'Dynamics', items: [{ cmd: 'calc.rms', size: 'large' }, { stack: ['rms.events', 'calc.cancel'] }] },
     { label: 'Study case', items: [{ cmd: 'study.settings', size: 'large' }, { stack: ['results.clear', 'results.csv'] }] },
   ] },
+  { id: 'arrange', label: 'Arrange', groups: [
+    { label: 'Select', items: [{ stack: ['select.connected', 'select.sameClass', 'select.voltageLevel'] }] },
+    { label: 'Align', items: [{ stack: ['arrange.alignLeft', 'arrange.alignCentre', 'arrange.alignRight'] }, { stack: ['arrange.alignTop', 'arrange.alignMiddle', 'arrange.alignBottom'] }] },
+    { label: 'Spacing', items: [{ stack: ['arrange.distributeH', 'arrange.distributeV', 'arrange.sameLength'] }] },
+    { label: 'Turn', items: [{ cmd: 'arrange.rotate', size: 'large' }, { cmd: 'arrange.flip', size: 'large' }] },
+    { label: 'Connections', items: [{ cmd: 'arrange.spread', size: 'large' }, { cmd: 'layout.arrange', size: 'large' }] },
+  ] },
   { id: 'view', label: 'View', groups: [
     { label: 'Navigate', items: [{ cmd: 'view.fit', size: 'large' }, { stack: ['view.zoomIn', 'view.zoomOut'] }] },
     { label: 'Annotations', items: [{ stack: ['view.boxes', 'view.names', 'view.branchNames'] }] },
     { label: 'Labels', items: [{ stack: ['view.disentangle', 'labels.reset'] }] },
+    { label: 'Grid', items: [{ stack: ['view.grid10', 'view.grid20', 'view.grid40'] }] },
     { label: 'Colouring', items: [{ stack: ['view.colourResults', 'view.colourVoltage'] }] },
     { label: 'Panels', items: [{ stack: ['view.tree', 'view.inspector', 'view.dock'] }] },
     { label: 'Theme', items: [{ stack: ['view.themeSystem', 'view.themeLight', 'view.themeDark'] }] },

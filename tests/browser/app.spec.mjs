@@ -159,8 +159,8 @@ test('arranges the diagram in the worker as one undoable step', async ({ page })
   await page.locator('#inspector-panel summary', { hasText: 'Diagram' }).click();
   const x = page.locator('#inspector-panel input[data-key="x"]');
   await expect(x).toHaveValue('-280');
-  await palette(page, 'Arrange');
-  await expect(page.locator('#app')).toContainText('Arranged the diagram.');
+  await palette(page, 'Lay out diagram');
+  await expect(page.locator('#app')).toContainText('Laid out the diagram.');
   await expect(x).not.toHaveValue('-280');
   await page.locator('#viewport canvas').focus();
   await page.keyboard.press('ControlOrMeta+Z');
@@ -282,12 +282,102 @@ test('drags a result box to a place of its own, undoes it, and lets the diagram 
 
 test('shows every row and label of the ribbon on every tab', async ({ page }) => {
   await open(page);
-  for (const tab of ['Home', 'Insert', 'Calculate', 'View', 'Help']) {
+  for (const tab of ['Home', 'Insert', 'Calculate', 'Arrange', 'View', 'Help']) {
     await page.getByRole('tab', { name: tab, exact: true }).click();
     const panels = await page.evaluate(() => [...document.querySelectorAll('.ribbon-panel')].filter(p => /** @type {HTMLElement} */ (p).offsetParent)
       .map(p => ({ client: p.clientHeight, scroll: p.scrollHeight })));
     for (const p of panels) expect(p.scroll, tab).toBeLessThanOrEqual(p.client);
   }
+});
+
+/** Opens the IEEE 14-bus sample zoomed in on the diagram; returns helpers that aim at and drag diagram points.
+ * @param {import('@playwright/test').Page} page */
+async function onDiagram(page) {
+  await open(page);
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('F');
+  await page.keyboard.press('=');
+  /** @param {number} x @param {number} y */
+  const at = (x, y) => page.evaluate(([px, py]) => /** @type {any} */ (window).powerstudio.toPage(px, py), [x, y]);
+  /** @param {{ x: number, y: number }} from @param {{ x: number, y: number }} to @param {() => Promise<void>} [midway] */
+  const drag = async (from, to, midway) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 8 });
+    if (midway) await midway();
+    await page.mouse.up();
+  };
+  const field = (/** @type {string} */ key) => page.locator(`#inspector-panel input[data-key="${key}"]`);
+  const select = async (/** @type {string} */ id) => { await page.locator(`.tree-row[data-id="${id}"]`).click(); await page.locator('#inspector-panel summary', { hasText: 'Diagram' }).click(); };
+  return { at, drag, field, select };
+}
+
+test('snaps a dragged busbar into line with another, places it freely with Alt, and Escape cancels a drag', async ({ page }) => {
+  const { at, drag, field, select } = await onDiagram(page);
+  // Bus 3 (centre x −420, length 200) dragged left by 208: its start comes to 2 units of Bus 2's start (x −730) and
+  // lines up with it, where the grid alone would have put the centre at −620.
+  await select('B3');
+  await drag(await at(-400, 360), await at(-608, 360), async () => { await expect(page.locator('.statusbar')).toContainText('Δx −210'); });
+  await expect(field('x')).toHaveValue('-630');
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(field('x')).toHaveValue('-420');
+  await page.keyboard.down('Alt');
+  await drag(await at(-400, 360), await at(-608, 360));
+  await page.keyboard.up('Alt');
+  await expect(field('x')).toHaveValue('-628');
+  await page.keyboard.press('ControlOrMeta+Z');
+  // Escape during a drag puts the busbar back and leaves nothing to redo.
+  await drag(await at(-400, 360), await at(-300, 420), async () => { await page.keyboard.press('Escape'); });
+  await expect(field('x')).toHaveValue('-420');
+  await expect(field('y')).toHaveValue('360');
+});
+
+test('aligns and distributes busbars from the Arrange tab, each as one undoable step', async ({ page }) => {
+  const { field, select } = await onDiagram(page);
+  // Bus 4 first: the others line up with it.
+  await page.locator('.tree-row[data-id="B4"]').click();
+  await page.locator('.tree-row[data-id="B2"]').click({ modifiers: ['ControlOrMeta'] });
+  await page.locator('.tree-row[data-id="B3"]').click({ modifiers: ['ControlOrMeta'] });
+  await page.getByRole('tab', { name: 'Arrange', exact: true }).click();
+  await page.locator('[data-cmd="arrange.alignCentre"]').click();
+  await select('B2');
+  await expect(field('x')).toHaveValue('-280');
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(field('x')).toHaveValue('-600');
+  // Bus 5 (y −160), Bus 4 (140) and Bus 3 (360): distributed, Bus 4 sits halfway.
+  await page.locator('.tree-row[data-id="B5"]').click();
+  await page.locator('.tree-row[data-id="B4"]').click({ modifiers: ['ControlOrMeta'] });
+  await page.locator('.tree-row[data-id="B3"]').click({ modifiers: ['ControlOrMeta'] });
+  await page.locator('[data-cmd="arrange.distributeV"]').click();
+  await select('B4');
+  await expect(field('y')).toHaveValue('100');
+  // Rotate turns it vertical; the grid step sets how far the arrow keys move it.
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('R');
+  await expect(page.locator('#inspector-panel select[data-key="orient"]')).toHaveValue('v');
+  await page.getByRole('tab', { name: 'View', exact: true }).click();
+  await page.locator('[data-cmd="view.grid40"]').click();
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(field('x')).toHaveValue('-240');
+});
+
+test('selects by window or crossing, and clicking again where elements stack reaches the one beneath', async ({ page }) => {
+  const { at, drag } = await onDiagram(page);
+  const selected = (/** @type {string} */ id) => page.locator(`.tree-row[data-id="${id}"]`);
+  // Bus 4 runs from x −400 to −160 at y 140. Rightwards over its right half: not wholly inside, not selected.
+  await drag(await at(-240, 120), await at(-150, 150));
+  await expect(selected('B4')).toHaveAttribute('aria-selected', 'false');
+  // Leftwards over the same area: it touches the bar, so the bar is selected.
+  await drag(await at(-150, 120), await at(-240, 150));
+  await expect(selected('B4')).toHaveAttribute('aria-selected', 'true');
+  // Load 4's stub leaves Bus 4 at x −256: the first click takes the load, the second the busbar under it.
+  const spot = await at(-256, 143);
+  await page.mouse.click(spot.x, spot.y);
+  await expect(selected('D4')).toHaveAttribute('aria-selected', 'true');
+  await page.mouse.click(spot.x, spot.y);
+  await expect(selected('B4')).toHaveAttribute('aria-selected', 'true');
+  await expect(selected('D4')).toHaveAttribute('aria-selected', 'false');
 });
 
 test('keeps work in the browser across a reload', async ({ page }) => {

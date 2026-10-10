@@ -4,6 +4,19 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## Precision editing, CAD phase C2 (2026-10-10, local, branch `cad`)
+
+| Check | Result |
+| --- | --- |
+| `tests/arrange.test.mjs`: align on every edge and centre, distribute, same length, rotate, flip, spread connections; snapping to lines, to the grid, at another zoom and with Alt; window and crossing selection; stacking order; a paused drag as one step and Escape's revert | 9 passed |
+| Browser: snap a busbar into line (−630, where the grid alone gives −620), Alt (−628), the status bar's Δx, Escape during a drag; align, distribute, rotate and a 40-unit grid from the Arrange and View tabs; window and crossing selection; click cycling | Passed in all four projects |
+
+Found on the way and fixed: a drag paused for more than 1.2 s became two steps in the history (edits merged only
+within that window, which suits typing but not dragging); guides drawn one world unit wide vanished when zoomed out;
+and a load flow the user started while a recalculation on edit was running was dropped, because the command was
+disabled until it ended (the run comparison test failed in Firefox under load). A calculation the user starts now
+stops the recalculation and runs; the test passed 48 of 48 times in four projects at twelve workers.
+
 ## Diagram labels, CAD phases C0 and C1 (2026-10-10, local, branch `cad`)
 
 Same environment as phase 7. Local runs only; nothing pushed.

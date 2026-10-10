@@ -3,7 +3,7 @@
 
 import { Tool } from './tool.js';
 import { PanGesture, MarqueeGesture, MoveGesture, SlideGesture, ResizeGesture, BendGesture, ReconnectGesture, LabelGesture } from './gestures.js';
-import { hitTest } from '../../render/hittest.js';
+import { hitTest, hitAll } from '../../render/hittest.js';
 import { route, branchKeys, bendHandle } from '../../render/geometry.js';
 
 /**
@@ -12,8 +12,26 @@ import { route, branchKeys, bendHandle } from '../../render/geometry.js';
  */
 
 export class SelectTool extends Tool {
+  /** @param {import('../viewport.js').Viewport} vp */
+  constructor(vp) {
+    super(vp);
+    /** The last press on an element that was already the whole selection: clicking there again without moving
+     * selects the next element beneath. @type {{ sx: number, sy: number, id: string } | null} */
+    this.again = null;
+  }
+
   /** @override */
   get mode() { return 'select'; }
+
+  /** @override @param {Pointer} e */
+  up(e) {
+    const a = this.again, vp = this.vp, app = vp.app;
+    this.again = null;
+    if (!a || Math.hypot(e.sx - a.sx, e.sy - a.sy) > 3) return;
+    const stack = hitAll(app.store.doc.elements, e.p, vp.camera.zoom, vp.index());
+    const i = stack.indexOf(a.id);
+    if (i >= 0 && stack.length > 1) app.setSelection([stack[(i + 1) % stack.length]]);
+  }
 
   /** @override @param {Pointer} e */
   down(e) {
@@ -33,6 +51,7 @@ export class SelectTool extends Tool {
     }
     if (hit.part === 'body') {
       if (e.shift || e.mod) { app.toggleSelection(hit.id); return null; }
+      if (app.selection.size === 1 && app.selection.has(hit.id)) this.again = { sx: e.sx, sy: e.sy, id: hit.id };
       if (!app.selection.has(hit.id)) app.setSelection([hit.id]);
     }
     const el = /** @type {Element} */ (app.store.get(hit.id));
@@ -47,7 +66,7 @@ export class SelectTool extends Tool {
       const axis = this.bendAxis(el);
       return app.selection.size === 1 && axis ? new BendGesture(vp, el, axis, e.p) : new MoveGesture(vp, e.p);
     }
-    return new MoveGesture(vp, e.p);
+    return new MoveGesture(vp, e.p, el.id);
   }
 
   /** The axis a branch's middle segment moves on, or null for a route without one. @param {Element} el */

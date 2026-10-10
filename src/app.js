@@ -5,6 +5,7 @@ import { DocumentStore } from './core/store.js';
 import { emptyDocument, nextId, normalizeSteps, validateForCalculation, busesOf } from './core/document.js';
 import { makeElement, CLASSES } from './core/catalog.js';
 import { snap } from './core/layout.js';
+import { align, distribute, sameLength, rotate, flip, spreadConnections } from './core/diagram-ops.js';
 import { SAMPLES } from './samples/index.js';
 import { projectFromDocument, projectFromParts, composeSteps, route, partTexts, allParts, activeCase, PROJECT_FORMAT, projectFileHead, projectFromFile } from './core/project.js';
 import { Commands } from './ui/commands.js';
@@ -81,6 +82,10 @@ export class App {
     this.networkRevision = 0;
     /** @type {CalcKind | ''} */
     this.running = '';
+    /** Whether the running calculation is a recalculation on edit, which a calculation the user starts replaces. */
+    this.runningAuto = false;
+    /** The running calculation, to wait for. @type {Promise<void> | null} */
+    this.current = null;
     /** An edit came during a calculation: recalculate the load flow once it ends. */
     this.autoPending = false;
     /** @type {{ elements: Element[] } | null} */
@@ -811,20 +816,20 @@ export class App {
     const revision = this.store.revision, unchanged = () => this.store.revision === revision;
     this.arranging = true;
     this.commands.changed();
-    this.setStatusMessage('Arranging the diagram…');
+    this.setStatusMessage('Laying out the diagram…');
     try {
       const drawing = await this.engine.layout(this.store.doc, unchanged);
-      if (!drawing || !unchanged()) { toast('info', 'The network changed while it was being arranged. Arrange it again to lay out the new state.'); return; }
-      this.store.transact('Arrange diagram', tx => {
+      if (!drawing || !unchanged()) { toast('info', 'The network changed while it was being laid out. Lay it out again for the new state.'); return; }
+      this.store.transact('Lay out diagram', tx => {
         for (const d of drawing) {
           const el = this.store.get(/** @type {string} */ (d.id));
           if (el) for (const [k, v] of Object.entries(d)) if (k !== 'id' && el[k] !== v) tx.set(el.id, k, v);
         }
       });
       this.viewport.fit();
-      this.setStatusMessage('Arranged the diagram.');
+      this.setStatusMessage('Laid out the diagram.');
     } catch (error) {
-      this.log('error', `Could not arrange the diagram: ${error instanceof Error ? error.message : error}`);
+      this.log('error', `Could not lay out the diagram: ${error instanceof Error ? error.message : error}`);
     } finally {
       this.arranging = false;
       this.commands.changed();
@@ -833,16 +838,74 @@ export class App {
   }
 
   /** @param {number} dx @param {number} dy */
+  /** Moves the selected busbars by grid steps. @param {number} dx @param {number} dy */
   nudge(dx, dy) {
-    const buses = [...this.selection].map(id => this.store.get(id)).filter(e => e?.cls === 'bus');
+    const buses = this.selectedOf('bus'), g = this.prefs.grid;
     if (!buses.length) return;
-    this.store.transact('Move busbars', tx => { for (const b of buses) { const e = /** @type {Element} */ (b); tx.set(e.id, 'x', snap(/** @type {number} */ (e.x) + dx)); tx.set(e.id, 'y', snap(/** @type {number} */ (e.y) + dy)); } }, { coalesce: 'nudge' });
+    const step = (/** @type {number} */ v, /** @type {number} */ d) => Math.round(v / g) * g + d * g;
+    this.store.transact('Move busbars', tx => { for (const e of buses) { tx.set(e.id, 'x', step(/** @type {number} */ (e.x), dx)); tx.set(e.id, 'y', step(/** @type {number} */ (e.y), dy)); } }, { coalesce: 'nudge' });
+  }
+
+  /** The selected elements of some classes, in the order they were selected. @param {...string} classes @returns {Element[]} */
+  selectedOf(...classes) {
+    const out = [];
+    for (const id of this.selection) { const el = this.store.get(id); if (el && classes.includes(el.cls)) out.push(el); }
+    return out;
+  }
+
+  /** Applies a diagram operation's changes as one step. @param {string} label @param {Array<[string, string, unknown]>} changes */
+  arrangeSelection(label, changes) {
+    if (!changes.length) { this.setStatusMessage(`${label}: nothing to change.`); return; }
+    this.tryEdit(label, () => this.store.transact(label, tx => { for (const [id, key, value] of changes) tx.set(id, key, value); }));
+  }
+
+  /**
+   * Selects what relates to the selection: what is connected to it (a busbar's connections, an element's busbars),
+   * every element of the same kinds, or every element of the same voltage levels. @param {'connected' | 'class' | 'level'} how
+   */
+  selectRelated(how) {
+    const els = [...this.selection].map(id => this.store.get(id)).filter(e => !!e).map(e => /** @type {Element} */ (e));
+    const all = this.store.doc.elements;
+    /** The busbars an element sits on. @param {Element} e */
+    const busesOfEl = e => (e.cls === 'bus' ? [e.id] : CLASSES[e.cls].ends.map(k => /** @type {string} */ (e[k])).filter(Boolean));
+    /** @type {Set<string>} */
+    const ids = new Set(els.map(e => e.id));
+    if (how === 'connected') {
+      const buses = new Set(els.filter(e => e.cls === 'bus').map(e => e.id));
+      for (const e of els) if (e.cls !== 'bus') for (const b of busesOfEl(e)) ids.add(b);
+      for (const e of all) if (e.cls !== 'bus' && busesOfEl(e).some(b => buses.has(b))) ids.add(e.id);
+    } else if (how === 'class') {
+      const classes = new Set(els.map(e => e.cls));
+      for (const e of all) if (classes.has(e.cls)) ids.add(e.id);
+    } else {
+      const vn = new Map(all.filter(e => e.cls === 'bus').map(b => [b.id, b.vn]));
+      const levels = new Set(els.flatMap(e => busesOfEl(e).map(b => vn.get(b))));
+      for (const e of all) { const at = busesOfEl(e).map(b => vn.get(b)); if (at.length && at.every(v => levels.has(v))) ids.add(e.id); }
+    }
+    this.setSelection([...ids]);
+    this.setStatusMessage(`Selected ${ids.size} element${ids.size === 1 ? '' : 's'}.`);
   }
 
   // ----- Calculations -----
 
-  /** @param {CalcKind} kind @param {{ auto?: boolean }} [opt] */
+  /**
+   * Runs a calculation. One the user starts while a recalculation on edit is running stops that recalculation and
+   * runs instead, so the user's command is never dropped. @param {CalcKind} kind @param {{ auto?: boolean }} [opt]
+   */
   async calc(kind, opt = {}) {
+    if (this.running) {
+      if (opt.auto || !this.runningAuto) return;
+      this.engine.cancel();
+      await this.current;
+      if (this.running) return;
+    }
+    this.runningAuto = !!opt.auto;
+    this.current = this.runCalc(kind, opt);
+    return this.current;
+  }
+
+  /** @param {CalcKind} kind @param {{ auto?: boolean }} opt */
+  async runCalc(kind, opt) {
     const doc = this.store.doc;
     const problems = validateForCalculation(doc, kind);
     if (problems.length) {
@@ -892,7 +955,8 @@ export class App {
       this.inspector.schedule();
       this.tree.render();
     } catch (error) {
-      if (error instanceof CancelledError) this.log('warn', `${CALC_LABEL[kind]} cancelled after ${duration(performance.now() - t0)}.`);
+      // A recalculation on edit is cancelled only to make way for a calculation the user starts: no news.
+      if (error instanceof CancelledError) { if (!opt.auto) this.log('warn', `${CALC_LABEL[kind]} cancelled after ${duration(performance.now() - t0)}.`); }
       else {
         const msg = error instanceof Error ? error.message : String(error);
         this.log('error', `${CALC_LABEL[kind]} failed: ${msg}`);
@@ -1139,7 +1203,8 @@ export class App {
   setStatusMessage(text) { if (this.status) { this.status.message.textContent = text; this.status.message.title = text; } }
 
   /** @param {{ x: number, y: number } | null} p */
-  statusPointer(p) { if (this.status) this.status.pointer.textContent = p ? `x ${Math.round(p.x)}  y ${Math.round(p.y)}` : '—'; }
+  /** The pointer's position in the status bar, and while dragging what the drag does. @param {{ x: number, y: number } | null} p @param {string} [note] */
+  statusPointer(p, note = '') { if (this.status) this.status.pointer.textContent = p ? `x ${Math.round(p.x)}  y ${Math.round(p.y)}${note ? `  ·  ${note}` : ''}` : '—'; }
 
   /** @param {string} label @param {string} backend @param {string} title */
   statusBackend(label, backend, title) {
@@ -1197,12 +1262,18 @@ export class App {
         items.push({ label: 'Add fault to simulation', icon: 'rms', run: () => this.addRmsFault(el.id) });
       }
       if (el.cls !== 'bus') items.push({ label: el.inService === false ? 'Switch into service' : 'Switch out of service', icon: 'power', hint: 'Shift+O', run: () => this.toggleService() });
+      // The arrange commands that apply to the selection.
+      const arranging = ['arrange.alignCentre', 'arrange.alignMiddle', 'arrange.distributeH', 'arrange.distributeV', 'arrange.sameLength', 'arrange.rotate', 'arrange.flip', 'arrange.spread', 'select.connected']
+        .map(id => this.commands.get(id)).filter(/** @returns {cmd is import('./ui/commands.js').Command} */ cmd => !!cmd && (cmd.enabled?.() ?? true));
+      if (arranging.length) {
+        items.push('separator', ...arranging.map(cmd => ({ label: cmd.label, icon: cmd.icon, hint: cmd.keys?.[0], run: () => this.commands.run(cmd.id) })));
+      }
       items.push('separator', { label: 'Copy', icon: 'copy', run: () => this.commands.run('edit.copy') }, { label: 'Duplicate', icon: 'duplicate', run: () => this.commands.run('edit.duplicate') },
         'separator', { label: 'Delete', icon: 'delete', danger: true, run: () => this.deleteSelection() });
     } else {
       items.push({ label: 'Paste', icon: 'paste', disabled: !this.clipboard, run: () => this.paste() });
       if (at) items.push({ label: 'Add busbar here', icon: 'bus', run: () => this.addBus(snap(at.x), snap(at.y)) });
-      items.push('separator', { label: 'Fit diagram', icon: 'fit', run: () => this.viewport.fit() }, { label: 'Arrange automatically', icon: 'layout', run: () => this.commands.run('layout.arrange') });
+      items.push('separator', { label: 'Fit diagram', icon: 'fit', run: () => this.viewport.fit() }, { label: 'Lay out diagram', icon: 'layout', run: () => this.commands.run('layout.arrange') });
     }
     contextMenu(x, y, items);
   }
@@ -1226,8 +1297,9 @@ export class App {
   registerCommands() {
     const c = this.commands;
     const sel = () => this.selection.size > 0;
-    // The first worker does one thing at a time: a calculation or an Arrange.
-    const idle = () => !this.running && !this.arranging;
+    // The first worker does one thing at a time: a calculation or a layout. A recalculation on edit gives way to a
+    // calculation the user starts.
+    const idle = () => (!this.running || this.runningAuto) && !this.arranging;
     const tool = (/** @type {Tool} */ t, /** @type {string} */ label, /** @type {string} */ ic, /** @type {string} */ key, /** @type {string} */ hint) =>
       c.add({ id: `tool.${t}`, label, icon: ic, keys: [key], group: t === 'select' || t === 'pan' ? 'Tool' : 'Insert', hint, run: () => this.setTool(this.tool === t && t !== 'select' ? 'select' : t), pressed: () => this.tool === t });
     // File
@@ -1262,13 +1334,13 @@ export class App {
       if (this.root.dataset.sheet) { this.root.dataset.sheet = ''; return; }
       this.setSelection([]);
     } });
-    for (const [key, dx, dy] of /** @type {Array<[string, number, number]>} */ ([['ArrowLeft', -20, 0], ['ArrowRight', 20, 0], ['ArrowUp', 0, -20], ['ArrowDown', 0, 20]])) {
+    for (const [key, dx, dy] of /** @type {Array<[string, number, number]>} */ ([['ArrowLeft', -1, 0], ['ArrowRight', 1, 0], ['ArrowUp', 0, -1], ['ArrowDown', 0, 1]])) {
       c.add({ id: `edit.nudge${key}`, label: `Move ${key.slice(5).toLowerCase()}`, group: 'Edit', keys: [key], palette: false, run: () => this.nudge(dx, dy) });
       c.add({ id: `edit.nudgeFar${key}`, label: `Move ${key.slice(5).toLowerCase()} far`, group: 'Edit', keys: [`Shift+${key}`], palette: false, run: () => this.nudge(dx * 5, dy * 5) });
     }
     c.add({ id: 'project.menu', label: 'Study case', icon: 'layers', group: 'File', hint: 'Choose the study case and where changes go', run: () => this.projectMenu() });
     c.add({ id: 'project.open', label: 'Manage project', keywords: 'study case scenario variant run log', icon: 'layers', group: 'File', run: () => openBackstage(this, 'project') });
-    c.add({ id: 'layout.arrange', label: 'Arrange', icon: 'layout', group: 'Edit', hint: 'Lay the diagram out again from the network topology',
+    c.add({ id: 'layout.arrange', label: 'Lay out diagram', keywords: 'arrange automatic layout', icon: 'layout', group: 'Arrange', hint: 'Lay the whole diagram out again from the network topology',
       enabled: () => !this.running && !this.arranging, run: () => { void this.arrange(); } });
     // Tools
     tool('select', 'Select', 'select', 'V', 'Select and move elements');
@@ -1328,6 +1400,29 @@ export class App {
     pref('view.names', 'Names', 'names', 'names', ['Shift+N']);
     pref('view.branchNames', 'Line names', 'line', 'branchNames');
     pref('view.disentangle', 'Disentangle labels', 'disentangle', 'disentangle', ['Shift+L']);
+    for (const step of [10, 20, 40]) {
+      c.add({ id: `view.grid${step}`, label: `Grid ${step}`, keywords: 'snap grid step', icon: 'grid', group: 'View', hint: `Snap to a ${step}-unit grid`,
+        pressed: () => this.prefs.grid === step, run: () => { this.prefs.grid = step; this.savePrefs(); this.viewport.setGridStep(step); } });
+    }
+    // Arrange: the first busbar selected is the one the others line up with or take after.
+    const buses = () => this.selectedOf('bus'), doc = () => this.store.doc;
+    /** @param {string} id @param {string} label @param {string} ic @param {number} need @param {() => Array<[string, string, unknown]>} changes @param {string} hint @param {string[]} [keys] */
+    const arrange = (id, label, ic, need, changes, hint, keys = []) =>
+      c.add({ id, label, icon: ic, keys, group: 'Arrange', hint, enabled: () => buses().length >= need, run: () => this.arrangeSelection(label, changes()) });
+    for (const [mode, name, ic] of /** @type {const} */ ([['left', 'left', 'alignLeft'], ['centre', 'centres', 'alignCentre'], ['right', 'right', 'alignRight'], ['top', 'top', 'alignTop'], ['middle', 'middles', 'alignMiddle'], ['bottom', 'bottom', 'alignBottom']])) {
+      const cap = mode.charAt(0).toUpperCase() + mode.slice(1);
+      arrange(`arrange.align${cap}`, `Align ${name}`, ic, 2, () => align(buses(), mode), `Line the selected busbars up with the first one's ${mode === 'centre' || mode === 'middle' ? mode : `${mode} edge`}`);
+    }
+    arrange('arrange.distributeH', 'Distribute horizontally', 'distributeH', 3, () => distribute(buses(), 'x'), 'Equal gaps between the selected busbars, side to side');
+    arrange('arrange.distributeV', 'Distribute vertically', 'distributeV', 3, () => distribute(buses(), 'y'), 'Equal gaps between the selected busbars, top to bottom');
+    arrange('arrange.sameLength', 'Same length', 'sameLength', 2, () => sameLength(buses()), 'Give the selected busbars the first one\'s length');
+    arrange('arrange.rotate', 'Rotate', 'rotate', 1, () => rotate(buses()), 'Turn the selected busbars between horizontal and vertical', ['R']);
+    arrange('arrange.spread', 'Spread connections', 'spread', 1, () => spreadConnections(doc(), buses()), 'Space the connections of the selected busbars evenly along them');
+    c.add({ id: 'arrange.flip', label: 'Flip side', icon: 'flip', keys: ['X'], group: 'Arrange', hint: 'Move the selected machines, grids, loads and shunts to the other side of their busbars',
+      enabled: () => this.selectedOf('gen', 'extgrid', 'load', 'shunt').length > 0, run: () => this.arrangeSelection('Flip side', flip(this.selectedOf('gen', 'extgrid', 'load', 'shunt'))) });
+    c.add({ id: 'select.connected', label: 'Select connected', icon: 'selectConnected', group: 'Select', hint: 'Add what the selection connects to: a busbar\'s connections, an element\'s busbars', enabled: sel, run: () => this.selectRelated('connected') });
+    c.add({ id: 'select.sameClass', label: 'Select same kind', icon: 'selectClass', group: 'Select', hint: 'Select every element of the kinds selected', enabled: sel, run: () => this.selectRelated('class') });
+    c.add({ id: 'select.voltageLevel', label: 'Select voltage level', icon: 'selectLevel', group: 'Select', hint: 'Select every element at the voltage levels of the selection', enabled: sel, run: () => this.selectRelated('level') });
     c.add({ id: 'labels.reset', label: 'Reset label positions', icon: 'resetLabels', group: 'View', hint: 'Let the diagram place labels dragged by hand again (the selection\'s, or all)',
       enabled: () => this.hasPinnedLabels(), run: () => this.resetLabels() });
     c.add({ id: 'view.colourResults', label: 'Colour by results', icon: 'colour', group: 'View', pressed: () => this.prefs.colouring === 'results', run: () => { this.prefs.colouring = 'results'; this.savePrefs(); this.rebuildOverlay(); this.viewport.invalidate(); } });

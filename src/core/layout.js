@@ -365,14 +365,28 @@ function isotonic(t) {
 }
 
 /**
- * Spreads branch ends and single-port elements along their bars. Branch ends go towards the far bus; generators and
- * grids go above the bar, loads and shunts below, each in the free slots nearest the bar's centre.
+ * Spreads branch ends and single-port elements along their bars, and straightens the routes. Branch ends go towards
+ * the far bus; generators and grids go above the bar, loads and shunts below, each in the free slots nearest the
+ * bar's centre.
  * @param {PowerDocument} doc
  */
 export function arrangeConnections(doc) {
+  const byId = new Map(doc.elements.map(e => [e.id, e]));
+  for (const [id, key, value] of connectionPlaces(doc)) /** @type {Element} */ (byId.get(id))[key] = value;
+  for (const el of doc.elements) if (el.cls === 'line' || el.cls === 'trafo') el.bend = 0;
+}
+
+/**
+ * Where `arrangeConnections` puts each connection, as field changes, for every busbar or only the given ones.
+ * @param {PowerDocument} doc @param {Set<string>} [only] @returns {Array<[string, string, unknown]>}
+ */
+export function connectionPlaces(doc, only) {
   const buses = new Map(doc.elements.filter(e => e.cls === 'bus').map(b => [b.id, b]));
+  /** @type {Array<[string, string, unknown]>} */
+  const out = [];
   /** @type {Map<string, Array<{ el: Element, key: string, want: number, side: 'above' | 'below' }>>} */
   const slots = new Map();
+  const mine = (/** @type {string} */ id) => !only || only.has(id);
   for (const el of doc.elements) {
     if (el.cls === 'bus') continue;
     if (el.cls === 'line' || el.cls === 'trafo') {
@@ -381,14 +395,15 @@ export function arrangeConnections(doc) {
       if (!a || !b) continue;
       const posKey = el.cls === 'line' ? ['fromPos', 'toPos'] : ['hvPos', 'lvPos'];
       for (const [self, other, key] of /** @type {const} */ ([[a, b, posKey[0]], [b, a, posKey[1]]])) {
+        if (!mine(self.id)) continue;
         const want = (/** @type {number} */ (other.x) - /** @type {number} */ (self.x)) / Math.max(/** @type {number} */ (self.len), 1);
         const side = /** @type {number} */ (other.y) < /** @type {number} */ (self.y) ? 'above' : 'below';
         push(slots, self.id, { el, key, want, side });
       }
-      el.bend = 0;
     } else {
+      if (!mine(/** @type {string} */ (el.bus))) continue;
       const side = el.cls === 'gen' || el.cls === 'extgrid' ? 'above' : 'below';
-      el.side = side;
+      out.push([el.id, 'side', side]);
       push(slots, /** @type {string} */ (el.bus), { el, key: 'pos', want: 0, side });
     }
   }
@@ -402,10 +417,11 @@ export function arrangeConnections(doc) {
       const usable = Math.max(len - 2 * GRID, GRID), step = items.length > 1 ? usable / (items.length - 1) : 0;
       items.forEach((s, k) => {
         const along = items.length > 1 ? -usable / 2 + k * step : clamp(s.want, -0.35, 0.35) * len;
-        s.el[s.key] = round3(along / len);
+        out.push([s.el.id, s.key, round3(along / len)]);
       });
     }
   }
+  return out;
 }
 
 /** @template K, V @param {Map<K, V[]>} m @param {K} k @param {V} v */

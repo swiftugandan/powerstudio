@@ -16,6 +16,7 @@ import { icon } from './icons.js';
 import { kbd } from './keys.js';
 import { minOf, maxOf } from '../core/extent.js';
 import { canvasMeasure } from '../render/metrics.js';
+import { Snapper, busesIn } from './snap.js';
 
 /**
  * @typedef {import('../core/catalog.js').Element} Element
@@ -52,6 +53,8 @@ export class Viewport {
     };
     /** The drag under way. @type {import('./tools/tool.js').Gesture | null} */
     this.gesture = null;
+    /** What snapping shows: alignment lines and markers. @type {import('./snap.js').Guide[]} */
+    this.guides = [];
     /** @type {{ x: number, y: number }} */
     this.pointer = { x: 0, y: 0 };
     this.pointerInside = false;
@@ -92,6 +95,7 @@ export class Viewport {
     this.fallbackReason = fallbackReason;
     renderer.onLost = reason => this.recover(reason);
     if (renderer instanceof Canvas2DRenderer) renderer.onPending = () => this.invalidate('view');
+    renderer.gridStep = this.app.prefs.grid;
     this.attach(renderer.canvas);
     this.resize();
     this.updateBadge();
@@ -112,6 +116,7 @@ export class Viewport {
     const canvas = h('canvas', { class: 'viewport-canvas', tabindex: '0', 'aria-label': 'Single-line diagram' });
     this.host.prepend(canvas);
     const fallback = new Canvas2DRenderer(canvas);
+    fallback.gridStep = this.app.prefs.grid;
     fallback.onPending = () => this.invalidate('view');
     this.renderer = fallback;
     this.fallbackReason = `WebGPU device lost: ${reason}`;
@@ -220,7 +225,7 @@ export class Viewport {
     const app = this.app;
     return {
       elements: app.store.doc.elements, palette: app.palette, selection: app.selection, hover: app.hover,
-      overlay: app.overlay, preview: this.preview(), measure: this.measure,
+      overlay: app.overlay, preview: this.preview(), guides: this.guides, zoom: this.camera.zoom, measure: this.measure,
       labels: { names: app.prefs.names, branchNames: app.prefs.branchNames, boxes: app.prefs.boxes, disentangle: app.prefs.disentangle },
     };
   }
@@ -346,7 +351,7 @@ export class Viewport {
     canvas.addEventListener('pointermove', e => this.onMove(e));
     canvas.addEventListener('pointerup', e => this.onUp(e));
     canvas.addEventListener('pointercancel', e => this.onUp(e));
-    canvas.addEventListener('pointerleave', () => { this.pointerInside = false; if (this.app.hover) this.app.setHover(''); this.app.statusPointer(null); this.invalidate('overlay'); });
+    canvas.addEventListener('pointerleave', () => { this.pointerInside = false; if (this.app.hover) this.app.setHover(''); this.app.statusPointer(null); if (!this.gesture) this.setGuides([]); this.invalidate('overlay'); });
     canvas.addEventListener('pointerenter', () => { this.pointerInside = true; });
     canvas.addEventListener('wheel', e => this.onWheel(e), { passive: false });
     canvas.addEventListener('dblclick', e => this.onDouble(e));
@@ -411,6 +416,7 @@ export class Viewport {
     if (!this.gesture) { this.tool.hover(ptr); return; }
     try {
       this.gesture.move(ptr);
+      if (this.gesture.status) this.app.statusPointer(ptr.p, this.gesture.status);
     } catch (error) {
       // An edit the store refuses ends the drag; what it had done stays, as one step.
       this.app.toast('warn', error instanceof Error ? error.message : String(error));
@@ -425,7 +431,10 @@ export class Viewport {
     const g = this.gesture;
     this.gesture = null;
     this.host.classList.remove('panning');
-    g?.end(this.pointerOf(e));
+    this.setGuides([]);
+    const ptr = this.pointerOf(e);
+    g?.end(ptr);
+    this.tool.up(ptr);
   }
 
   /** The hit index of the document as it is now, built again after an edit. */
@@ -467,8 +476,37 @@ export class Viewport {
     return bus.orient === 'v' ? (p.x < /** @type {number} */ (bus.x) ? 'above' : 'below') : (p.y < /** @type {number} */ (bus.y) ? 'above' : 'below');
   }
 
-  /** Escape: drops the active tool's half-finished action; true if there was one. */
-  cancelPending() { return this.tool.cancel(); }
+  /** Escape: reverts the drag under way, or drops the active tool's half-finished action; true if there was one. */
+  cancelPending() {
+    if (this.gesture) {
+      this.gesture.cancel();
+      this.gesture = null;
+      this.host.classList.remove('panning');
+      this.setGuides([]);
+      return true;
+    }
+    return this.tool.cancel();
+  }
+
+  /** The grid the background shows and drags snap to. @param {number} step */
+  setGridStep(step) {
+    if (this.renderer) this.renderer.gridStep = step;
+    this.invalidate('view');
+  }
+
+  /** Shows snapping's guides in the overlay. @param {import('./snap.js').Guide[]} guides */
+  setGuides(guides) {
+    if (!guides.length && !this.guides.length) return;
+    this.guides = guides;
+    this.invalidate('overlay');
+  }
+
+  /** A snapper for the busbars in view, without some. @param {Set<string>} [without] */
+  snapper(without) {
+    const c = this.camera, a = c.toWorld(0, 0), b = c.toWorld(c.width, c.height);
+    const view = { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) };
+    return new Snapper(busesIn(this.app.store.doc.elements, view, without), { grid: this.app.prefs.grid, zoom: c.zoom });
+  }
 
   /** @param {WheelEvent} e */
   onWheel(e) {

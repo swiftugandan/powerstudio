@@ -27,6 +27,8 @@ export class Canvas2DRenderer {
   /** @param {HTMLCanvasElement} canvas */
   constructor(canvas) {
     this.backend = /** @type {const} */ ('canvas2d');
+    /** The background grid's step in world units: the snapping grid. */
+    this.gridStep = 20;
     this.label = 'Canvas 2D';
     this.detail = '';
     /** Whether the diagram is large enough to draw through the cache. */
@@ -83,7 +85,7 @@ export class Canvas2DRenderer {
     ctx.fillStyle = css(palette.bg);
     ctx.fillRect(0, 0, W, H);
     // Dot grid, coarser when zoomed out (same rule as the WebGPU shader).
-    let step = 20;
+    let step = this.gridStep;
     if (step * scale < 12 * dpr) step *= 5;
     if (step * scale < 12 * dpr) step *= 5;
     const x0 = camera.cx - W / 2 / scale, y0 = camera.cy - H / 2 / scale;

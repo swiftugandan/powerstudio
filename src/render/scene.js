@@ -32,7 +32,7 @@ import { SpatialHash, LabelIndex, COST, placeLabels, labelKey } from './labels.j
  *   | { kind: 'ghost-bus', x: number, y: number, len: number }
  *   | { kind: 'ghost-port', cls: string, bus: string, pos: number, side: 'above' | 'below' }} Preview
  * @typedef {{ elements: Element[], palette: Palette, selection: Set<string>, hover: string, overlay: Overlay | null,
- *   preview: Preview | null, labels: { names: boolean, branchNames: boolean, boxes: boolean, disentangle?: boolean },
+ *   preview: Preview | null, guides?: import('../ui/snap.js').Guide[], zoom?: number, labels: { names: boolean, branchNames: boolean, boxes: boolean, disentangle?: boolean },
  *   measure?: import('./metrics.js').Measure }} SceneInput
  *   `measure` gives text widths; without it the scene uses widths that err wide (Node has no fonts); `disentangle`
  *   (on unless false) places labels clear of each other
@@ -528,6 +528,13 @@ export function buildOverlay(input) {
     }
   }
   if (preview) drawPreview(list, P, preview, buses);
+  // Snapping's guides: dashed alignment lines and square markers on the points snapped to, the same size on screen
+  // at every zoom.
+  const guide = withAlpha(P.select, 0.95), px = 1 / (input.zoom ?? 1);
+  for (const g of input.guides ?? []) {
+    if (g.kind === 'line') list.segment(g.x0, g.y0, g.x1, g.y1, 1.25 * px, guide, 5 * px);
+    else list.rect(g.x - 4.5 * px, g.y - 4.5 * px, 9 * px, 9 * px, withAlpha(P.bg, 0), guide, 1.5 * px, 1.5 * px);
+  }
   return list;
 }
 
@@ -604,8 +611,11 @@ function bolt(list, x, y, c) {
 function drawPreview(list, P, pv, buses) {
   if (pv.kind === 'rubber') list.segment(pv.from.x, pv.from.y, pv.to.x, pv.to.y, 2, P.preview, 5);
   else if (pv.kind === 'marquee') {
-    const x = Math.min(pv.x0, pv.x1), y = Math.min(pv.y0, pv.y1);
-    list.rect(x, y, Math.abs(pv.x1 - pv.x0), Math.abs(pv.y1 - pv.y0), withAlpha(P.select, 0.08), withAlpha(P.select, 0.8), 1, 0);
+    // Dragged leftwards it selects what it touches (crossing), drawn dashed; rightwards what lies wholly inside.
+    const x0 = Math.min(pv.x0, pv.x1), y0 = Math.min(pv.y0, pv.y1), x1 = Math.max(pv.x0, pv.x1), y1 = Math.max(pv.y0, pv.y1);
+    const crossing = pv.x1 < pv.x0, edge = withAlpha(P.select, 0.8);
+    list.rect(x0, y0, x1 - x0, y1 - y0, withAlpha(P.select, crossing ? 0.05 : 0.08), crossing ? withAlpha(P.select, 0) : edge, 1, 0);
+    if (crossing) for (const [a, b, c, d] of [[x0, y0, x1, y0], [x1, y0, x1, y1], [x1, y1, x0, y1], [x0, y1, x0, y0]]) list.segment(a, b, c, d, 1, edge, 5);
   } else if (pv.kind === 'ghost-bus') {
     list.segment(pv.x - pv.len / 2, pv.y, pv.x + pv.len / 2, pv.y, BAR_WIDTH, withAlpha(P.preview, 0.7));
   } else if (pv.kind === 'ghost-port') {
