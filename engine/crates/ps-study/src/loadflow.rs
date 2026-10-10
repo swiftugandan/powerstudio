@@ -269,6 +269,16 @@ pub struct LoadFlowReport {
 
 /// Runs a load flow and returns the solved network with its report. Studies built on the load flow use the network.
 pub fn solve(model: &Model, run: &LoadFlowRun) -> (Calc, ps_lf::Solution, LoadFlowReport) {
+    solve_prepared(model, run, |_| {})
+}
+
+/// [`solve`], with `prepare` adjusting the calculation network before the solve (such as the starting state of
+/// reactive limits that a contingency takes over from its base case).
+pub fn solve_prepared(
+    model: &Model,
+    run: &LoadFlowRun,
+    prepare: impl FnOnce(&mut Calc),
+) -> (Calc, ps_lf::Solution, LoadFlowReport) {
     let t0 = ps_num::clock::now_ms();
     let st = &run.settings;
     let mut calc = Calc::build(
@@ -281,6 +291,7 @@ pub fn solve(model: &Model, run: &LoadFlowRun) -> (Calc, ps_lf::Solution, LoadFl
     if let Some(start) = &run.start {
         calc.set_start(start);
     }
+    prepare(&mut calc);
     let build_ms = ps_num::clock::now_ms() - t0;
     let sb = model.meta.base_mva;
     let opt = options(st, sb, run.start.is_some());

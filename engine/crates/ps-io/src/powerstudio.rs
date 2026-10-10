@@ -338,6 +338,7 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     rated_kv1: vh,
                     rated_kv2: vl,
                     rated_mva: sn,
+                    unrated: !e.flag("thermal", true),
                     r,
                     x,
                     g1: g / zb1 * at_hv,

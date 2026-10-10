@@ -48,6 +48,7 @@ export async function importDialog(s, names) {
     h('p', { class: 'import-lead', text: `${formatName(s)} · ${summary.join(' · ')} · read in ${fixed(s.ms / 1000, 2)} s` }),
     h('div', { class: `import-status ${f.kind}`, role: 'status' }, h('span', { class: `pill ${f.kind}`, text: f.kind === 'ok' ? 'Exact' : f.kind === 'warn' ? 'Check' : 'Differs' }), h('span', { text: f.text })),
   );
+  for (const t of s.study) body.append(h('p', { class: 'import-note', text: t }));
   if (s.fidelity.solved && !s.fidelity.editorConverges) {
     body.append(h('p', { class: 'import-note', text: 'This network needs a good starting point: its load flows start from the imported voltages, then from their own last solution.' }));
   }

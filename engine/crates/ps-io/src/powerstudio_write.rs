@@ -535,7 +535,16 @@ fn transformers2(d: &mut Doc) {
             continue;
         }
         let conns = Some((t.conn1, t.conn2));
-        let tap_fields = taps(d, t, &b.0);
+        let mut extra = taps(d, t, &b.0);
+        if t.unrated {
+            // The rated power stands in for a missing rating: the editor's transformer reports no loading.
+            match &mut extra {
+                Value::Object(o) => {
+                    o.insert("thermal".into(), Value::Bool(false));
+                }
+                other => *other = json!({ "thermal": false }),
+            }
+        }
         if d.transformer(
             &t.id,
             &t.name,
@@ -545,7 +554,7 @@ fn transformers2(d: &mut Doc) {
             t.rated_mva,
             t.in_service,
             conns,
-            tap_fields,
+            extra,
         )
         .is_none()
         {

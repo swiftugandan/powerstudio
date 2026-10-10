@@ -491,7 +491,7 @@ impl Work {
                 opt.enforce_q_limits && g.mode != MachineMode::Pq && (range < 1.0 / sb || range.is_nan())
             })
             .collect();
-        Self {
+        let mut work = Self {
             fixed_q,
             target_p: net.machines.iter().map(|g| g.p).collect(),
             initial_p: net.machines.iter().map(|g| g.p).collect(),
@@ -506,6 +506,69 @@ impl Work {
             notes: Vec::new(),
             discrete: crate::discrete::DiscreteState::new(&net.taps, net.shunt_controls.len()),
             outer: 0,
+        };
+        work.hold_from_start(opt);
+        work
+    }
+
+    /// For a warm start with reactive limits: holds the buses the previous solution left at a limit there
+    /// (`PuBus::held0`), at their machines' limits for the starting voltages. They are released as usual once the
+    /// voltage passes its target. As in the reactive limit loop, every island keeps a voltage control: a reference
+    /// machine starts in control, and an island whose controlling buses would all start held keeps its strongest
+    /// (highest regulated voltage level, then largest active power, then first bus) in control.
+    fn hold_from_start(&mut self, opt: &Options) {
+        if !(opt.warm_start && opt.enforce_q_limits) {
+            return;
+        }
+        let vm: Vec<f64> = self.net.buses.iter().map(|b| b.vm0).collect();
+        let n = vm.len();
+        let mut grid_bus = vec![false; n];
+        for g in &self.net.grids {
+            grid_bus[g.bus] = true;
+        }
+        let mut units: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut reference = vec![false; n];
+        for (m, g) in self.net.machines.iter().enumerate() {
+            if g.mode != MachineMode::Pq && !self.fixed_q[m] && !grid_bus[g.bus] {
+                units[g.bus].push(m);
+                reference[g.bus] |= g.mode == MachineMode::Reference;
+            }
+        }
+        for b in 0..n {
+            let dir = self.net.buses[b].held0;
+            if dir == 0 || units[b].is_empty() || reference[b] {
+                continue;
+            }
+            let (lo, hi) = units[b].iter().fold((0.0, 0.0), |(a, c), &m| {
+                let (l, h) = self.q_limits(m, &vm);
+                (a + l, c + h)
+            });
+            self.frozen[b] = Some((if dir > 0 { hi } else { lo }, dir));
+        }
+        // Islands left without a voltage control.
+        let mut controlled = vec![false; self.islands];
+        for b in 0..n {
+            if grid_bus[b] || (!units[b].is_empty() && self.frozen[b].is_none()) {
+                controlled[self.island[b]] = true;
+            }
+        }
+        let key = |w: &Self, b: usize| {
+            let first = units[b].first().copied().unwrap_or(0);
+            let reg = w.reg_bus(first, opt);
+            let p: f64 = units[b].iter().map(|&m| w.target_p[m]).sum();
+            (-w.net.buses[reg].base_kv, -p, b)
+        };
+        for island in (0..self.islands).filter(|&i| !controlled[i]) {
+            let strongest = (0..n)
+                .filter(|&b| self.island[b] == island && self.frozen[b].is_some())
+                .min_by(|&x, &y| {
+                    key(self, x)
+                        .partial_cmp(&key(self, y))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            if let Some(b) = strongest {
+                self.frozen[b] = None;
+            }
         }
     }
 

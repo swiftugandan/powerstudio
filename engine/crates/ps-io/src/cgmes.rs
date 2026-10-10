@@ -871,6 +871,7 @@ fn transformers(cx: &mut Ctx) {
                     .num(e1, "PowerTransformerEnd.ratedS")
                     .or_else(|| cx.num(e2, "PowerTransformerEnd.ratedS"))
                     .unwrap_or(0.0),
+                unrated: false,
                 r: cx.numd(e1, "PowerTransformerEnd.r") + cx.numd(e2, "PowerTransformerEnd.r") * k,
                 x: cx.numd(e1, "PowerTransformerEnd.x") + cx.numd(e2, "PowerTransformerEnd.x") * k,
                 g1: cx.numd(e1, "PowerTransformerEnd.g"),

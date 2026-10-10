@@ -160,6 +160,12 @@ rules. The DC sensitivity goldens (`sensitivity-*.json`, `scripts/oracle/sensiti
 sensitivity analysis of every branch flow to every generator's injection with the slack fixed, which is the PTDF of a
 transfer to the slack bus; transformer ratios are left out of both DC models.
 
+Each contingency starts from the base case's reactive limit state because OpenLoadFlow's security analysis does:
+`NetworkState.save` keeps every bus's `BusState`, including whether its generator voltage control is enabled, after
+the pre-contingency load flow, and `restore` puts it back before each contingency. The count of PQ-to-PV switches that
+caps releases at three lives in `ReactiveLimitsOuterLoop`'s `ContextData`, which `initialize` creates afresh for every
+run, so PowerStudio starts each contingency with the count at zero as well (OpenLoadFlow source at commit a651a514).
+
 Screening uses the fast decoupled load flow of B. Stott and O. Alsac, "Fast decoupled load flow", IEEE Transactions on
 Power Apparatus and Systems PAS-93 (1974) 859–869, in the XB form that R. A. M. van Amerongen compared with the
 original in "A general-purpose version of the fast decoupled load flow", IEEE Transactions on Power Systems 4 (1989)

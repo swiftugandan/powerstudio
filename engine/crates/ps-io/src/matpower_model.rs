@@ -246,6 +246,8 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 rated_kv1: k1,
                 rated_kv2: vt,
                 rated_mva: if rate > 0.0 { rate } else { sb },
+                // Without RATE_A the system base stands in for the rated power and is no rating.
+                unrated: rate <= 0.0,
                 r: rr * z1,
                 x: xx * z1,
                 g1: 0.0,

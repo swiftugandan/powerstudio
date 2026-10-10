@@ -182,7 +182,14 @@ unsolvable cases first, then by the number of violations, then by highest loadin
 (`acceptableS`; its permanent limit always qualifies), in kA where the end has a current limit and against its MVA
 rating otherwise. With the default of 0 s only permanent limits count.
 
-**Solving.** The base case is solved once and every contingency starts from its voltages. A single-branch outage
+**Solving.** The base case is solved once and every contingency starts from its voltages and, with reactive limits
+respected, from its machines' limit state: a bus the base case holds at a limit starts held there (released as usual
+when its voltage passes its target), as OpenLoadFlow's security analysis restores the base case's bus states before
+each contingency. An island must keep a voltage control, so a reference machine starts in control and an island whose
+controlling buses would all start held keeps its strongest in control, by the rule of the reactive limit loop. On
+ACTIVSg2000 with limits this takes N-1 from 102 to 22 s natively with the same outcome (29 outages without a
+solution, 41 with violations); ACTIVSg10k takes 75 ms per outage against 26 ms without limits, since its outages
+still switch tens of machines in three to six rounds. A single-branch outage
 that leaves the network connected (Tarjan's bridges tell which do) keeps the base network's matrix pattern: the
 branch's admittances are zeroed and the sparse analysis of the base Jacobian is reused, which takes 27 ms per outage
 on the 10,000-bus ACTIVSg grid natively. Bridges, machines, HVDC links and multi-element contingencies rebuild the
@@ -270,7 +277,9 @@ the decoupled voltage model (B″). Both take a branch outage as a low-rank corr
   every outage that full AC flags (a new violation or no solution) to have been solved in full, and the screened
   estimates to stay within a tenth of the drift of the full solution. With limits on, screening clears 2,111 of
   ACTIVSg2000's outages; ieee300 and rts96, whose machines nearly all lose voltage control at their limits, clear
-  none, because the decoupled iterations do not converge on them. Another test checks that regulating tap changers
+  none, because the decoupled iterations do not converge on them; nor does ACTIVSg10k, whose base case holds a few
+  hundred machines at their limits within 1e-5 p.u. of their targets, so that every outage could switch some of
+  them. Bounding those switches inside the screen cost more solves than it saved and is not attempted. Another test checks that regulating tap changers
   turn screening off with a note. A second test parks each line
   of IEEE 14 in turn at 99.99 % of its limit and each busbar's band edge 0.0001 p.u. from its voltage, below and
   above: the cases the drift rule alone let through (24 outages before the limit rule) and a bus over its band in the
@@ -302,8 +311,11 @@ equilibrium.
 describes: transformers keep arbitrary phase shifts and carry their charging as magnetising admittance, generators
 keep their active power limits, and buses keep the case's stored voltages for warm starts. Branches and generators
 are named by their row in the case, as MATPOWER identifies them (`L17` or `T17` for branch row 17, `G4` for generator
-row 4). MATPOWER has no zero-sequence, machine or inertia data; the importer fills them with stated typical values and
-lists them in the import's notes. The app opens cases through it like any other file (see "Opening other tools'
+row 4). RATE_A is the branch's rating in MVA; a line gets it as a current limit at nominal voltage, and a transformer
+as its rated power. A RATE_A of 0 means no rating, as in MATPOWER: such a transformer takes the system base as its
+rated power, only as a base for its data, and is marked unrated (`thermal` off in the editor), so its loading is not
+reported. PSS/E branch records that join two voltage levels follow the same rule. MATPOWER has no zero-sequence,
+machine or inertia data; the importer fills them with stated typical values and lists them in the import's notes. The app opens cases through it like any other file (see "Opening other tools'
 files in the app").
 
 ## CGMES import
@@ -417,10 +429,19 @@ intermediate busbar for that part. The engine then solves the model and the docu
 model's solution, both with remote voltage control and voltage-dependent loads on and the discrete controls held, and
 reports the largest voltage difference with the voltages to start the editor's load flows from.
 
+The import also sets the study case where the file shows how it was solved. When in-service machines with a reactive
+range of at least 1 Mvar sit at a reactive limit in the file's own solution, the study case respects reactive power
+limits and the import dialog says why: such a case was solved with them, and without them its machines hold voltages
+they cannot reach. ACTIVSg10k is the example: two machines 0.0007 p.u. of reactance apart hold 1.0415 and 1.0172 p.u.
+without limits, which drives 3,500 Mvar through the line between them, where the file's solution, at their limits,
+has 2.6 Mvar.
+
 **Checked by** `engine/crates/ps-study/tests/document.rs`: every reference model (MATPOWER cases up to ACTIVSg70k,
 the CGMES configurations, the PSS/E files) converts into a document whose load flow agrees with the model's to
 2e-12 p.u. or better, and `tests/import.test.mjs`, which imports MATPOWER and RAW files through the WebAssembly
-engine and checks the document passes the editor's import gate unchanged.
+engine and checks the document passes the editor's import gate unchanged. The same test file checks that ACTIVSg2000
+opens with reactive limits respected and case14 without, and that a MATPOWER transformer without a rating reports no
+loading, in the model and in its document.
 
 ## Requests
 

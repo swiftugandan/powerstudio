@@ -36,6 +36,7 @@ pub fn end_limits(model: &Model, src: BranchSource, duration_s: Option<f64>) -> 
 pub fn rated_mva(model: &Model, src: BranchSource) -> Option<f64> {
     let row = src.row as usize;
     let r = match src.class {
+        Class::Transformer2 if model.transformers2[row].unrated => 0.0,
         Class::Transformer2 => model.transformers2[row].rated_mva,
         Class::Transformer3 => model.transformers3[row].windings[usize::from(src.winding.max(1)) - 1].rated_mva,
         _ => 0.0,

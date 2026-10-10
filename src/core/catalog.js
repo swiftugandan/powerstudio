@@ -77,6 +77,8 @@ export const CLASSES = {
     fields: [
       name, bus('hv', 'HV busbar'), bus('lv', 'LV busbar'), inService,
       num('sn', 'Rated power', 40, { unit: 'MVA', min: 0, exclusiveMin: true, symbol: 'Sr' }),
+      { key: 'thermal', label: 'Rated power limits loading', type: 'bool', group: 'basic', default: true,
+        help: 'Off when the rated power is only the base of the impedance data, as for a MATPOWER branch without a rating: the loading is then not reported.' },
       num('vnHV', 'Rated voltage HV', 110, { unit: 'kV', min: 0, exclusiveMin: true, symbol: 'UrHV' }),
       num('vnLV', 'Rated voltage LV', 20, { unit: 'kV', min: 0, exclusiveMin: true, symbol: 'UrLV' }),
       num('uk', 'Short-circuit voltage', 12, { unit: '%', min: 0, exclusiveMin: true, symbol: 'uk' }),

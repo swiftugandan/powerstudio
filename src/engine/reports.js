@@ -51,7 +51,7 @@
  * @typedef {{ solved: boolean, maxDv: number, maxDa: number, worst: string, editorConverges: boolean, start: StartVoltages }} Fidelity
  * @typedef {{ nodes: number, branches: number, sources: number, loads: number, switches: number }} ImportSize
  * @typedef {{ format: 'cgmes' | 'psse' | 'matpower', report: ImportReport, validation: ModelIssue[], conversion: string[],
- *   fidelity: Fidelity, size: ImportSize, ms: number }} ImportSummary
+ *   study: string[], fidelity: Fidelity, size: ImportSize, ms: number }} ImportSummary
  */
 
 /** @param {number | null | undefined} v */

@@ -346,6 +346,7 @@ impl Calc {
                     base_kv: b.base_kv,
                     vm0: 1.0,
                     va0: 0.0,
+                    held0: 0,
                 })
                 .collect(),
             ..Default::default()

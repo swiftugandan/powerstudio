@@ -110,6 +110,17 @@ pub struct Start {
     pub va: Vec<f64>,
 }
 
+/// In-service voltage-controlling machines whose reactive power in the file sits at one of its limits (within 0.01
+/// Mvar), counting only machines with a reactive range of at least 1 Mvar, as the load flow does.
+pub fn machines_at_reactive_limits(model: &Model) -> usize {
+    model
+        .generators
+        .iter()
+        .filter(|g| g.in_service && g.control != ps_model::MachineControl::Pq && g.q_max - g.q_min >= 1.0)
+        .filter(|g| (g.q - g.q_max).abs() < 0.01 || (g.q - g.q_min).abs() < 0.01)
+        .count()
+}
+
 /// Solves `model` and the document converted from it (`ps_io::powerstudio_write`), the document started from the
 /// model's solution, and compares every node's voltage through the busbar that stands for it.
 pub fn editor_fidelity(model: &Model, converted: &ps_io::powerstudio_write::Converted) -> Fidelity {
@@ -268,6 +279,8 @@ pub struct ForEditor {
     pub validation: Vec<ps_model::Issue>,
     /// What the editor's document reduced or approximated.
     pub conversion: Vec<String>,
+    /// How the study case was set from the file, and why.
+    pub study: Vec<String>,
     /// How closely the document reproduces the model's load flow, and the voltages to start from.
     pub fidelity: Fidelity,
     /// Counts of what the model holds.
@@ -366,8 +379,17 @@ pub fn import_for_editor(files: Vec<ps_io::files::File>) -> Result<ForEditor, St
         );
     };
     let validation = model.validate();
-    let converted = ps_io::powerstudio_write::to_document(&model);
+    let mut converted = ps_io::powerstudio_write::to_document(&model);
     let fidelity = editor_fidelity(&model, &converted);
+    let at_limit = machines_at_reactive_limits(&model);
+    let mut study = Vec::new();
+    if at_limit > 0 {
+        converted.doc["study"] = serde_json::json!({ "loadflow": { "enforceQLimits": true } });
+        study.push(format!(
+            "The study case respects reactive power limits: {at_limit} machine(s) sit at a limit in the file's own \
+             solution, so it was solved with them. Without them, machines would hold voltages they cannot reach."
+        ));
+    }
     let size = Size {
         nodes: model.nodes.len(),
         branches: model.lines.len() + model.transformers2.len() + model.transformers3.len(),
@@ -380,6 +402,7 @@ pub fn import_for_editor(files: Vec<ps_io::files::File>) -> Result<ForEditor, St
         report,
         validation,
         conversion: converted.notes,
+        study,
         fidelity,
         size,
         doc: converted.doc,

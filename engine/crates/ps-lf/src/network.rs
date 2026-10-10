@@ -33,6 +33,9 @@ pub struct PuBus {
     pub vm0: f64,
     /// Starting angle for warm starts, radians.
     pub va0: f64,
+    /// For warm starts with reactive limits: whether the bus's machines start held at their lower (−1) or upper (+1)
+    /// reactive limit, as a previous solution left them; 0 starts them in voltage control.
+    pub held0: i8,
 }
 
 /// A branch as a two-port: `[If; It] = [yff yft; ytf ytt] [Vf; Vt]` in per unit.

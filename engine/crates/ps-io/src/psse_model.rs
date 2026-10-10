@@ -726,6 +726,8 @@ fn branches(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 rated_kv1: kv1,
                 rated_kv2: kv2,
                 rated_mva: if rate > 0.0 { rate } else { cx.sbase },
+                // A branch record has no nameplate: without a rating the system base stands in and is no rating.
+                unrated: rate <= 0.0,
                 r: rr * zb,
                 x: xx * zb,
                 g1: gi / zb,
@@ -1006,6 +1008,7 @@ fn transformers(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 rated_kv1: kv1,
                 rated_kv2: kv2,
                 rated_mva: if rate > 0.0 { rate } else { r.num(1, 2, sbase)? },
+                unrated: false,
                 r: rr * zb1,
                 x: xx * zb1,
                 // At bus I, outside winding 1's ratio: in the model's frame, scaled by t1².

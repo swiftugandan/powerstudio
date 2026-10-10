@@ -461,6 +461,7 @@ mod tests {
         let t = Transformer2 {
             rated_kv1: 110.0,
             rated_mva: 40.0,
+            unrated: false,
             x: (0.01_f64 - 0.000_036).sqrt() * zb,
             ..Default::default()
         };

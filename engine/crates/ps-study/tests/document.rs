@@ -74,3 +74,52 @@ fn documents_reproduce_their_models() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// A MATPOWER transformer without RATE_A has no thermal rating: the system base that stands in for its rated power
+/// is not judged as one, neither in the model nor in the editor's document made from it. A rated one still is.
+#[test]
+fn a_transformer_without_a_rating_reports_no_loading() {
+    let text = "function mpc = t\nmpc.version = '2';\nmpc.baseMVA = 100;\nmpc.bus = [\n\
+        1 3 0 0 0 0 1 1.0 0 132 1 1.1 0.9;\n2 1 150 20 0 0 1 1.0 0 33 1 1.1 0.9;\n3 1 50 10 0 0 1 1.0 0 33 1 1.1 0.9;\n];\n\
+        mpc.gen = [\n1 0 0 300 -300 1.0 100 1 400 0;\n];\n\
+        mpc.branch = [\n1 2 0.001 0.05 0 0 0 0 1.0 0 1 -360 360;\n1 3 0.001 0.05 0 80 0 0 1.0 0 1 -360 360;\n];\n";
+    let model = ps_io::matpower_model::to_model(&ps_io::matpower::parse(text).unwrap()).model;
+    assert_eq!(model.transformers2.len(), 2);
+    let loading = |m: &Model| {
+        let r = ps_study::loadflow::run(
+            m,
+            &ps_study::LoadFlowRun {
+                settings: ps_model::study::LoadFlowSettings::default(),
+                outages: Default::default(),
+                start: None,
+            },
+        );
+        assert!(r.converged);
+        ["T1", "T2"].map(|id| r.branches.iter().find(|b| b.id == id).unwrap().loading)
+    };
+    let [unrated, rated] = loading(&model);
+    assert_eq!(unrated, None, "150 MW through a transformer without a rating");
+    assert!(rated.unwrap() > 60.0, "{rated:?}");
+    let doc = ps_io::powerstudio_write::to_document(&model).doc;
+    let back = ps_io::powerstudio::parse(&doc.to_string()).unwrap().model;
+    let [unrated, rated] = loading(&back);
+    assert_eq!(unrated, None);
+    assert!(rated.unwrap() > 60.0, "{rated:?}");
+}
+
+/// A case solved with reactive limits (machines at a limit in its stored solution) opens with the study case
+/// respecting them, and says so: ACTIVSg2000 does; case14 written as RAW, whose machines all sit inside their limits,
+/// does not.
+#[test]
+fn a_case_solved_with_reactive_limits_opens_with_them() {
+    let open = |file: &str| {
+        let data = std::fs::read(repo(file)).unwrap();
+        let name = file.rsplit('/').next().unwrap().to_string();
+        ps_study::exchange::import_for_editor(vec![ps_io::files::File { name, data }]).unwrap()
+    };
+    let r = open(".cache/reference/case_ACTIVSg2000.m");
+    assert_eq!(r.doc["study"]["loadflow"]["enforceQLimits"], true);
+    assert!(r.study.iter().any(|n| n.contains("respects reactive power limits")));
+    let r = open("tests/fixtures/case14.raw");
+    assert!(r.doc.get("study").is_none(), "{:?}", r.doc.get("study"));
+}

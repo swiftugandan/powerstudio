@@ -296,6 +296,10 @@ pub struct Transformer2 {
     pub rated_kv2: f64,
     /// Rated power, MVA.
     pub rated_mva: f64,
+    /// Whether the rated power is only a base for the transformer's data, not a thermal rating (a MATPOWER branch
+    /// without a rating): its loading is then judged by its current limits alone.
+    #[serde(default)]
+    pub unrated: bool,
     /// Series resistance referred to winding 1, Ω.
     pub r: f64,
     /// Series reactance referred to winding 1, Ω.

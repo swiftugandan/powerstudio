@@ -148,6 +148,7 @@ fn a_tap_table_acts_like_the_stepped_changer_it_tabulates() {
             rated_kv1: 110.0,
             rated_kv2: 20.0,
             rated_mva: 40.0,
+            unrated: false,
             r: 1.2,
             x: 36.0,
             ..Default::default()

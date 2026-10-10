@@ -699,12 +699,19 @@ impl Screen {
     }
 }
 
+/// What a contingency that rebuilds the network starts from, by node: the base solution's voltages (magnitude p.u.,
+/// angle radians) and the reactive limits its machines are held at (−1 lower, +1 upper, 0 none).
+struct Start {
+    voltages: Vec<Option<(f64, f64)>>,
+    held: Vec<i8>,
+}
+
 /// The base case, solved once, and what every contingency starts from.
 struct Prepared {
     base: Base,
     screen: Option<Screen>,
     base_case: Case,
-    start: Vec<Option<(f64, f64)>>,
+    start: Start,
     base_dead: HashSet<String>,
     post_duration: Option<f64>,
     limit: f64,
@@ -754,10 +761,27 @@ fn prepare(model: &Model, study: &StudyCase) -> Result<Prepared, String> {
             start[n as usize] = Some((sol.vm[b], sol.va[b]));
         }
     }
+    // The base solution's reactive limit state by node, for outages that rebuild the network.
+    let mut held_start = vec![0_i8; model.nodes.len()];
+    for &(m, dir) in &sol.held {
+        if let Some(g) = sol.net.machines.get(m) {
+            for &n in &calc.topo.buses[g.bus].nodes {
+                held_start[n as usize] = dir;
+            }
+        }
+    }
+    // Every outage starts from the base solution: its voltages, and with reactive limits the machines it holds at
+    // a limit (as OpenLoadFlow's security analysis does), so each outage does not find them again.
     let mut net = sol.net.clone();
     for (b, bus) in net.buses.iter_mut().enumerate() {
         bus.vm0 = sol.vm[b];
         bus.va0 = sol.va[b];
+        bus.held0 = 0;
+    }
+    for &(m, dir) in &sol.held {
+        if let Some(g) = sol.net.machines.get(m) {
+            net.buses[g.bus].held0 = dir;
+        }
     }
     let opt = ps_lf::Options {
         warm_start: true,
@@ -784,7 +808,10 @@ fn prepare(model: &Model, study: &StudyCase) -> Result<Prepared, String> {
         base,
         screen,
         base_case,
-        start,
+        start: Start {
+            voltages: start,
+            held: held_start,
+        },
         base_dead,
         post_duration,
         limit,
@@ -1189,7 +1216,7 @@ fn solve_case(
     base: &Base,
     cache: &mut Cache,
     found: &[(Class, usize)],
-    start: &[Option<(f64, f64)>],
+    start: &Start,
     base_dead: &HashSet<&str>,
     post_duration: Option<f64>,
     effort: &mut Effort,
@@ -1229,12 +1256,18 @@ fn solve_case(
     for &(k, row) in found {
         outages.insert(k, row);
     }
-    let (calc, sol, report) = loadflow::solve(
+    let (calc, sol, report) = loadflow::solve_prepared(
         model,
         &LoadFlowRun {
             settings: study.loadflow,
             outages,
-            start: Some(start.to_vec()),
+            start: Some(start.voltages.clone()),
+        },
+        |calc| {
+            for (b, bus) in calc.topo.buses.iter().enumerate() {
+                let held = bus.nodes.iter().map(|&n| start.held[n as usize]).find(|&h| h != 0);
+                calc.net.buses[b].held0 = held.unwrap_or(0);
+            }
         },
     );
     let lost = report
@@ -1501,7 +1534,8 @@ mod tests {
                 ps_lf::PuBus {
                     base_kv: 1.0,
                     vm0: 1.0,
-                    va0: 0.0
+                    va0: 0.0,
+                    held0: 0
                 };
                 5
             ],
