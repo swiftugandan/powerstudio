@@ -288,6 +288,23 @@ pub struct PuNetwork {
     pub taps: Vec<PuTapBranch>,
     /// Shunts with voltage-controlled sections.
     pub shunt_controls: Vec<PuShuntControl>,
+    /// Control areas.
+    pub areas: Vec<PuArea>,
+    /// The area of each bus, by index into `areas`.
+    pub bus_area: Vec<Option<usize>>,
+}
+
+/// A control area: its net export over its tie branches is held at a target by its slack bus's machines.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PuArea {
+    /// Caller's identifier.
+    pub id: usize,
+    /// Net export target, p.u. (power leaving the area through branches to other areas, at their ends inside it).
+    pub target: f64,
+    /// Tolerance on the target, p.u.
+    pub tolerance: f64,
+    /// The bus whose machines hold the interchange; `None` for an area without control.
+    pub slack_bus: Option<usize>,
 }
 
 /// Two-port admittances of a series impedance `z`, total shunt admittance `ysh` split between both ends, and an ideal

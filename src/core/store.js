@@ -179,8 +179,10 @@ export class Tx {
         for (const f of CLASSES[other.cls].fields) if (f.type === 'bus' && f.optional !== undefined && other[f.key] === id) this.set(other.id, f.key, '');
       }
     }
-    // The study case forgets the element: simulation events on it, and it in contingencies and remedial actions.
+    // The study case forgets the element: simulation events on it, a zone's slack busbar, and it in contingencies
+    // and remedial actions.
     const study = this.store.doc.study;
+    if (study.loadflow.areas.some(a => a.slack === id)) this.setStudy('loadflow', 'areas', study.loadflow.areas.map(a => (a.slack === id ? { ...a, slack: '' } : a)));
     const events = study.rms.events.filter(e => e.target !== id);
     if (events.length !== study.rms.events.length) this.setStudy('rms', 'events', events);
     const list = study.contingency.list.map(c => ({ ...c, elements: c.elements.filter(e => e !== id) })).filter(c => c.elements.length);
@@ -213,7 +215,7 @@ export class Tx {
   setStudy(section, key, value) {
     const target = /** @type {Record<string, any>} */ (this.store.doc.study)[section];
     if (!target) throw new Error(`Unknown study section ${section}.`);
-    if (!(key === 'events' || (section === 'contingency' && (key === 'list' || key === 'remedial')))) {
+    if (!(key === 'events' || (section === 'contingency' && (key === 'list' || key === 'remedial')) || (section === 'loadflow' && key === 'areas'))) {
       const spec = /** @type {Record<string, readonly import('./catalog.js').FieldSpec[]>} */ (STUDY_FIELDS)[section]?.find(f => f.key === key);
       if (!spec) throw new Error(`Unknown study setting ${section}.${key}.`);
       const err = checkValue(spec, value);

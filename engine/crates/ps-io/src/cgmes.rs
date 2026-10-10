@@ -312,6 +312,7 @@ fn containers(cx: &mut Ctx) {
             interchange_mw: cx.numd(o, "ControlArea.netInterchange"),
             tolerance_mw: cx.numd(o, "ControlArea.pTolerance"),
             control: false,
+            slack: None,
         });
     }
     cx.mark("Substation", "substations");

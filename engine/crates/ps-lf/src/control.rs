@@ -36,6 +36,9 @@ pub(crate) fn enabled(opt: &Options) -> Vec<Control> {
     if opt.balance != Balance::Reference {
         out.push(Control::Slack);
     }
+    if opt.area_interchange {
+        out.push(Control::Interchange);
+    }
     if opt.enforce_q_limits {
         out.push(Control::ReactiveLimits);
     }
@@ -59,7 +62,89 @@ pub(crate) fn check(c: Control, work: &mut Work, s: &mut Solver, opt: &Options) 
         Control::PhaseShifters => crate::discrete::phase_shifters(work, s, opt),
         Control::Taps => crate::discrete::taps(work, s, opt),
         Control::Shunts => crate::discrete::shunts(work, s, opt),
+        Control::Interchange => interchange(work, s),
     }
+}
+
+/// Net export of each area over its tie branches, p.u.: the active power entering each branch that joins two areas,
+/// at its end inside the area.
+pub fn area_exports(net: &crate::PuNetwork, vm: &[f64], va: &[f64]) -> Vec<f64> {
+    let mut out = vec![0.0; net.areas.len()];
+    let area = |b: usize| net.bus_area.get(b).copied().flatten();
+    for br in &net.branches {
+        let (af, at) = (area(br.f), area(br.t));
+        if af == at {
+            continue;
+        }
+        let vf = ps_num::C64::from_polar(vm[br.f], va[br.f]);
+        let vt = ps_num::C64::from_polar(vm[br.t], va[br.t]);
+        if let Some(a) = af {
+            out[a] += (vf * (br.yff * vf + br.yft * vt).conj()).re;
+        }
+        if let Some(a) = at {
+            out[a] += (vt * (br.ytf * vf + br.ytt * vt).conj()).re;
+        }
+    }
+    out
+}
+
+/// Area interchange control: each area with a slack bus whose net export is off its target by more than its
+/// tolerance changes its slack machines' active power by the difference, shared equally within their limits. An area
+/// whose slack bus holds an island's reference balances the island instead and is left alone; an area whose slack
+/// machines are all at a limit is noted.
+fn interchange(work: &mut Work, s: &mut Solver) -> Status {
+    let exports = area_exports(&work.net, &s.vm, &s.va);
+    let mut changed = false;
+    for (a, area) in work.net.areas.clone().iter().enumerate() {
+        let Some(bus) = area.slack_bus else { continue };
+        let units: Vec<usize> = (0..work.net.machines.len())
+            .filter(|&m| work.net.machines[m].bus == bus)
+            .collect();
+        let reference = units
+            .iter()
+            .any(|&m| work.net.machines[m].mode == MachineMode::Reference)
+            || work.net.grids.iter().any(|g| g.bus == bus);
+        let short = area.target - exports[a];
+        if reference || short.abs() <= area.tolerance.max(P_RESIDUE) {
+            continue;
+        }
+        // Share the shortfall equally; a machine at a limit passes its rest to the others.
+        let mut left = short;
+        let mut free: Vec<usize> = units.clone();
+        while left.abs() > P_RESIDUE && !free.is_empty() {
+            let each = left / free.len() as f64;
+            let mut next = Vec::new();
+            for &m in &free {
+                let g = &work.net.machines[m];
+                let (lo, hi) = if g.p_max > g.p_min {
+                    (g.p_min, g.p_max)
+                } else {
+                    (f64::NEG_INFINITY, f64::INFINITY)
+                };
+                let p = work.target_p[m];
+                let q = (p + each).clamp(lo, hi);
+                work.target_p[m] = q;
+                work.initial_p[m] += q - p;
+                left -= q - p;
+                if (q - p - each).abs() < P_RESIDUE {
+                    next.push(m);
+                }
+            }
+            if next.len() == free.len() {
+                break;
+            }
+            free = next;
+        }
+        if (short - left).abs() > P_RESIDUE {
+            changed = true;
+        }
+        work.area_short[a] = if left.abs() > area.tolerance.max(P_RESIDUE) {
+            left
+        } else {
+            0.0
+        };
+    }
+    if changed { Status::Unstable } else { Status::Stable }
 }
 
 /// The loops that were still changing when the limit on changes was reached, in words.
@@ -73,6 +158,7 @@ pub(crate) fn unsettled(controls: &[ControlLog]) -> String {
             Control::PhaseShifters => "phase shifters",
             Control::Taps => "tap changers",
             Control::Shunts => "switched shunts",
+            Control::Interchange => "area interchange",
         })
         .collect();
     if names.is_empty() {

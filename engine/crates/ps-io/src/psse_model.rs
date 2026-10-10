@@ -199,7 +199,7 @@ fn mapped_as(s: Section) -> &'static str {
         Section::Branch => "lines (transformers between different base voltages)",
         Section::SwitchingDevice => "switches",
         Section::Transformer => "two- and three-winding transformers",
-        Section::Area => "areas (interchange control off)",
+        Section::Area => "areas with their interchange targets and slack buses",
         Section::Facts => "static var compensators (shunt devices; series devices not modelled)",
         Section::TwoTerminalDc => "HVDC links with line-commutated converter stations",
         Section::VscDc => "HVDC links with voltage-source converter stations",
@@ -1095,24 +1095,46 @@ fn transformers(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
     Ok(())
 }
 
+/// Areas: I, ISW (the area slack bus), PDES (desired net export, MW), PTOL (tolerance, MW), ARNAME. An area with a
+/// slack bus takes part in interchange control when the study case turns it on.
 fn areas(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
     for r in raw.section(Section::Area) {
         let num = r.int(0, 0, 0)?;
-        let name = r.text(0, 4, "");
+        let isw = r.int(0, 1, 0)?;
+        let name = r.text(0, 4, "").trim().to_string();
         let (pdes, ptol) = (r.num(0, 2, 0.0)?, r.num(0, 3, 0.0)?);
-        if let Some(a) = cx.m.areas.iter_mut().find(|a| a.id == format!("A{num}")) {
-            a.name = if name.is_empty() { a.name.clone() } else { name };
-            a.interchange_mw = pdes;
-            a.tolerance_mw = ptol;
+        let slack = if isw == 0 {
+            None
         } else {
-            cx.m.areas.push(Area {
-                id: format!("A{num}"),
-                name,
-                interchange_mw: pdes,
-                tolerance_mw: ptol,
-                control: false,
-            });
+            match cx.node_of.get(&isw.abs()) {
+                Some(&(node, _, _)) => Some(node),
+                None => {
+                    cx.notes.push(format!(
+                        "Area {num}: its slack bus {isw} is not defined; it takes no part in interchange control."
+                    ));
+                    None
+                }
+            }
+        };
+        let i = match cx.m.areas.iter().position(|a| a.id == format!("A{num}")) {
+            Some(i) => i,
+            None => {
+                cx.m.areas.push(Area {
+                    id: format!("A{num}"),
+                    name: format!("Area {num}"),
+                    ..Default::default()
+                });
+                cx.m.areas.len() - 1
+            }
+        };
+        let a = &mut cx.m.areas[i];
+        if !name.is_empty() {
+            a.name = name;
         }
+        a.interchange_mw = pdes;
+        a.tolerance_mw = ptol;
+        a.control = slack.is_some();
+        a.slack = slack;
     }
     Ok(())
 }

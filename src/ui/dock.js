@@ -182,11 +182,28 @@ export class Dock {
     const regulated = r.taps.length + r.sections.length;
     const views = /** @type {Array<[string, string]>} */ ([['buses', `Busbars ${r.buses.length}`], ['branches', `Branches ${r.branches.length}`], ['units', `Machines and loads ${r.gens.length + r.grids.length + r.loads.length + r.shunts.length}`]]);
     if (regulated) views.push(['controls', `Controls ${regulated}`]);
-    const view = this.lfView === 'controls' && !regulated ? 'buses' : this.lfView;
+    if (r.areas.length) views.push(['areas', `Areas ${r.areas.length}`]);
+    const view = (this.lfView === 'controls' && !regulated) || (this.lfView === 'areas' && !r.areas.length) ? 'buses' : this.lfView;
     const seg = this.segmented(views, view, v => { this.lfView = v; });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), seg);
     let table;
-    if (view === 'controls') {
+    if (view === 'areas') {
+      const lf = app.store.doc.study.loadflow;
+      const set = (/** @type {import('../engine/reports.js').AreaResult} */ a) => a.controlled || a.target !== 0 || a.tolerance !== 0;
+      const status = (/** @type {import('../engine/reports.js').AreaResult} */ a) => {
+        const off = a.export - a.target;
+        if (!a.controlled) return lf.areas.some(x => x.zone === a.name && x.slack) && !lf.areaInterchange ? 'Off in the study case' : 'Not controlled';
+        return Math.abs(off) <= a.tolerance + 1e-6 ? 'Within tolerance' : `${fixed(Math.abs(off), 1)} MW ${off < 0 ? 'short' : 'over'}`;
+      };
+      table = this.table([
+        { key: 'name', label: 'Area', value: (/** @type {any} */ a) => a.name },
+        { key: 'export', label: 'Net export', unit: 'MW', num: true, value: (/** @type {any} */ a) => a.export, text: (/** @type {any} */ a) => fixed(a.export, 2) },
+        { key: 'target', label: 'Target', unit: 'MW', num: true, value: (/** @type {any} */ a) => (set(a) ? a.target : NaN), text: (/** @type {any} */ a) => (set(a) ? fixed(a.target, 2) : '—') },
+        { key: 'tolerance', label: 'Tolerance', unit: 'MW', num: true, value: (/** @type {any} */ a) => (set(a) ? a.tolerance : NaN), text: (/** @type {any} */ a) => (set(a) ? fixed(a.tolerance, 1) : '—') },
+        { key: 'status', label: 'Interchange', value: (/** @type {any} */ a) => status(a),
+          cls: (/** @type {any} */ a) => (a.controlled && Math.abs(a.export - a.target) > a.tolerance + 1e-6 ? 'warn' : '') },
+      ], r.areas, 'loadflow', 'areas', 'name', 1);
+    } else if (view === 'controls') {
       /** @typedef {{ id: string, kind: string, before: number, after: number, low: number, high: number }} ControlRow */
       const rows = /** @type {ControlRow[]} */ ([
         ...r.taps.map(t => ({ id: t.id, kind: t.kind === 'phase' ? 'Phase shifter' : 'Tap changer', before: t.start, after: t.position, low: t.low, high: t.high })),

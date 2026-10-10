@@ -155,11 +155,29 @@ pub struct MismatchResult {
     pub vm: f64,
 }
 
+/// A control area's interchange.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AreaResult {
+    /// Area identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Net export: active power leaving the area through branches to other areas, at their ends inside it, MW.
+    pub export: f64,
+    /// Export target, MW.
+    pub target: f64,
+    /// Tolerance on the target, MW.
+    pub tolerance: f64,
+    /// Whether the area's slack bus held its export in this load flow.
+    pub controlled: bool,
+}
+
 /// What one control did.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ControlResult {
-    /// `slack`, `reactiveLimits`, `phaseShifters`, `taps` or `shunts`.
+    /// `slack`, `interchange`, `reactiveLimits`, `phaseShifters`, `taps` or `shunts`.
     pub control: &'static str,
     /// Times it changed something.
     pub changes: usize,
@@ -257,6 +275,8 @@ pub struct LoadFlowReport {
     pub distributed: f64,
     /// What each enabled control did.
     pub controls: Vec<ControlResult>,
+    /// Control areas with their net export (empty when the model has fewer than two).
+    pub areas: Vec<AreaResult>,
     /// When it did not converge: the buses with the largest remaining mismatch.
     pub worst: Vec<MismatchResult>,
     /// Voltages in bus order.
@@ -328,6 +348,7 @@ pub fn options(st: &LoadFlowSettings, sb: f64, warm_start: bool) -> Options {
         tap_control: st.tap_control,
         shunt_control: st.shunt_control,
         phase_control: st.phase_control,
+        area_interchange: st.area_interchange,
         max_outer: 30,
     }
 }
@@ -481,6 +502,17 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
         warnings.push("Voltage-dependent loads are off: every load is solved as constant power.".into());
     }
     warnings.extend(sol.notes.iter().cloned());
+    for &(a, short) in &sol.area_short {
+        if let Some(area) = model.areas.get(sol.net.areas.get(a).map_or(a, |x| x.id)) {
+            warnings.push(format!(
+                "Area {}: its slack machines reached their active power limits {:.1} MW {} its export target of {} MW.",
+                area.name,
+                short.abs() * sb,
+                if short > 0.0 { "short of" } else { "beyond" },
+                area.interchange_mw
+            ));
+        }
+    }
     for &(m, lim) in &sol.held {
         let q = sol.machines[m].q * sb;
         let word = if lim > 0 { "upper" } else { "lower" };
@@ -569,6 +601,7 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
                 ps_lf::Control::PhaseShifters => "phaseShifters",
                 ps_lf::Control::Taps => "taps",
                 ps_lf::Control::Shunts => "shunts",
+                ps_lf::Control::Interchange => "interchange",
             },
             changes: c.changes,
         })
@@ -628,6 +661,25 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
         sections,
         distributed: sol.distributed.iter().sum::<f64>() * sb,
         controls,
+        areas: if model.areas.len() < 2 || sol.vm.is_empty() {
+            Vec::new()
+        } else {
+            let exports = ps_lf::area_exports(&sol.net, &sol.vm, &sol.va);
+            model
+                .areas
+                .iter()
+                .zip(&sol.net.areas)
+                .zip(exports)
+                .map(|((a, pa), e)| AreaResult {
+                    id: a.id.clone(),
+                    name: a.name.clone(),
+                    export: e * sb,
+                    target: a.interchange_mw,
+                    tolerance: a.tolerance_mw,
+                    controlled: st.area_interchange && pa.slack_bus.is_some(),
+                })
+                .collect()
+        },
         worst: sol
             .worst
             .iter()

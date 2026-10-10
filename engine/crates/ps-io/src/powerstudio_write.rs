@@ -255,6 +255,20 @@ impl Doc<'_> {
 
 /// Converts a model into a PowerStudio document.
 pub fn to_document(m: &Model) -> Converted {
+    // Each area's zone: its name, or its identifier where the name is empty or shared with another area.
+    let zones: Vec<String> = m
+        .areas
+        .iter()
+        .map(|a| {
+            let name = a.name.trim();
+            let shared = m.areas.iter().filter(|b| b.name.trim() == name).count() > 1;
+            if name.is_empty() || shared {
+                a.id.clone()
+            } else {
+                name.to_string()
+            }
+        })
+        .collect();
     let view = crate::busbranch::reduce(m);
     let mut d = Doc {
         m,
@@ -291,10 +305,7 @@ pub fn to_document(m: &Model) -> Converted {
                 .filter(|v| !v.name.is_empty())
                 .map_or(n.id.clone(), |v| v.name.clone()),
         };
-        let zone = n
-            .area
-            .and_then(|a| m.areas.get(a as usize))
-            .map_or(String::new(), |a| a.name.clone());
+        let zone = n.area.and_then(|a| zones.get(a as usize)).cloned().unwrap_or_default();
         let kv = if n.nominal_kv > 0.0 { n.nominal_kv } else { 1.0 };
         let id = d.push(
             "bus",
@@ -312,7 +323,18 @@ pub fn to_document(m: &Model) -> Converted {
     let mut counted: Vec<(&&str, &usize)> = d.counts.iter().collect();
     counted.sort();
     notes.extend(counted.into_iter().map(|(what, k)| format!("{k} {what}.")));
-    let doc = json!({
+    // Interchange targets of the areas that have a slack, by zone, for the study case.
+    let targets: Vec<Value> = m
+        .areas
+        .iter()
+        .zip(&zones)
+        .filter(|(a, _)| a.control)
+        .filter_map(|(a, zone)| {
+            let slack = d.bus(a.slack?)?.0;
+            Some(json!({ "zone": zone, "export": a.interchange_mw, "tolerance": a.tolerance_mw, "slack": slack }))
+        })
+        .collect();
+    let mut doc = json!({
         "format": "powerstudio",
         "version": 1,
         "name": m.meta.name,
@@ -321,6 +343,9 @@ pub fn to_document(m: &Model) -> Converted {
         "frequency": m.meta.frequency_hz,
         "elements": d.elements,
     });
+    if !targets.is_empty() {
+        doc["study"]["loadflow"]["areas"] = Value::Array(targets);
+    }
     Converted {
         doc,
         bus_of_node,

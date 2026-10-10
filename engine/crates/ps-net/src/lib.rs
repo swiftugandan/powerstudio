@@ -7,8 +7,8 @@
 //! per-unit system is defined once, here. docs/ENGINE.md derives each model.
 
 use ps_lf::{
-    MachineMode, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt, PuShuntControl, PuTapBranch, TapAxis,
-    TapTarget, TwoPort, UnitKind,
+    MachineMode, PuArea, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt, PuShuntControl, PuTapBranch,
+    TapAxis, TapTarget, TwoPort, UnitKind,
 };
 use ps_model::{Class, Line, MachineControl, Model, Transformer2, Transformer3};
 use ps_num::{C64, DEG};
@@ -600,6 +600,7 @@ impl Calc {
         );
         let tap_sources = regulating_taps(model, &topo, &mut net, &branches, &mut warnings);
         let shunt_controls = regulating_shunts(model, &topo, &mut net, &shunts, &mut warnings);
+        control_areas(model, &topo, &mut net, &mut warnings);
         let mut calc = Calc {
             net,
             topo,
@@ -1120,6 +1121,52 @@ fn push_tap_branch(
         })
         .collect();
     net.taps.push(PuTapBranch { branch, axes, table });
+}
+
+/// Control areas: every calculation bus takes the area of its first node that has one, and each area its interchange
+/// target and tolerance in per unit with the bus of its slack node. An area whose slack node is not energised takes
+/// no part in interchange control, with a warning.
+fn control_areas(model: &Model, topo: &Topology, net: &mut PuNetwork, warnings: &mut Vec<String>) {
+    let sb = model.meta.base_mva;
+    let mut bus_of_node = vec![None; model.nodes.len()];
+    net.bus_area = topo
+        .buses
+        .iter()
+        .enumerate()
+        .map(|(b, bus)| {
+            for &n in &bus.nodes {
+                bus_of_node[n as usize] = Some(b);
+            }
+            bus.nodes
+                .iter()
+                .find_map(|&n| model.nodes[n as usize].area.map(|a| a as usize))
+        })
+        .collect();
+    net.areas = model
+        .areas
+        .iter()
+        .enumerate()
+        .map(|(k, a)| {
+            let slack_bus = if a.control {
+                let bus = a.slack.and_then(|n| bus_of_node.get(n.0 as usize).copied().flatten());
+                if bus.is_none() {
+                    warnings.push(format!(
+                        "Area {}: its slack node is out of service or missing; it takes no part in interchange control.",
+                        a.name
+                    ));
+                }
+                bus
+            } else {
+                None
+            };
+            PuArea {
+                id: k,
+                target: a.interchange_mw / sb,
+                tolerance: a.tolerance_mw / sb,
+                slack_bus,
+            }
+        })
+        .collect();
 }
 
 /// The shunts with an active voltage control, with their admittance at every number of sections.

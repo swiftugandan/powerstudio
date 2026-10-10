@@ -724,3 +724,16 @@ table.grid td.muted { color: var(--text-3); }
 .cont-editor p.cont-empty.invalid { color: var(--danger); }
 .dock-note { display: flex; gap: 6px; align-items: flex-start; padding: 6px 10px; font-size: 12px; color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--border); }
 .dock-note .icon { flex: none; margin-top: 1px; color: var(--info, var(--accent)); }
+.events.areas { table-layout: fixed; }
+.events.areas th:first-child, .events.areas td.area-zone { width: 28%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.events.areas .input { width: 100%; }
+.dialog-body p.study-note:first-child { margin-top: 0; }
+.events.areas th { padding-left: 0; }
+@media (max-width: 640px) {
+  .events.areas, .events.areas tbody, .events.areas tr, .events.areas td { display: block; width: auto !important; }
+  .events.areas thead { display: none; }
+  .events.areas tr { padding: 6px 0 8px; border-bottom: 1px solid var(--border); }
+  .events.areas td.area-zone { font-weight: 600; padding: 0 0 4px; white-space: normal; }
+  .events.areas td[data-label] { display: grid; grid-template-columns: 40% minmax(0, 1fr); align-items: center; gap: 8px; padding: 2px 0; }
+  .events.areas td[data-label]::before { content: attr(data-label); color: var(--text-2); font-size: 12px; }
+}

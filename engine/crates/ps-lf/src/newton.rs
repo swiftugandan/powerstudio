@@ -60,6 +60,8 @@ pub struct Options {
     pub shunt_control: bool,
     /// Phase shifters regulate active power flow.
     pub phase_control: bool,
+    /// Each control area's slack bus holds the area's net export at its target.
+    pub area_interchange: bool,
     /// Largest number of outer loop changes.
     pub max_outer: usize,
 }
@@ -79,6 +81,7 @@ impl Default for Options {
             tap_control: false,
             shunt_control: false,
             phase_control: false,
+            area_interchange: false,
             max_outer: 30,
         }
     }
@@ -130,6 +133,8 @@ pub enum Control {
     Taps,
     /// Shunt voltage control.
     Shunts,
+    /// Area interchange control.
+    Interchange,
 }
 
 /// A load flow solution.
@@ -173,6 +178,8 @@ pub struct Solution {
     pub controls: Vec<ControlLog>,
     /// Controls that could not do what was asked, in plain words.
     pub notes: Vec<String>,
+    /// Control areas whose slack machines reached their limits short of the export target: area and shortfall, p.u.
+    pub area_short: Vec<(usize, f64)>,
     /// When the load flow did not converge: the buses with the largest remaining mismatch, largest first, as
     /// (bus, active mismatch, reactive mismatch) in p.u.
     pub worst: Vec<(usize, f64, f64)>,
@@ -223,6 +230,8 @@ pub(crate) struct Work {
     pub discrete: crate::discrete::DiscreteState,
     /// Outer loop changes so far.
     pub outer: usize,
+    /// Per control area: the export its slack machines could not reach at their limits, p.u. (0 when met).
+    pub area_short: Vec<f64>,
 }
 
 /// The present state of the network: voltages and the solver's last factorisation.
@@ -506,6 +515,7 @@ impl Work {
             notes: Vec::new(),
             discrete: crate::discrete::DiscreteState::new(&net.taps, net.shunt_controls.len()),
             outer: 0,
+            area_short: vec![0.0; net.areas.len()],
         };
         work.hold_from_start(opt);
         work
@@ -785,6 +795,13 @@ impl Work {
             .collect();
         let shunt_sections = self.net.shunt_controls.iter().map(|c| c.index).collect();
         let notes = std::mem::take(&mut self.notes);
+        let area_short = self
+            .area_short
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| **s != 0.0)
+            .map(|(a, &s)| (a, s))
+            .collect();
         // The buses that hold the mismatch, when Newton itself stopped short.
         let worst_buses = match s {
             Some(s) if !converged && n > 0 && worst > opt.tolerance => s.worst_buses(10),
@@ -810,6 +827,7 @@ impl Work {
             distributed,
             controls,
             notes,
+            area_short,
             worst: worst_buses,
             timing,
         }

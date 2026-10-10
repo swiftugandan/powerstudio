@@ -12,10 +12,13 @@ import { checkContingencies } from './contingencies.js';
  * @typedef {import('./catalog.js').ElementClass} ElementClass
  * @typedef {import('./catalog.js').FieldSpec} FieldSpec
  * @typedef {{ t: number, kind: 'fault' | 'clear' | 'trip' | 'loadstep', target: string, value?: number }} SimEvent
+ * @typedef {{ zone: string, export: number, tolerance: number, slack: string }} AreaTarget A zone's interchange: net export
+ *   target and tolerance in MW, and the busbar whose machines hold it ('' for none).
  * @typedef {{
  *   loadflow: { tolerance: number, maxIter: number, enforceQLimits: boolean, dcStart: boolean, loadScale: number,
  *     balance: 'reference' | 'maxP' | 'targetP' | 'factor' | 'margin' | 'load', slackTolerance: number, remoteVoltage: boolean,
- *     voltageDependentLoads: boolean, tapControl: boolean, shuntControl: boolean, phaseControl: boolean },
+ *     voltageDependentLoads: boolean, tapControl: boolean, shuntControl: boolean, phaseControl: boolean, areaInterchange: boolean,
+ *     areas: AreaTarget[] },
  *   shortcircuit: { fault: '3ph' | '2ph' | '1ph', mode: 'max' | 'min', kappa: 'B' | 'C', lvTolerance: '6' | '10', location: string },
  *   contingency: { lines: boolean, trafos: boolean, gens: boolean, maxLoading: number, acceptableS: number,
  *     screening: boolean, screeningMargin: number, screeningVoltage: number,
@@ -49,6 +52,8 @@ export const STUDY_FIELDS = {
     { key: 'tapControl', label: 'Tap changers regulate voltage', type: 'bool', group: 'loadflow', default: false },
     { key: 'phaseControl', label: 'Phase shifters regulate flow', type: 'bool', group: 'loadflow', default: false },
     { key: 'shuntControl', label: 'Switched shunts regulate voltage', type: 'bool', group: 'loadflow', default: false },
+    { key: 'areaInterchange', label: 'Areas hold their interchange', type: 'bool', group: 'loadflow', default: false,
+      help: 'Each zone with an export target and a slack busbar changes the active power of the machines there until its net export is within tolerance.' },
   ],
   shortcircuit: [
     { key: 'fault', label: 'Fault type', type: 'enum', group: 'shortcircuit', default: '3ph', options: ['3ph', '2ph', '1ph'] },
@@ -88,6 +93,7 @@ export function defaultStudy() {
   }
   study.rms.events = [];
   study.contingency.list = [];
+  study.loadflow.areas = [];
   study.contingency.remedial = [];
   return /** @type {Study} */ (/** @type {unknown} */ (study));
 }
@@ -195,6 +201,28 @@ export function normalizeDocument(input) {
   doc.study.contingency.list = lists.contingencies;
   doc.study.contingency.remedial = lists.remedial;
   issues.push(...lists.issues.map(i => `Study case: ${i}`));
+  // Interchange targets: one per zone that has busbars, with a slack busbar in that zone or none.
+  /** @type {Map<string, Set<string>>} */
+  const zones = new Map();
+  for (const b of doc.elements.filter(e => e.cls === 'bus' && e.zone)) {
+    const z = /** @type {string} */ (b.zone);
+    zones.set(z, (zones.get(z) ?? new Set()).add(b.id));
+  }
+  for (const raw of Array.isArray(study.loadflow?.areas) ? study.loadflow.areas : []) {
+    const a = /** @type {Record<string, unknown>} */ (raw);
+    const zone = typeof a?.zone === 'string' ? a.zone : '';
+    const busbars = zones.get(zone);
+    if (!busbars || doc.study.loadflow.areas.some(x => x.zone === zone) || !Number.isFinite(a.export) || !(Number(a.tolerance) >= 0)) {
+      issues.push(`Study case: skipped the interchange target of zone "${zone}"; it needs a zone with busbars, an export and a tolerance.`);
+      continue;
+    }
+    let slack = typeof a.slack === 'string' ? a.slack : '';
+    if (slack && !busbars.has(slack)) {
+      issues.push(`Study case: zone "${zone}": slack busbar "${slack}" is not in the zone; the zone takes no part in interchange control.`);
+      slack = '';
+    }
+    doc.study.loadflow.areas.push({ zone, export: /** @type {number} */ (a.export), tolerance: /** @type {number} */ (a.tolerance), slack });
+  }
   for (const ev of Array.isArray(study.rms?.events) ? study.rms.events : []) {
     const e = /** @type {Record<string, unknown>} */ (ev);
     if (typeof e?.t !== 'number' || !EVENT_KINDS.includes(/** @type {never} */ (e.kind)) || typeof e.target !== 'string' || !ids.has(e.target)) {

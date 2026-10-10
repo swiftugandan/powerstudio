@@ -49,6 +49,8 @@ pub struct LoadFlowSettings {
     pub shunt_control: bool,
     /// Phase shifters regulate active power flow.
     pub phase_control: bool,
+    /// Control areas hold their net export at their targets with their slack buses' machines.
+    pub area_interchange: bool,
 }
 
 impl Default for LoadFlowSettings {
@@ -66,6 +68,7 @@ impl Default for LoadFlowSettings {
             tap_control: false,
             shunt_control: false,
             phase_control: false,
+            area_interchange: false,
         }
     }
 }

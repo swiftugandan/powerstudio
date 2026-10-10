@@ -176,6 +176,19 @@ follow from the PTDFs as in A. J. Wood, B. F. Wollenberg and G. B. Sheblé, Powe
 3rd edition, Wiley, 2014, chapter 7. No value in the tests comes from these texts; they describe the methods, and
 the goldens and the full AC solution are the references.
 
+## Area interchange
+
+PowerStudio's area interchange control follows the PSS/E area record: ISW names the area slack bus, PDES the desired
+net interchange and PTOL its tolerance, both in MW. That PDES is the net export (power leaving the area) is read from
+the data rather than recalled: the IEEE 300 case in powsybl-core's test resources (`psse-ieee300.raw`, read in place
+from .cache/reference) carries a solved state in which area 1 exports 94.1 MW against a PDES of +100 and areas 2 and
+3 import 33.6 and 58.7 MW against −40 and −60 (each tie branch measured at its end inside the area), and the PDES
+values sum to zero. PowSyBl is not used as the reference: its PSS/E importer (`AreaConverter`) copies PDES into an
+interchange target that its grid model defines with the load sign convention, positive for import
+(docs/grid_model/network_subnetwork.md in powsybl-core 7.3.0), and ignores ISW, and OpenLoadFlow's area interchange
+loop spreads an area's correction over all its participating machines. The engine test
+(`engine/crates/ps-study/tests/interchange.rs`) checks the definition on IEEE 300 and the two-area case instead.
+
 ## Short-circuit method
 
 The voltage factors c, the correction factors KT and KG, the fictitious generator resistances, the peak factor κ

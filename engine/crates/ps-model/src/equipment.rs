@@ -668,6 +668,9 @@ pub struct Area {
     pub interchange_mw: f64,
     /// Tolerance on the target, MW.
     pub tolerance_mw: f64,
-    /// Whether interchange control acts in the load flow.
+    /// Whether interchange control acts in the load flow (when the study case turns it on).
     pub control: bool,
+    /// The area slack: the node whose machines change their active power to hold the interchange.
+    #[serde(default)]
+    pub slack: Option<NodeRef>,
 }

@@ -384,7 +384,7 @@ pub fn import_for_editor(files: Vec<ps_io::files::File>) -> Result<ForEditor, St
     let at_limit = machines_at_reactive_limits(&model);
     let mut study = Vec::new();
     if at_limit > 0 {
-        converted.doc["study"] = serde_json::json!({ "loadflow": { "enforceQLimits": true } });
+        converted.doc["study"]["loadflow"]["enforceQLimits"] = serde_json::Value::Bool(true);
         study.push(format!(
             "The study case respects reactive power limits: {at_limit} machine(s) sit at a limit in the file's own \
              solution, so it was solved with them. Without them, machines would hold voltages they cannot reach."

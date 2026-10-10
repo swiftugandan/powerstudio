@@ -170,6 +170,35 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
             angle0: 0.0,
         });
     }
+    // Interchange targets of the zones (the study case's `loadflow.areas`): export and tolerance in MW, slack busbar.
+    let targets = doc
+        .get("study")
+        .and_then(|s| s.get("loadflow"))
+        .and_then(|s| s.get("areas"))
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_object).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for t in targets {
+        let t = El(t);
+        let zone = t.text("zone");
+        let Some(&a) = areas.get(zone) else {
+            issues.push(format!(
+                "Study case: no busbar is in zone \"{zone}\"; its interchange target is skipped."
+            ));
+            continue;
+        };
+        let slack = node_of.get(t.text("slack")).map(|&n| NodeRef(n));
+        if slack.is_none() {
+            issues.push(format!(
+                "Study case: zone \"{zone}\" has no slack busbar; it takes no part in interchange control."
+            ));
+        }
+        let area = &mut m.areas[a as usize];
+        area.interchange_mw = t.num("export", 0.0);
+        area.tolerance_mw = t.num("tolerance", 10.0);
+        area.control = slack.is_some();
+        area.slack = slack;
+    }
     let mut seen: HashMap<(Class, String), ()> = HashMap::new();
     for raw in &elements {
         let e = El(raw);

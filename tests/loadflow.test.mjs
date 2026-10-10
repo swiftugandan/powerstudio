@@ -125,3 +125,25 @@ test('load scaling multiplies every load', () => {
   const r = studies.loadflow(ieee14(), { loadScale: 1.1 });
   assert.ok(Math.abs(r.totals.load - 259 * 1.1) < 1e-9);
 });
+
+test('a zone with an export target and a slack busbar holds its interchange, within its machines\' limits', () => {
+  const doc = ieee14();
+  const free = studies.loadflow(doc);
+  const sub = /** @type {import('../src/engine/reports.js').AreaResult} */ (free.areas.find(a => a.name === 'Subtransmission'));
+  assert.equal(sub.controlled, false);
+  // The 33 kV zone imports what its loads take. Its machine at bus 6 is a synchronous condenser (cos φ 0.0001):
+  // asked to import 15 MW less, it cannot, and the report says so.
+  doc.study.loadflow.areaInterchange = true;
+  doc.study.loadflow.areas = [{ zone: 'Subtransmission', export: sub.export + 15, tolerance: 1, slack: 'B6' }];
+  const condenser = studies.loadflow(doc);
+  assert.ok(condenser.warnings.some(w => w.startsWith('Area Subtransmission: its slack machines reached their active power limits')));
+  // As a generator rated 25 MVA at cos φ 0.85 (21 MW), it covers the 15 MW.
+  const g4 = /** @type {import('../src/core/catalog.js').Element} */ (doc.elements.find(e => e.id === 'G4'));
+  g4.cosphi = 0.85;
+  const held = studies.loadflow(doc);
+  const after = /** @type {import('../src/engine/reports.js').AreaResult} */ (held.areas.find(a => a.name === 'Subtransmission'));
+  assert.ok(held.converged && after.controlled);
+  assert.ok(Math.abs(after.export - (sub.export + 15)) <= 1, `${after.export}`);
+  const p = (/** @type {import('../src/engine/reports.js').LoadFlowResult} */ r) => /** @type {any} */ (r.gens.find(g => g.id === 'G4')).p;
+  assert.ok(Math.abs(p(held) - 15) < 1, `${p(held)} MW`);
+});

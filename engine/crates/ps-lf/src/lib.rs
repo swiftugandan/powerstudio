@@ -10,6 +10,7 @@
 //! tap changers and switched shunts as outer loops. [`branch_flows`] turns a solution into flows and currents.
 
 mod control;
+pub use control::area_exports;
 mod dc;
 mod discrete;
 mod equations;
@@ -23,8 +24,8 @@ mod ybus;
 pub use dc::dc_angles;
 pub use flows::{BranchFlow, branch_flows, bus_injections};
 pub use network::{
-    BusKind, MachineMode, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt, PuShuntControl, PuTapBranch,
-    TapAxis, TapTarget, TwoPort, UnitKind, nominal_angles, two_port,
+    BusKind, MachineMode, PuArea, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt, PuShuntControl,
+    PuTapBranch, TapAxis, TapTarget, TwoPort, UnitKind, nominal_angles, two_port,
 };
 pub use newton::{
     Balance, Cache, Control, ControlLog, IterationLog, Options, Solution, Timing, UnitOutput, solve, solve_cached,

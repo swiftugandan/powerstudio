@@ -95,8 +95,8 @@ solution then stalls at a mismatch it reports, bus by bus, instead of diverging.
 - **HVDC links** run at their setpoints: the rectifier draws the setpoint from its AC network and the inverter delivers
   it less the stations' losses (a percentage) and the line's R·P²/V². A line-commutated station also consumes
   |P|·tan(acos pf); a voltage-source station regulates voltage or holds its reactive power within limits.
-- **Controls** act as outer loops around Newton, in OpenLoadFlow's order: slack distribution, reactive limits, phase
-  shifters, tap changers, switched shunts. A loop that changes something re-solves before the next is checked, and a
+- **Controls** act as outer loops around Newton, in OpenLoadFlow's order: slack distribution, area interchange,
+  reactive limits, phase shifters, tap changers, switched shunts. A loop that changes something re-solves before the next is checked, and a
   round repeats until nothing changes (at most 30 changes). `engine/crates/ps-lf/src/control.rs` and `discrete.rs`
   state each rule:
   - *Slack distribution* shares each island's imbalance among machines (by maximum power, present power,
@@ -108,12 +108,20 @@ solution then stalls at a mismatch it reports, bus by bus, instead of diverging.
     direction the limit was resisting, at most three times. With limits on, a machine whose reactive range is under
     1 Mvar holds its stated reactive power. (The `ieee14-qlim` case: G2 reaches 50 Mvar only after G4 and G5 are
     held.)
+  - *Area interchange* holds each control area's net export (the active power entering the branches to other areas,
+    at their ends inside it) within its tolerance of its target. The machines at the area's slack bus take the
+    difference, shared equally within their active power limits; an area whose slack bus holds an island's
+    reference balances the island instead, so its export is what the others leave; an area whose slack machines reach
+    their limits stops there and the report says how far short it is. The definition follows the PSS/E area record
+    (ISW, PDES, PTOL); docs/research/sources.md gives the evidence for PDES being an export and why PowSyBl is not the
+    reference here. In the editor an area is a zone, with its target, tolerance and slack busbar in the study case.
   - *Tap changers, phase shifters and switched shunts* move whole positions. The change each needs comes from a
     sensitivity at the converged state; the new position is the closest to that change, within three positions per
     round for a single tap changer, one per pass when several regulate one busbar, four sections per round for a
     shunt. The voltage target of a busbar a machine also regulates is the machine's.
 - **Diagnostics.** The report lists the final tap positions and shunt sections, the power each island's distribution
-  moved, what each control did, and in plain words every control that could not do what was asked.
+  moved, every area's net export with its target, what each control did, and in plain words every control that could
+  not do what was asked.
 - **Results.** Voltages, branch flows and currents at both ends, losses, loading (current against the permanent
   limit for lines, apparent power against the rating for transformers), the output of every machine and grid, the
   iteration log and the time spent. A bus's active power balance goes to its reference units. Its reactive balance
@@ -354,7 +362,7 @@ What maps:
 | Transformers | Two- and three-winding transformers (`T-<i>-<j>-<ckt>`, `T-<i>-<j>-<k>-<ckt>`); CW, CZ and CM conversions; three-winding units as a star; each winding's tap range RMI…RMA in NTP steps with the stated ratio as the present step, voltage control from VMA, VMI and CONT; COD 3 windings as phase tap tables with their flow control |
 | System switching devices (version 35) | Switches |
 | FACTS devices | A shunt device (a STATCOM) becomes a static var compensator holding VSET within ±SHMX |
-| Areas | Areas with their scheduled interchange |
+| Areas | Areas with their scheduled interchange (PDES, as net export), tolerance (PTOL) and slack bus (ISW) for interchange control |
 | Two-terminal DC lines | HVDC links `DC-<name>` between line-commutated stations `DC-<name>-R` and `-I`, at the scheduled power (MDC 1: SETVL MW; MDC 2: SETVL A at VSCHD) with the resistance RDC at VSCHD, each station at the power factor ½·(cos ANMX + cos 60°) as PowSyBl converts them |
 | VSC DC lines | HVDC links `VSC-<name>` between voltage-source stations `-1` and `-2`, at \|DCSET\| of the converter controlling AC power, losses from ALOSS, voltage control (MODE 1) at ACSET or a power factor (MODE 2) |
 

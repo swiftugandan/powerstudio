@@ -39,6 +39,10 @@ export async function openStudyDialog(app, focusSection) {
       }));
     }
     body.append(h('h3', { text: TITLES[section], id: `study-${section}` }), props);
+    if (section === 'loadflow') {
+      const areas = areaEditor(app, /** @type {any} */ (draft.loadflow));
+      if (areas) body.append(h('h3', { text: 'Area interchange', id: 'study-areas' }), areas);
+    }
     if (section === 'contingency') {
       const { list, remedial } = doc.study.contingency;
       const own = `${list.length} contingenc${list.length === 1 ? 'y' : 'ies'} of your own and ${remedial.length} remedial action${remedial.length === 1 ? '' : 's'}`;
@@ -55,8 +59,40 @@ export async function openStudyDialog(app, focusSection) {
     for (const [section, fields] of Object.entries(STUDY_FIELDS)) for (const f of fields) tx.setStudy(section, f.key, draft[section][f.key]);
     const events = /** @type {any[]} */ (draft.rms.events).filter(e => Number.isFinite(e.t) && e.target).sort((a, b) => a.t - b.t);
     if (JSON.stringify(events) !== JSON.stringify(doc.study.rms.events)) tx.setStudy('rms', 'events', events);
+    const areas = /** @type {import('../core/document.js').AreaTarget[]} */ (draft.loadflow.areas).filter(a => a.slack || a.export !== 0);
+    if (JSON.stringify(areas) !== JSON.stringify(doc.study.loadflow.areas)) tx.setStudy('loadflow', 'areas', areas);
   }));
   if (focusSection) document.getElementById(`study-${focusSection}`)?.scrollIntoView();
+}
+
+/**
+ * The interchange target of every zone: net export, tolerance and slack busbar. Null when no busbar has a zone.
+ * @param {import('../app.js').App} app @param {{ areas: import('../core/document.js').AreaTarget[] }} lf
+ */
+function areaEditor(app, lf) {
+  const doc = app.store.doc;
+  const zones = [...new Set(doc.elements.filter(e => e.cls === 'bus' && e.zone).map(e => /** @type {string} */ (e.zone)))].sort((a, b) => a.localeCompare(b, 'en-GB'));
+  if (!zones.length) return null;
+  // One row per zone, the ones without a target starting empty.
+  lf.areas = zones.map(zone => lf.areas.find(a => a.zone === zone) ?? { zone, export: 0, tolerance: 10, slack: '' });
+  const number = (/** @type {number} */ v, /** @type {(x: number) => void} */ set, /** @type {string} */ aria, /** @type {number} */ min) => {
+    const input = /** @type {HTMLInputElement} */ (h('input', { class: 'input has-unit', value: String(v), 'aria-label': aria, inputmode: 'decimal' }));
+    input.addEventListener('change', () => { const x = parseNumber(input.value); const ok = Number.isFinite(x) && x >= min; input.classList.toggle('invalid', !ok); if (ok) set(x); });
+    return h('div', { class: 'field' }, input, h('span', { class: 'unit', text: 'MW' }));
+  };
+  const rows = lf.areas.map(a => {
+    const slack = /** @type {HTMLSelectElement} */ (h('select', { class: 'input', 'aria-label': `Slack busbar of ${a.zone}` }, h('option', { value: '', text: 'None: not controlled' }),
+      ...doc.elements.filter(e => e.cls === 'bus' && e.zone === a.zone).map(b => h('option', { value: b.id, text: b.name || b.id }))));
+    slack.value = a.slack;
+    slack.addEventListener('change', () => { a.slack = slack.value; });
+    return h('tr', {}, h('td', { class: 'area-zone', text: a.zone, title: a.zone }),
+      h('td', { 'data-label': 'Export target' }, number(a.export, x => { a.export = x; }, `Export target of ${a.zone}`, -Infinity)),
+      h('td', { 'data-label': 'Tolerance' }, number(a.tolerance, x => { a.tolerance = x; }, `Tolerance of ${a.zone}`, 0)),
+      h('td', { 'data-label': 'Slack busbar' }, slack));
+  });
+  return h('div', {},
+    h('p', { class: 'study-note', text: 'A zone exports the active power leaving it through branches to other zones. With area interchange on, the machines at a zone\'s slack busbar hold its export within the tolerance.' }),
+    h('table', { class: 'events areas' }, h('thead', {}, h('tr', {}, h('th', { text: 'Zone' }), h('th', { text: 'Export target' }), h('th', { text: 'Tolerance' }), h('th', { text: 'Slack busbar' }))), h('tbody', {}, ...rows)));
 }
 
 /** @param {import('../app.js').App} app @param {{ events: import('../core/document.js').SimEvent[] }} rms */
