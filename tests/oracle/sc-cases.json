@@ -1,5 +1,5 @@
 {
- "about": "Short-circuit cases from IEC TR 60909-4 as pandapower's test suite encodes them (pandapower is BSD-3; the test file is downloaded at a pinned commit by scripts/fetch-reference.mjs into .cache/reference and read by scripts/oracle/iec60909.py, which writes tests/oracle/golden/sc-<name>.json with each network, pandapower's results, and the values the test expects, read from its source). Each case names the test function whose network and expected values it takes, and the calculation: fault ('3ph', '2ph'), case ('max', 'min'), kappa method, and changes the test makes to the network before calculating.",
+ "about": "Short-circuit cases from IEC TR 60909-4 as pandapower's test suite encodes them (pandapower is BSD-3; the test file is downloaded at a pinned commit by scripts/fetch-reference.mjs into .cache/reference and read by scripts/oracle/iec60909.py, which writes tests/oracle/golden/sc-<name>.json with each network, pandapower's results, and the values the test expects, read from its source). Each case names the test function whose network and expected values it takes, and the calculation: fault ('3ph', '2ph', '1ph'), case ('max', 'min'), kappa method, and changes the test makes to the network before calculating.",
  "archives": {
   "pandapower-iec60909-4": {
    "file": "pandapower-test_iec60909_4.py",
@@ -14,7 +14,7 @@
    "network": "iec_60909_4",
    "fault": "3ph",
    "case": "max",
-   "about": "The full example network: three-phase faults, maximum currents, \u03ba by method C."
+   "about": "The full example network: three-phase faults, maximum currents, κ by method C."
   },
   {
    "name": "tr60909-4-3ph-min",
@@ -26,7 +26,7 @@
     "line_endtemp_degree": 80.0,
     "ext_grid_min_from_max": 10.0
    },
-   "about": "Minimum currents: line end temperature 80 \u00b0C, network feeders at a tenth of their maximum short-circuit power."
+   "about": "Minimum currents: line end temperature 80 °C, network feeders at a tenth of their maximum short-circuit power."
   },
   {
    "name": "tr60909-4-2ph-max",
@@ -35,6 +35,14 @@
    "fault": "2ph",
    "case": "max",
    "about": "Line-to-line faults, maximum currents."
+  },
+  {
+   "name": "tr60909-4-1ph-max",
+   "test": "test_iec_60909_4_1ph",
+   "network": "iec_60909_4",
+   "fault": "1ph",
+   "case": "max",
+   "about": "Line-to-earth faults, maximum currents. pandapower skips this test as unfinished; it meets the listed values at F1 to F5 and F8 to F10, and at F6 and F7 finds an earth path through the three-winding transformers that the report's values do not have."
   },
   {
    "name": "tr60909-4-3ph-no-motors",

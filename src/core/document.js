@@ -21,7 +21,7 @@ import { checkContingencies } from './contingencies.js';
  *     voltageDependentLoads: boolean, tapControl: boolean, shuntControl: boolean, phaseControl: boolean, areaInterchange: boolean,
  *     areas: AreaTarget[] },
  *   shortcircuit: { fault: '3ph' | '2ph' | '1ph', mode: 'max' | 'min', kappa: 'B' | 'C', lvTolerance: '6' | '10', location: string,
- *     tMin: number, tK: number, lineTemperature: number },
+ *     tMin: number, tK: number, lineTemperature: number, faultR: number, faultX: number },
  *   contingency: { lines: boolean, trafos: boolean, gens: boolean, busbars: boolean, maxLoading: number, acceptableS: number,
  *     screening: boolean, screeningMargin: number, screeningVoltage: number,
  *     list: import('./contingencies.js').Contingency[], remedial: import('./contingencies.js').RemedialAction[] },
@@ -70,6 +70,9 @@ export const STUDY_FIELDS = {
       help: 'How long the current flows, for the thermal equivalent current Ith.' },
     { key: 'lineTemperature', label: 'Line temperature at fault end', type: 'number', group: 'shortcircuit', default: 80, unit: '°C', min: 20, max: 250,
       help: 'Minimum currents only: lines\u2019 resistance rises from its 20 °C value to this conductor temperature.' },
+    { key: 'faultR', label: 'Fault resistance', type: 'number', group: 'shortcircuit', default: 0, unit: 'Ω', min: 0, max: 1e4,
+      help: 'An impedance in each faulted phase, such as an arc; zero is a bolted fault.' },
+    { key: 'faultX', label: 'Fault reactance', type: 'number', group: 'shortcircuit', default: 0, unit: 'Ω', min: 0, max: 1e4 },
   ],
   contingency: [
     { key: 'lines', label: 'Line outages', type: 'bool', group: 'loadflow', default: true },

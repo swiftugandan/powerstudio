@@ -746,6 +746,8 @@ fn branches(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 limits: limits(rate, kv1, kv2),
                 on_load_taps: false,
                 tap_range_pct: 0.0,
+                rn: [0.0; 2],
+                xn: [0.0; 2],
             });
             continue;
         }
@@ -1031,6 +1033,8 @@ fn transformers(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                 limits: limits(rate, kv1, kv2),
                 on_load_taps: false,
                 tap_range_pct: 0.0,
+                rn: [0.0; 2],
+                xn: [0.0; 2],
             });
         } else {
             let (n3, kv3, ide3) = cx.at('3', k, &[i, j], &ckt, r)?;
@@ -1076,6 +1080,10 @@ fn transformers(cx: &mut Ctx, raw: &RawCase) -> Result<(), ParseError> {
                         -r.num(2 + w, 2, 0.0)?
                     },
                     conn: Winding::Yn,
+                    r0: zs[w].0 * zb,
+                    x0: zs[w].1 * zb,
+                    rn: 0.0,
+                    xn: 0.0,
                     // STAT: 0 all out, 1 all in, 2 winding 2 out, 3 winding 3 out, 4 winding 1 out.
                     open: matches!((stat, w), (2, 1) | (3, 2) | (4, 0)),
                 };

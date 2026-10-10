@@ -164,7 +164,8 @@ function shortcircuit(r, name) {
   const top = [...r.buses].sort((a, b) => b.ikss - a.ikss);
   return [
     facts([
-      ['Fault', `${enumLabel('fault', r.fault)}, ${r.mode === 'max' ? 'maximum' : 'minimum'} currents, κ method ${r.kappaMethod}`],
+      ['Fault', `${enumLabel('fault', r.fault)}, ${r.mode === 'max' ? 'maximum' : 'minimum'} currents, κ method ${r.kappaMethod}`
+        + (r.faultR || r.faultX ? `, through ${fixed(r.faultR, 2)} + j${fixed(r.faultX, 2)} Ω in each faulted phase` : ', bolted')],
       ['Location', r.location ? name(r.location) : `Every busbar (${r.buses.length})`],
     ]),
     h('h3', { text: 'Highest initial short-circuit currents' }),

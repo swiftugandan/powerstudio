@@ -19,6 +19,8 @@ fn settings(fault: FaultType, mode: ScMode, kappa: KappaMethod, location: &str) 
         t_min: 0.1,
         t_k: 1.0,
         line_temperature: 20.0,
+        fault_r: 0.0,
+        fault_x: 0.0,
     }
 }
 
@@ -31,8 +33,14 @@ fn every_fault_type_and_mode_matches_pandapower() {
             (FaultType::LineToLine, "2ph"),
             (FaultType::LineToEarth, "1ph"),
         ] {
-            for (mode, mkey) in [(ScMode::Max, "max"), (ScMode::Min, "min")] {
-                let r = shortcircuit::run(&imp.model, &settings(fault, mode, KappaMethod::C, ""));
+            // Maximum and minimum currents, and maximum currents through the oracle's fault impedance.
+            for (mode, mkey) in [(ScMode::Max, "max"), (ScMode::Min, "min"), (ScMode::Max, "max-zf")] {
+                let mut st = settings(fault, mode, KappaMethod::C, "");
+                if mkey.ends_with("zf") {
+                    st.fault_r = f(&golden(name)["faultImpedance"]["r"]);
+                    st.fault_x = f(&golden(name)["faultImpedance"]["x"]);
+                }
+                let r = shortcircuit::run(&imp.model, &st);
                 let reference = &golden(name)["shortcircuit"][format!("{key}-{mkey}")];
                 assert_eq!(
                     r.buses.len(),

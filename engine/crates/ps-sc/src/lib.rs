@@ -19,7 +19,7 @@ pub use factors::{
 };
 
 use ps_model::study::{FaultType, KappaMethod, ScMode, ShortCircuitSettings};
-use ps_model::{Class, Feeder, Line, Model, NodeRef, Transformer2, Transformer3, Winding, Winding3};
+use ps_model::{Class, Feeder, Line, Model, NodeRef, Transformer2, Winding};
 use ps_net::{
     BuildOptions, Calc, Seq, TransformerOptions, line_pu, tap_factor, transformer2_pu, transformer3_winding_pu,
     two_port,
@@ -90,6 +90,10 @@ pub struct ShortCircuitReport {
     pub t_min: f64,
     /// Duration of the short circuit for the thermal equivalent currents, s.
     pub t_k: f64,
+    /// Fault resistance in each faulted phase, Ω.
+    pub fault_r: f64,
+    /// Fault reactance in each faulted phase, Ω.
+    pub fault_x: f64,
     /// Results per faulted bus.
     pub buses: Vec<FaultResult>,
     /// The single fault location, or empty.
@@ -147,6 +151,8 @@ struct Builder<'a> {
     star_lines: HashMap<usize, Line>,
     /// Lines that stand for part of a transformer's impedance, which conductor temperature does not change.
     transformer_lines: HashSet<usize>,
+    /// The two-winding transformers that are windings of a document's star.
+    star_members: HashSet<usize>,
 }
 
 type Entries = Vec<(usize, usize, C64)>;
@@ -307,16 +313,34 @@ impl Builder<'_> {
                 stamp(&mut e, a, b, two_port(sx(p.z), C64::ZERO, C64::ZERO, p.ratio, p.shift));
                 continue;
             }
-            match (t.conn1, t.conn2) {
-                (Winding::D, Winding::Yn) => e.push((b, b, sx(p.z).inv())),
-                (Winding::Yn, Winding::Yn) => {
-                    stamp(&mut e, a, b, two_port(sx(p.z), C64::ZERO, C64::ZERO, p.ratio, 0.0))
-                }
-                (Winding::Yn, Winding::D) => {
-                    // Zero-sequence impedance seen from the earthed HV winding, on the HV bus's base, tap included.
+            // An earthed winding's neutral earthing appears three times in the zero sequence.
+            let neutral = |w: usize, bus: usize| C64::new(t.rn[w], t.xn[w]).scale(3.0 * sb / (vbase[bus] * vbase[bus]));
+            let earthed = |c: Winding| matches!(c, Winding::Yn | Winding::Zn);
+            // A document star's winding: its own connection decides, the star side standing for the star point.
+            let conn2 = if self.star_members.contains(&k) {
+                Winding::Yn
+            } else {
+                t.conn2
+            };
+            match (t.conn1, conn2) {
+                (Winding::D, c2) if earthed(c2) => e.push((b, b, sx(p.z + neutral(1, b)).inv())),
+                (c1, c2) if earthed(c1) && earthed(c2) => stamp(
+                    &mut e,
+                    a,
+                    b,
+                    two_port(
+                        sx(p.z + neutral(0, a) + neutral(1, b)),
+                        C64::ZERO,
+                        C64::ZERO,
+                        p.ratio,
+                        0.0,
+                    ),
+                ),
+                (c1, Winding::D) if earthed(c1) => {
+                    // Zero-sequence impedance seen from the earthed winding 1, on its bus's base, tap included.
                     let tf = tap_factor(t, 1);
                     let z = C64::new(t.r0, t.x0).scale(tf * tf * sb / (vbase[a] * vbase[a]) * kt);
-                    e.push((a, a, sx(z).inv()));
+                    e.push((a, a, sx(z + neutral(0, a)).inv()));
                 }
                 _ => {}
             }
@@ -342,26 +366,41 @@ impl Builder<'_> {
             } else {
                 t.clone()
             };
+            // The zero sequence through each winding's own R0, X0 (the positive values where none are given).
+            let mut zero = corrected.clone();
+            for w in &mut zero.windings {
+                (w.r, w.x) = w.zero_sequence();
+            }
             for (w, end) in ends.iter().enumerate() {
                 let Some(a) = *end else { continue };
                 if t.windings[w].open {
                     continue;
                 }
-                let p = transformer3_winding_pu(&corrected, w, vbase[a], sb);
                 match seq {
-                    Seq::Positive => stamp(
-                        &mut e,
-                        a,
-                        star,
-                        two_port(sx(p.z), C64::ZERO, C64::ZERO, p.ratio, p.shift),
-                    ),
-                    Seq::Zero => match t.windings[w].conn {
-                        Winding::Yn | Winding::Zn => {
-                            stamp(&mut e, a, star, two_port(sx(p.z), C64::ZERO, C64::ZERO, p.ratio, 0.0))
+                    Seq::Positive => {
+                        let p = transformer3_winding_pu(&corrected, w, vbase[a], sb);
+                        stamp(
+                            &mut e,
+                            a,
+                            star,
+                            two_port(sx(p.z), C64::ZERO, C64::ZERO, p.ratio, p.shift),
+                        )
+                    }
+                    Seq::Zero => {
+                        let p = transformer3_winding_pu(&zero, w, vbase[a], sb);
+                        let wd = &t.windings[w];
+                        let neutral = C64::new(wd.rn, wd.xn).scale(3.0 * sb / (vbase[a] * vbase[a]));
+                        match wd.conn {
+                            Winding::Yn | Winding::Zn => stamp(
+                                &mut e,
+                                a,
+                                star,
+                                two_port(sx(p.z + neutral), C64::ZERO, C64::ZERO, p.ratio, 0.0),
+                            ),
+                            Winding::D => e.push((star, star, sx(p.z).inv())),
+                            _ => {}
                         }
-                        Winding::D => e.push((star, star, sx(p.z).inv())),
-                        _ => {}
-                    },
+                    }
                 }
             }
         }
@@ -505,9 +544,9 @@ fn document_stars(model: &Model) -> Vec<Star> {
 }
 
 /// The windings of each document star with KT applied per winding pair, as `three_winding_corrected` does for a
-/// three-winding transformer: each winding's impedance on its own side, the pairs corrected on the smaller rating,
-/// and the result back in the transformer, or in the line where the winding has one. A transformer's
-/// zero-sequence impedance follows its reactance.
+/// three-winding transformer: each winding's impedances on its own side in both sequences, the pair factors from the
+/// positive sequence on the smaller rating, and the results back in the transformer, or in the line where the winding
+/// has one.
 fn star_corrections(
     model: &Model,
     calc: &Calc,
@@ -516,6 +555,7 @@ fn star_corrections(
 ) -> (HashMap<usize, Transformer2>, HashMap<usize, Line>) {
     let (mut trafos, mut lines) = (HashMap::new(), HashMap::new());
     for star in stars {
+        let n = star.windings.len();
         // Each winding's transformer: its end away from the star, that side's rated voltage and the other side's.
         let ends: Vec<(NodeRef, f64, f64)> = star
             .windings
@@ -542,76 +582,79 @@ fn star_corrections(
             .map(|b| cmax_bus[b])
             .fold(f64::NEG_INFINITY, f64::max);
         let cmax = if cmax.is_finite() { cmax } else { 1.1 };
-        // Each winding's transformer impedance and whole impedance, in ohms on its own side.
-        let head: Vec<(f64, f64)> = star
-            .windings
-            .iter()
-            .zip(&ends)
-            .map(|(w, e)| {
-                let t = &model.transformers2[w.trafo];
-                let refer = (e.1 / t.rated_kv1).powi(2);
-                (t.r * refer, t.x * refer)
-            })
-            .collect();
-        let own: Vec<(f64, f64)> = star
-            .windings
-            .iter()
-            .zip(&ends)
-            .zip(&head)
-            .map(|((w, e), h)| match w.line {
-                Some(l) => {
-                    let refer = (e.1 / e.2).powi(2);
-                    (h.0 + model.lines[l].r * refer, h.1 + model.lines[l].x * refer)
-                }
-                None => *h,
-            })
-            .collect();
-        let rating = |n: usize| model.transformers2[star.windings[n].trafo].rated_mva;
-        let corrected: Vec<(f64, f64)> = if own.len() == 3 {
-            let w = |n: usize| Winding3 {
-                rated_kv: ends[n].1,
-                rated_mva: rating(n),
-                r: own[n].0,
-                x: own[n].1,
-                ..Default::default()
-            };
-            let t3 = Transformer3 {
-                windings: [w(0), w(1), w(2)],
-                ..Default::default()
-            };
-            three_winding_corrected(&t3, cmax)
-                .windings
-                .iter()
-                .map(|w| (w.r, w.x))
-                .collect()
-        } else {
-            // Two windings: one pair, one factor.
-            let k1 = ends[0].1;
-            let x_pair = own[0].1 + own[1].1 * (k1 / ends[1].1).powi(2);
-            let kt = 0.95 * cmax / (1.0 + 0.6 * x_pair / (k1 * k1 / rating(0).min(rating(1))));
-            own.iter().map(|o| (o.0 * kt, o.1 * kt)).collect()
+        // Each winding's transformer part and whole impedance, Ω on its own side, positive and zero sequence.
+        let head = |m: usize, zero: bool| -> (f64, f64) {
+            let t = &model.transformers2[star.windings[m].trafo];
+            let refer = (ends[m].1 / t.rated_kv1).powi(2);
+            let (r, x) = if zero { (t.r0, t.x0) } else { (t.r, t.x) };
+            (r * refer, x * refer)
         };
-        for (n, w) in star.windings.iter().enumerate() {
+        let own = |m: usize, zero: bool| -> (f64, f64) {
+            let h = head(m, zero);
+            match star.windings[m].line {
+                Some(l) => {
+                    let l = &model.lines[l];
+                    let refer = (ends[m].1 / ends[m].2).powi(2);
+                    let (r, x) = if zero { (l.r0, l.x0) } else { (l.r, l.x) };
+                    (h.0 + r * refer, h.1 + x * refer)
+                }
+                None => h,
+            }
+        };
+        // On the first winding's voltage, the star (or the one pair) corrected with the positive sequence's factors.
+        let k1 = ends[0].1;
+        let on_k1 = |m: usize, z: (f64, f64)| {
+            let f = (k1 / ends[m].1).powi(2);
+            (z.0 * f, z.1 * f)
+        };
+        let from_k1 = |m: usize, z: (f64, f64)| {
+            let f = (ends[m].1 / k1).powi(2);
+            (z.0 * f, z.1 * f)
+        };
+        let rating = |m: usize| model.transformers2[star.windings[m].trafo].rated_mva;
+        let corrected = |zero: bool| -> Vec<(f64, f64)> {
+            let positive: Vec<(f64, f64)> = (0..n).map(|m| on_k1(m, own(m, false))).collect();
+            let seq: Vec<(f64, f64)> = (0..n).map(|m| on_k1(m, own(m, zero))).collect();
+            let out = if n == 3 {
+                let kt = factors::pair_factors(
+                    [positive[0], positive[1], positive[2]],
+                    [rating(0), rating(1), rating(2)],
+                    k1,
+                    cmax,
+                );
+                factors::correct_star([seq[0], seq[1], seq[2]], kt).to_vec()
+            } else {
+                // Two windings: one pair, one factor.
+                let x_pair = positive[0].1 + positive[1].1;
+                let kt = 0.95 * cmax / (1.0 + 0.6 * x_pair / (k1 * k1 / rating(0).min(rating(1))));
+                seq.iter().map(|z| (z.0 * kt, z.1 * kt)).collect()
+            };
+            out.into_iter().enumerate().map(|(m, z)| from_k1(m, z)).collect()
+        };
+        let (positive, zero) = (corrected(false), corrected(true));
+        for (m, w) in star.windings.iter().enumerate() {
             let t = &model.transformers2[w.trafo];
             match w.line {
                 Some(l) => {
                     // The transformer keeps its part; the line takes the rest of the corrected impedance.
-                    let back = (ends[n].2 / ends[n].1).powi(2);
+                    let back = (ends[m].2 / ends[m].1).powi(2);
+                    let (h, h0) = (head(m, false), head(m, true));
                     let mut c = model.lines[l].clone();
-                    c.r = (corrected[n].0 - head[n].0) * back;
-                    c.x = (corrected[n].1 - head[n].1) * back;
+                    c.r = (positive[m].0 - h.0) * back;
+                    c.x = (positive[m].1 - h.1) * back;
+                    c.r0 = (zero[m].0 - h0.0) * back;
+                    c.x0 = (zero[m].1 - h0.1) * back;
                     lines.insert(l, c);
                     // Listed as it is, so it takes no correction of its own.
                     trafos.insert(w.trafo, t.clone());
                 }
                 None => {
-                    let back = (t.rated_kv1 / ends[n].1).powi(2);
+                    let back = (t.rated_kv1 / ends[m].1).powi(2);
                     let mut c = t.clone();
-                    c.r = corrected[n].0 * back;
-                    c.x = corrected[n].1 * back;
-                    let ratio = if t.x != 0.0 { c.x / t.x } else { 1.0 };
-                    c.r0 *= ratio;
-                    c.x0 *= ratio;
+                    c.r = positive[m].0 * back;
+                    c.x = positive[m].1 * back;
+                    c.r0 = zero[m].0 * back;
+                    c.x0 = zero[m].1 * back;
                     trafos.insert(w.trafo, c);
                 }
             }
@@ -671,6 +714,13 @@ fn find_units(
             continue;
         };
         let Some(other) = other else { continue };
+        if let Some(first) = units.iter().find(|u: &&Unit| u.bus == bus) {
+            warnings.push(format!(
+                "{}: shares its busbar with {}, the machine of another power station unit; a fault there is calculated \
+                 for {}'s terminals.",
+                g.id, model.generators[first.machine].id, model.generators[first.machine].id
+            ));
+        }
         units.push(Unit {
             machine: k,
             trafo: tk,
@@ -723,6 +773,7 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
         star_windings,
         star_lines,
         transformer_lines: transformer_lines(model),
+        star_members: stars.iter().flat_map(|s| s.windings.iter().map(|w| w.trafo)).collect(),
     };
     let fc = if f == 60.0 { 24.0 } else { 20.0 };
     let factor = |entries: Entries| {
@@ -735,6 +786,7 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
     // Factorisations per variant, made when a fault first needs them.
     let mut positive: HashMap<Variant, Option<ComplexLu>> = HashMap::new();
     let mut peak: HashMap<Variant, Option<ComplexLu>> = HashMap::new();
+    let mut zero_peak: Option<Option<ComplexLu>> = None;
     let mut zero = if st.fault == FaultType::LineToEarth {
         factor(b.assemble(Seq::Zero, Variant::Normal, false))
     } else {
@@ -786,33 +838,58 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
         };
         let (vb, cc) = (vbase[k], c_bus[k]);
         let zb = vb * vb / sb;
-        // In ohms with Un in kV the currents come out in kA: three-phase c·Un/(√3·|Z1|), line-to-line
-        // c·Un/|Z1 + Z2|, line-to-earth √3·c·Un/|Z1 + Z2 + Z0|, with Z2 = Z1.
+        // The fault impedance ZF in each faulted phase, as pandapower defines it.
+        let zf = C64::new(st.fault_r, st.fault_x).scale(1.0 / zb);
+        // The fault loop in p.u. of the bus's base: Z1 + ZF, 2·(Z1 + ZF) and 2·Z1 + Z0 + 3·ZF (Z2 = Z1).
+        let loop_of = |z1: C64, z0: C64| match st.fault {
+            FaultType::ThreePhase => z1 + zf,
+            FaultType::LineToLine => (z1 + zf).scale(2.0),
+            FaultType::LineToEarth => z1.scale(2.0) + z0 + zf.scale(3.0),
+        };
+        // In ohms with Un in kV the currents come out in kA: three-phase c·Un/(√3·|loop|), line-to-line c·Un/|loop|,
+        // line-to-earth √3·c·Un/|loop|.
+        let zl = loop_of(z1, z0).abs() * zb;
         let ikss = voltage_scale
             * match st.fault {
-                FaultType::ThreePhase => cc * vb / (SQRT3 * z1.abs() * zb),
-                FaultType::LineToLine => cc * vb / (2.0 * z1.abs() * zb),
-                FaultType::LineToEarth => SQRT3 * cc * vb / ((z1.scale(2.0) + z0).abs() * zb),
+                FaultType::ThreePhase => cc * vb / (SQRT3 * zl),
+                FaultType::LineToLine => cc * vb / zl,
+                FaultType::LineToEarth => SQRT3 * cc * vb / zl,
             };
         let kappa = match st.kappa {
             KappaMethod::C => {
                 let lu = peak
                     .entry(variant)
                     .or_insert_with(|| factor(b.assemble(Seq::Positive, variant, true)));
+                // R/X of the fault loop with the network at the equivalent frequency (the fault impedance as given):
+                // for earth faults 2·Z1 + Z0 + 3·ZF, as the TR 60909-4 example has it.
                 match column(lu, k) {
-                    Some(c) => kappa_of(c[k].re / c[k].im * (fc / f)),
+                    Some(c) if st.fault == FaultType::LineToEarth => {
+                        let zl = zero_peak.get_or_insert_with(|| factor(b.assemble(Seq::Zero, Variant::Normal, true)));
+                        match column(zl, k) {
+                            Some(c0) => {
+                                let lp = loop_of(c[k], c0[k]);
+                                kappa_of(lp.re / lp.im * (fc / f))
+                            }
+                            None => f64::NAN,
+                        }
+                    }
+                    Some(c) => {
+                        let lp = loop_of(c[k], C64::ZERO);
+                        kappa_of(lp.re / lp.im * (fc / f))
+                    }
                     None => f64::NAN,
                 }
             }
             KappaMethod::B => {
                 let limit = if vb < 1.0 { 1.8 } else { 2.0 };
                 let safety = if meshed_rx >= 0.3 { 1.15 } else { 1.0 };
-                (safety * kappa_of(z1.re / z1.im)).clamp(1.0, limit)
+                let lp = loop_of(z1, z0);
+                (safety * kappa_of(lp.re / lp.im)).clamp(1.0, limit)
             }
         };
         let ip = kappa * std::f64::consts::SQRT_2 * ikss;
         let ib = if st.fault == FaultType::ThreePhase {
-            voltage_scale * breaking(&b, variant, &col, k, cc, voltage_scale) * sb / (SQRT3 * vb)
+            voltage_scale * breaking(&b, variant, &col, k, cc, zf, voltage_scale) * sb / (SQRT3 * vb)
         } else {
             ikss
         };
@@ -858,7 +935,8 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
         fault_column.filter(|_| !st.location.is_empty()),
         st.fault == FaultType::ThreePhase,
     ) {
-        contributions = branch_contributions(&b, variant, &col, targets[0]);
+        let zf = C64::new(st.fault_r, st.fault_x).scale(sb / (vbase[targets[0]] * vbase[targets[0]]));
+        contributions = branch_contributions(&b, variant, &col, targets[0], zf);
     }
     ShortCircuitReport {
         fault: st.fault,
@@ -866,6 +944,8 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
         kappa_method: st.kappa,
         t_min: st.t_min,
         t_k: st.t_k,
+        fault_r: st.fault_r,
+        fault_x: st.fault_x,
         buses,
         location: st.location.clone(),
         contributions,
@@ -883,8 +963,8 @@ pub fn run(model: &Model, st: &ShortCircuitSettings) -> ShortCircuitReport {
 /// variant's network whose impedance column is `col` (IEC 60909-0, 9.1.2.2): the initial current less, for every
 /// machine and motor, its share of the voltage (the drop across its own impedance over c·Un/√3) times the part of
 /// its current that has decayed by the minimum time delay, (1 − μ) or (1 − μ·q).
-fn breaking(b: &Builder, variant: Variant, col: &[C64], k: usize, c: f64, voltage_scale: f64) -> f64 {
-    let i_f = C64::new(c, 0.0) / col[k];
+fn breaking(b: &Builder, variant: Variant, col: &[C64], k: usize, c: f64, zf: C64, voltage_scale: f64) -> f64 {
+    let i_f = C64::new(c, 0.0) / (col[k] + zf);
     let mut ib = i_f.abs();
     for r in b.rotating(variant, false, 1.0) {
         // The machine's terminal voltage in the fault network is the drop across its impedance; per unit, its
@@ -899,10 +979,10 @@ fn breaking(b: &Builder, variant: Variant, col: &[C64], k: usize, c: f64, voltag
 }
 
 /// Branch currents for a three-phase fault at bus `k` on a variant's network.
-fn branch_contributions(b: &Builder, variant: Variant, col: &[C64], k: usize) -> Vec<BranchContribution> {
+fn branch_contributions(b: &Builder, variant: Variant, col: &[C64], k: usize, zf: C64) -> Vec<BranchContribution> {
     let (model, calc, sb, vbase) = (b.model, b.calc, b.sb, &b.vbase);
     // Fault current If = c / Zkk; voltage change at every bus ΔV = −Z(:,k)·If.
-    let i_f = C64::new(b.c_bus[k], 0.0) / col[k];
+    let i_f = C64::new(b.c_bus[k], 0.0) / (col[k] + zf);
     let dv: Vec<C64> = col.iter().map(|&z| -(z * i_f)).collect();
     let ka = |bus: usize| sb / (SQRT3 * vbase[bus]);
     let mut out = Vec::new();

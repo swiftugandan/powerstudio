@@ -267,6 +267,8 @@ pub fn to_model(case: &MatpowerCase) -> Imported {
                 limits: Vec::new(),
                 on_load_taps: false,
                 tap_range_pct: 0.0,
+                rn: [0.0; 2],
+                xn: [0.0; 2],
             });
         }
     }

@@ -338,6 +338,12 @@ pub struct Transformer2 {
     /// The tap range used for a power station unit without on-load tap changer, ±%.
     #[serde(default)]
     pub tap_range_pct: f64,
+    /// Resistance of each winding's neutral earthing, Ω, for an earthed star winding.
+    #[serde(default)]
+    pub rn: [f64; 2],
+    /// Reactance of each winding's neutral earthing, Ω.
+    #[serde(default)]
+    pub xn: [f64; 2],
 }
 
 /// One winding of a three-winding transformer, with its share of the star-equivalent impedance.
@@ -368,9 +374,32 @@ pub struct Winding3 {
     pub phase_shift_deg: f64,
     /// Connection.
     pub conn: Winding,
+    /// Zero-sequence star-equivalent resistance referred to this winding, Ω.
+    #[serde(default)]
+    pub r0: f64,
+    /// Zero-sequence star-equivalent reactance referred to this winding, Ω.
+    #[serde(default)]
+    pub x0: f64,
+    /// Resistance of the neutral's earthing, Ω, when the winding is an earthed star.
+    #[serde(default)]
+    pub rn: f64,
+    /// Reactance of the neutral's earthing, Ω.
+    #[serde(default)]
+    pub xn: f64,
     /// Disconnected from its node while the transformer stays in service.
     #[serde(default)]
     pub open: bool,
+}
+
+impl Winding3 {
+    /// The winding's zero-sequence star impedance (R0, X0), Ω, or its positive-sequence one where none is given.
+    pub fn zero_sequence(&self) -> (f64, f64) {
+        if self.r0 == 0.0 && self.x0 == 0.0 {
+            (self.r, self.x)
+        } else {
+            (self.r0, self.x0)
+        }
+    }
 }
 
 /// A three-winding transformer as a star of three windings. Each winding carries its own share of the star impedance

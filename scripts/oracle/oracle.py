@@ -110,6 +110,10 @@ def build_net(doc):
     return net
 
 
+# The fault resistance and reactance, Ω, of the fault-impedance short circuits: enough to change every current.
+ZFAULT = (2.0, 1.0)
+
+
 def finite(v):
     """JSON has no NaN; results that pandapower leaves undefined (no fault current) become null."""
     return float(v) if math.isfinite(v) else None
@@ -140,6 +144,16 @@ def sample_goldens():
                     net.bus.name[i]: {"ikss": finite(res.ikss_ka[i]), "ip": finite(res.ip_ka[i]), "ith": finite(res.ith_ka[i])}
                     for i in res.index
                 }
+        # A fault impedance in each faulted phase (ZFAULT below), maximum currents.
+        for fault in ("3ph", "2ph", "1ph"):
+            sc.calc_sc(net, fault=fault, case="max", ip=True, ith=True, kappa_method="C", lv_tol_percent=10, tk_s=1.0,
+                       r_fault_ohm=ZFAULT[0], x_fault_ohm=ZFAULT[1])
+            res = net.res_bus_sc
+            out["shortcircuit"][f"{fault}-max-zf"] = {
+                net.bus.name[i]: {"ikss": finite(res.ikss_ka[i]), "ip": finite(res.ip_ka[i]), "ith": finite(res.ith_ka[i])}
+                for i in res.index
+            }
+        out["faultImpedance"] = {"r": ZFAULT[0], "x": ZFAULT[1]}
         (GOLDEN / f"{name}.json").write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")
         print("wrote", f"{name}.json")
 

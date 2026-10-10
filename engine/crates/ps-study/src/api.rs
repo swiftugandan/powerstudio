@@ -80,6 +80,8 @@ struct ShortCircuitOptions {
     t_min: Option<f64>,
     t_k: Option<f64>,
     line_temperature: Option<f64>,
+    fault_r: Option<f64>,
+    fault_x: Option<f64>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -208,6 +210,8 @@ pub fn handle(
             st.t_min = o.t_min.unwrap_or(st.t_min);
             st.t_k = o.t_k.unwrap_or(st.t_k);
             st.line_temperature = o.line_temperature.unwrap_or(st.line_temperature);
+            st.fault_r = o.fault_r.unwrap_or(st.fault_r);
+            st.fault_x = o.fault_x.unwrap_or(st.fault_x);
             if let Some(l) = o.location {
                 st.location = l;
             }

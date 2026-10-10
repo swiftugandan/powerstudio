@@ -444,6 +444,8 @@ pub fn from_value(doc: &Value) -> Result<Imported, ParseError> {
                     limits: Vec::new(),
                     on_load_taps: e.flag("onLoadTaps", false),
                     tap_range_pct: e.num("tapRange", 0.0),
+                    rn: [e.num("rnHV", 0.0), e.num("rnLV", 0.0)],
+                    xn: [e.num("xnHV", 0.0), e.num("xnLV", 0.0)],
                 });
             }
             Class::Generator => {

@@ -800,6 +800,22 @@ fn winding(kind: Option<&str>) -> Winding {
     }
 }
 
+/// A transformer end's connection: its connection kind, earthed when `TransformerEnd.grounded` says so (or, without
+/// that flag, when the kind has a neutral).
+fn end_winding(g: &Graph, e: &Object) -> Winding {
+    let kind = winding(g.enumeration(e, "PowerTransformerEnd.connectionKind"));
+    let earthed = g
+        .flag(e, "TransformerEnd.grounded")
+        .unwrap_or(matches!(kind, Winding::Yn | Winding::Zn));
+    match (kind, earthed) {
+        (Winding::Y | Winding::Yn, true) => Winding::Yn,
+        (Winding::Y | Winding::Yn, false) => Winding::Y,
+        (Winding::Z | Winding::Zn, true) => Winding::Zn,
+        (Winding::Z | Winding::Zn, false) => Winding::Z,
+        (k, _) => k,
+    }
+}
+
 fn transformers(cx: &mut Ctx) {
     let g = cx.g;
     let mut ends: HashMap<&str, Vec<&Object>> = HashMap::new();
@@ -883,8 +899,8 @@ fn transformers(cx: &mut Ctx) {
                 b2: cx.numd(e2, "PowerTransformerEnd.b") * refer_y,
                 clock: (clock(e2) - clock(e1)).rem_euclid(12) as u8,
                 phase_shift_deg: 0.0,
-                conn1: winding(g.enumeration(e1, "PowerTransformerEnd.connectionKind")),
-                conn2: winding(g.enumeration(e2, "PowerTransformerEnd.connectionKind")),
+                conn1: end_winding(g, e1),
+                conn2: end_winding(g, e2),
                 r0: cx.numd(e1, "PowerTransformerEnd.r0") + cx.numd(e2, "PowerTransformerEnd.r0") * k,
                 x0: cx.numd(e1, "PowerTransformerEnd.x0") + cx.numd(e2, "PowerTransformerEnd.x0") * k,
                 ratio_taps: Vec::new(),
@@ -892,6 +908,14 @@ fn transformers(cx: &mut Ctx) {
                 limits,
                 on_load_taps: false,
                 tap_range_pct: 0.0,
+                rn: [
+                    cx.numd(e1, "TransformerEnd.rground"),
+                    cx.numd(e2, "TransformerEnd.rground"),
+                ],
+                xn: [
+                    cx.numd(e1, "TransformerEnd.xground"),
+                    cx.numd(e2, "TransformerEnd.xground"),
+                ],
             };
             for (end, e) in [(1u8, e1), (2u8, e2)] {
                 if let Some(tc) = ratio.get(&*e.id).copied() {
@@ -942,7 +966,11 @@ fn transformers(cx: &mut Ctx) {
                     b: cx.numd(e, "PowerTransformerEnd.b"),
                     phase_shift_deg: 0.0,
                     clock: (clock(e) - clock(data[0].0)).rem_euclid(12) as u8,
-                    conn: winding(g.enumeration(e, "PowerTransformerEnd.connectionKind")),
+                    conn: end_winding(g, e),
+                    r0: cx.numd(e, "PowerTransformerEnd.r0"),
+                    x0: cx.numd(e, "PowerTransformerEnd.x0"),
+                    rn: cx.numd(e, "TransformerEnd.rground"),
+                    xn: cx.numd(e, "TransformerEnd.xground"),
                     open,
                 };
                 limits.extend(cx.current_limits(term, i as u8 + 1));

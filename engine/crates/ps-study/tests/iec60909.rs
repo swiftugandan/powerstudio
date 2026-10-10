@@ -83,7 +83,14 @@ fn model_of(net: &Value) -> Model {
         let (uh, sn) = (num(t, "vn_hv_kv"), num(t, "sn_mva"));
         let zb = uh * uh / sn;
         let (z, r) = (num(t, "vk_percent") / 100.0 * zb, num(t, "vkr_percent") / 100.0 * zb);
+        let (z0, r0) = (
+            opt(t, "vk0_percent").map_or(z, |v| v / 100.0 * zb),
+            opt(t, "vkr0_percent").map_or(r, |v| v / 100.0 * zb),
+        );
         let conn = connections(t["vector_group"].as_str().unwrap_or("Yy"));
+        // pandapower's neutral reactance belongs to the earthed star winding.
+        let xn = opt(t, "xn_ohm").unwrap_or(0.0);
+        let earthed_hv = matches!(conn.first(), Some(Winding::Yn | Winding::Zn));
         m.transformers2.push(Transformer2 {
             id: format!("T{}", t["index"]),
             node1: node(num(t, "hv_bus")),
@@ -99,6 +106,10 @@ fn model_of(net: &Value) -> Model {
             phase_shift_deg: opt(t, "shift_degree").unwrap_or(0.0),
             on_load_taps: t["oltc"] == true,
             tap_range_pct: opt(t, "pt_percent").unwrap_or(0.0),
+            r0,
+            x0: (z0 * z0 - r0 * r0).max(0.0).sqrt(),
+            rn: [0.0; 2],
+            xn: if earthed_hv { [xn, 0.0] } else { [0.0, xn] },
             ..Default::default()
         });
     }
@@ -112,13 +123,23 @@ fn model_of(net: &Value) -> Model {
             let (z, r) = (num(t, vk) / 100.0 * zb, num(t, vkr) / 100.0 * zb);
             (r, (z * z - r * r).sqrt())
         };
-        let (hm, ml, hl) = (
-            pair("vk_hv_percent", "vkr_hv_percent", 0, 1),
-            pair("vk_mv_percent", "vkr_mv_percent", 1, 2),
-            pair("vk_lv_percent", "vkr_lv_percent", 0, 2),
-        );
         let half = |a: (f64, f64), b: (f64, f64), c: (f64, f64)| (0.5 * (a.0 + b.0 - c.0), 0.5 * (a.1 + b.1 - c.1));
-        let star = [half(hm, hl, ml), half(hm, ml, hl), half(hl, ml, hm)];
+        let star_of = |zero: &str| {
+            let key = |kind: &str, side: &str| format!("{kind}{zero}_{side}_percent");
+            let (hm, ml, hl) = (
+                pair(&key("vk", "hv"), &key("vkr", "hv"), 0, 1),
+                pair(&key("vk", "mv"), &key("vkr", "mv"), 1, 2),
+                pair(&key("vk", "lv"), &key("vkr", "lv"), 0, 2),
+            );
+            [half(hm, hl, ml), half(hm, ml, hl), half(hl, ml, hm)]
+        };
+        let star = star_of("");
+        // The reduced networks give no zero-sequence data: the positive sequence stands in.
+        let star0 = if opt(t, "vk0_hv_percent").is_some() {
+            star_of("0")
+        } else {
+            star
+        };
         let conn = connections(t["vector_group"].as_str().unwrap_or("Yyy"));
         let bus = [num(t, "hv_bus"), num(t, "mv_bus"), num(t, "lv_bus")];
         let winding = |w: usize| Winding3 {
@@ -127,6 +148,8 @@ fn model_of(net: &Value) -> Model {
             rated_mva: s[w],
             r: star[w].0 * (u[w] / u[0]).powi(2),
             x: star[w].1 * (u[w] / u[0]).powi(2),
+            r0: star0[w].0 * (u[w] / u[0]).powi(2),
+            x0: star0[w].1 * (u[w] / u[0]).powi(2),
             conn: conn.get(w).copied().unwrap_or(Winding::Y),
             ..Default::default()
         };
@@ -146,6 +169,8 @@ fn model_of(net: &Value) -> Model {
             in_service: true,
             r: num(l, "r_ohm_per_km") * len,
             x: num(l, "x_ohm_per_km") * len,
+            r0: opt(l, "r0_ohm_per_km").unwrap_or(num(l, "r_ohm_per_km")) * len,
+            x0: opt(l, "x0_ohm_per_km").unwrap_or(num(l, "x_ohm_per_km")) * len,
             length_km: num(l, "length_km"),
             ..Default::default()
         });
@@ -202,10 +227,10 @@ fn the_tr_60909_4_example_meets_the_reports_values() {
         let golden = golden(&format!("sc-{name}"));
         let model = model_of(&golden["network"]);
         let st = ShortCircuitSettings {
-            fault: if case["fault"] == "2ph" {
-                FaultType::LineToLine
-            } else {
-                FaultType::ThreePhase
+            fault: match case["fault"].as_str() {
+                Some("2ph") => FaultType::LineToLine,
+                Some("1ph") => FaultType::LineToEarth,
+                _ => FaultType::ThreePhase,
             },
             mode: if case["case"] == "min" {
                 ScMode::Min
@@ -235,6 +260,12 @@ fn the_tr_60909_4_example_meets_the_reports_values() {
             let atol = f(&e["atol"]);
             let mut worst = (0.0_f64, 0usize);
             for (bus, want) in e["values"].as_array().unwrap().iter().map(f).enumerate() {
+                // pandapower's encoding earths transformer T6's 10 kV star point solidly where the report earths it
+                // through 100 Ω, so its earth faults at F6 and F7 are not the report's (MiniGrid has the earthing;
+                // its test checks those two).
+                if case["fault"] == "1ph" && (bus == 5 || bus == 6) {
+                    continue;
+                }
                 let d = (value(bus, column) - want).abs();
                 if d > worst.0 {
                     worst = (d, bus);
@@ -270,6 +301,23 @@ fn the_tr_60909_4_example_meets_the_reports_values() {
                             value(bus, column)
                         ));
                     }
+                }
+            }
+        }
+        // The report's peak currents for earth faults, which pandapower's test leaves out, from MiniGrid's workbook
+        // (its sheet of the report's line-to-earth values, F2 to F5 by node code).
+        if name == "tr60909-4-1ph-max" {
+            for want in minigrid_sheet(3).iter().filter(|w| w.ip.is_finite()) {
+                let bus: usize = want.code.parse::<usize>().unwrap() - 1;
+                let got = at(bus).ip;
+                if report {
+                    eprintln!("{name}: ip at F{} {got:.4} report {}", want.code, want.ip);
+                }
+                if (got - want.ip).abs() > 1e-4 * want.ip {
+                    failures.push(format!(
+                        "{name}: ip at F{} is {got:.4} kA, the report's {}",
+                        want.code, want.ip
+                    ));
                 }
             }
         }
@@ -460,6 +508,25 @@ fn sheet_results(rows: &[Vec<String>]) -> Vec<SheetResult> {
     out
 }
 
+/// The fault results of one sheet of MiniGrid's results workbook, read from the cached CGMES 3.0 archive: 3 and 4 the
+/// report's values for line-to-earth and three-phase faults, 5 and 6 a tool's with each node's CIM identifier.
+fn minigrid_sheet(sheet: usize) -> Vec<SheetResult> {
+    let cases = json("tests/oracle/cgmes-cases.json");
+    let archive = repo(&format!(
+        ".cache/reference/{}",
+        cases["archives"]["cgmes-3.0.3"]["file"].as_str().unwrap()
+    ));
+    let bytes = std::fs::read(&archive).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e}. Run node scripts/fetch-reference.mjs first.",
+            archive.display()
+        )
+    });
+    let book = "CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/MiniGrid/MiniGrid-RESULTS.xlsx";
+    let entries = ps_io::zip::read_matching(&bytes, &[book]).unwrap();
+    sheet_results(&worksheet(&entries, &format!("{book}/"), sheet))
+}
+
 /// The TopologicalNode of every ConnectivityNode, from the case's TP file.
 fn topological_nodes(files: &[ps_io::files::File]) -> std::collections::HashMap<String, String> {
     let tp = files.iter().find(|f| f.name.ends_with("_TP.xml")).expect("a TP file");
@@ -487,15 +554,17 @@ fn topological_nodes(files: &[ps_io::files::File]) -> std::collections::HashMap<
 }
 
 /// MiniGrid, CGMES's conformity configuration of the same example network, imported from its files: machines, units,
-/// motors and feeders come from CGMES's short-circuit attributes. The results workbook that comes with it lists the
-/// report's values for three-phase faults (sheet 4) and a tool's results with the CIM identifier of each node (sheet
-/// 6), both read from the cached archive.
+/// motors, feeders and neutral earthing come from CGMES's short-circuit attributes. The results workbook that comes
+/// with it lists the report's values (sheets 3 and 4, line-to-earth and three-phase) and a tool's results with the
+/// CIM identifier of each node (sheets 5 and 6), all read from the cached archive. Every location is also faulted in
+/// the network written as a document and read back, which must give the same currents.
 ///
 /// One datum differs from the report: MiniGrid rates machine G2 at 150 MVA where the report (and pandapower's
-/// encoding, in the golden) has 100 MVA. The test takes the report's rating. With it, Ik″ and ip meet the report's
-/// values to 1e-4 at every location. Ib meets them to 0.1 % where only synchronous machines contribute, and to
-/// 0.25 % at the motors' busbars (F6, F7), where the engine's q factors, from the motors' pole pairs, leave a little
-/// more current than the report.
+/// encoding, in the golden) has 100 MVA. The test takes the report's rating. With it, three-phase Ik″ and ip meet the
+/// report's values to 1e-4 at every location. Ib meets them to 0.1 % where only synchronous machines contribute and to
+/// 0.25 % at the motors' busbars (F6, F7), where the engine's Ib is the lower by 0.14 and 0.21 %. Earth-fault Ik″
+/// meets them to 1e-3: MiniGrid's zero-sequence data for the three-winding transformers differ a little from the
+/// report's.
 #[test]
 fn minigrid_from_cgmes_meets_the_reports_values() {
     let cases = json("tests/oracle/cgmes-cases.json");
@@ -511,15 +580,8 @@ fn minigrid_from_cgmes_meets_the_reports_values() {
     for g in model.generators.iter_mut().filter(|g| g.name == "G2") {
         g.rated_mva = report_g2;
     }
-    let archive = repo(&format!(
-        ".cache/reference/{}",
-        cases["archives"]["cgmes-3.0.3"]["file"].as_str().unwrap()
-    ));
-    let bytes = std::fs::read(archive).unwrap();
-    let book = "CGMES_ConformityAssessmentScheme_TestConfigurations_v3-0-3/v3.0/MiniGrid/MiniGrid-RESULTS.xlsx";
-    let entries = ps_io::zip::read_matching(&bytes, &[book]).unwrap();
-    let report = sheet_results(&worksheet(&entries, &format!("{book}/"), 4));
-    let tool = sheet_results(&worksheet(&entries, &format!("{book}/"), 6));
+    let report = minigrid_sheet(4);
+    let tool = minigrid_sheet(6);
     let tn_of = topological_nodes(&files);
     let print = std::env::var("PS_SC_REPORT").is_ok();
     let mut failures = Vec::new();
@@ -572,6 +634,57 @@ fn minigrid_from_cgmes_meets_the_reports_values() {
             if (got - want).abs() > rel * want {
                 failures.push(format!("F{}: {what} is {got:.4} kA, the report's {want}", t.code));
             }
+        }
+    }
+    // Line-to-earth faults: the report's values (sheet 3) at the locations the tool lists with their CIM identifiers
+    // (sheet 5).
+    let report = minigrid_sheet(3);
+    let tool = minigrid_sheet(5);
+    for t in &tool {
+        let Some(want) = report.iter().find(|x| x.code == t.code) else {
+            continue;
+        };
+        let tn = t.cim.as_deref().unwrap();
+        let k = model
+            .nodes
+            .iter()
+            .position(|n| tn_of.get(&n.id).is_some_and(|x| x == tn))
+            .unwrap_or_else(|| panic!("F{}: no node", t.code));
+        let st = ShortCircuitSettings {
+            fault: FaultType::LineToEarth,
+            kappa: KappaMethod::C,
+            location: model.nodes[k].id.clone(),
+            ..Default::default()
+        };
+        let b = ps_study::shortcircuit::run(&model, &st).buses.remove(0);
+        let d = ps_study::shortcircuit::run(
+            &document,
+            &ShortCircuitSettings {
+                location: converted.bus_of_node[k].clone().unwrap(),
+                ..st.clone()
+            },
+        )
+        .buses
+        .remove(0);
+        if print {
+            eprintln!(
+                "F{:>2} earth Ik″ {:8.4} report {:8.4} document {:8.4} | ip {:8.4} report {:8.4}",
+                t.code, b.ikss, want.ikss, d.ikss, b.ip, want.ip
+            );
+        }
+        if (d.ikss - b.ikss).abs() > 1e-9 * b.ikss {
+            failures.push(format!(
+                "F{}: the document gives an earth-fault Ik″ of {}, the model {}",
+                t.code, d.ikss, b.ikss
+            ));
+        }
+        // MiniGrid's zero-sequence data for the three-winding transformers differ a little from the report's, which
+        // pandapower's encoding of them meets to 1e-4 (the first test); so 1e-3 here.
+        if (b.ikss - want.ikss).abs() > 1e-3 * want.ikss {
+            failures.push(format!(
+                "F{}: earth-fault Ik″ is {:.4} kA, the report's {}",
+                t.code, b.ikss, want.ikss
+            ));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));

@@ -116,9 +116,9 @@ def network(net):
         "bus": records(net.bus, ["vn_kv", "in_service"]),
         "ext_grid": records(net.ext_grid, ["bus", "s_sc_max_mva", "s_sc_min_mva", "rx_max", "rx_min", "x0x_max", "r0x0_max", "in_service"]),
         "gen": records(net.gen, ["bus", "p_mw", "vn_kv", "sn_mva", "xdss_pu", "rdss_ohm", "cos_phi", "pg_percent", "power_station_trafo", "in_service"]),
-        "trafo": records(net.trafo, ["hv_bus", "lv_bus", "sn_mva", "vn_hv_kv", "vn_lv_kv", "vk_percent", "vkr_percent", "pfe_kw", "i0_percent", "shift_degree", "tap_side", "tap_neutral", "tap_pos", "tap_step_percent", "oltc", "pt_percent", "power_station_unit", "vector_group", "in_service"]),
-        "trafo3w": records(net.trafo3w, ["hv_bus", "mv_bus", "lv_bus", "vn_hv_kv", "vn_mv_kv", "vn_lv_kv", "sn_hv_mva", "sn_mv_mva", "sn_lv_mva", "vk_hv_percent", "vkr_hv_percent", "vk_mv_percent", "vkr_mv_percent", "vk_lv_percent", "vkr_lv_percent", "pfe_kw", "i0_percent", "tap_side", "tap_neutral", "tap_pos", "tap_step_percent", "vector_group", "in_service"]),
-        "line": records(net.line, ["from_bus", "to_bus", "length_km", "r_ohm_per_km", "x_ohm_per_km", "c_nf_per_km", "parallel", "endtemp_degree", "in_service"]),
+        "trafo": records(net.trafo, ["hv_bus", "lv_bus", "sn_mva", "vn_hv_kv", "vn_lv_kv", "vk_percent", "vkr_percent", "vk0_percent", "vkr0_percent", "xn_ohm", "pfe_kw", "i0_percent", "shift_degree", "tap_side", "tap_neutral", "tap_pos", "tap_step_percent", "oltc", "pt_percent", "power_station_unit", "vector_group", "in_service"]),
+        "trafo3w": records(net.trafo3w, ["hv_bus", "mv_bus", "lv_bus", "vn_hv_kv", "vn_mv_kv", "vn_lv_kv", "sn_hv_mva", "sn_mv_mva", "sn_lv_mva", "vk_hv_percent", "vkr_hv_percent", "vk_mv_percent", "vkr_mv_percent", "vk_lv_percent", "vkr_lv_percent", "vk0_hv_percent", "vkr0_hv_percent", "vk0_mv_percent", "vkr0_mv_percent", "vk0_lv_percent", "vkr0_lv_percent", "pfe_kw", "i0_percent", "tap_side", "tap_neutral", "tap_pos", "tap_step_percent", "vector_group", "in_service"]),
+        "line": records(net.line, ["from_bus", "to_bus", "length_km", "r_ohm_per_km", "x_ohm_per_km", "c_nf_per_km", "r0_ohm_per_km", "x0_ohm_per_km", "c0_nf_per_km", "parallel", "endtemp_degree", "in_service"]),
         "motor": records(net.motor, ["bus", "pn_mech_mw", "cos_phi_n", "efficiency_n_percent", "vn_kv", "rx", "lrc_pu", "in_service"]),
         "xward": records(net.xward, ["bus", "pz_mw", "qz_mvar", "in_service"]),
     }
@@ -139,7 +139,8 @@ def run(mod, source, case):
     calc_sc(net, fault=case["fault"], case=case["case"], ip=True, ith=True, tk_s=0.1, kappa_method="C")
     asserted, listed = expected_values(source, case["test"])
     res = net.res_bus_sc
-    results = {int(b): {c: (None if np.isnan(res.at[b, c]) else float(res.at[b, c])) for c in res.columns} for b in res.index}
+    # JSON has no NaN or infinity: an undefined result (no fault current, an open zero-sequence network) is null.
+    results = {int(b): {c: (float(res.at[b, c]) if np.isfinite(res.at[b, c]) else None) for c in res.columns} for b in res.index}
     return {
         "about": f"IEC TR 60909-4 case '{case['name']}' of tests/oracle/sc-cases.json, from pandapower {pp.__version__}'s "
         f"{case['test']} (BSD-3); written by scripts/oracle/iec60909.py. Do not edit by hand.",
@@ -153,6 +154,10 @@ def run(mod, source, case):
 
 
 def main():
+    # As in oracle.py: PowerStudio models machine neutrals as unearthed, where pandapower places a placeholder
+    # admittance at generator buses in the zero sequence; removing it makes both describe the same network.
+    import pandapower.pd2ppc_zero as zero
+    zero._add_gen_sc_impedance_zero = lambda net, ppc: None
     spec = json.loads(CASES.read_text())
     archive = spec["archives"]["pandapower-iec60909-4"]["file"]
     mod, source = load_test_module(REFERENCE / archive)

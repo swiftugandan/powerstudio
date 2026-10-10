@@ -24,28 +24,48 @@ pub fn transformer_correction(t: &Transformer2, cmax: f64) -> f64 {
     0.95 * cmax / (1.0 + 0.6 * t.x / zb)
 }
 
-/// A three-winding transformer with each winding pair's impedance multiplied by its own KT (IEC 60909-0, 6.3.3):
-/// the star impedances are summed to pair impedances on winding 1's voltage, each pair corrected with its reactance
-/// on the smaller of its two ratings, and the corrected pairs turned back into a star.
+/// KT of each winding pair of a three-winding transformer (IEC 60909-0, 6.3.3), pairs 1-2, 1-3 and 2-3: `star` the
+/// positive-sequence star impedances (R, X) referred to one voltage `kv`, `ratings` the windings' rated powers; each
+/// pair's reactance in p.u. of the smaller of its two ratings.
+pub fn pair_factors(star: [(f64, f64); 3], ratings: [f64; 3], kv: f64, cmax: f64) -> [f64; 3] {
+    let kt = |a: usize, b: usize| {
+        let x = star[a].1 + star[b].1;
+        0.95 * cmax / (1.0 + 0.6 * x / (kv * kv / ratings[a].min(ratings[b])))
+    };
+    [kt(0, 1), kt(0, 2), kt(1, 2)]
+}
+
+/// A star of three impedances (R, X), all referred to one voltage, with each winding pair's impedance multiplied by
+/// its factor (pairs 1-2, 1-3, 2-3) and turned back into a star.
+pub fn correct_star(star: [(f64, f64); 3], kt: [f64; 3]) -> [(f64, f64); 3] {
+    let pair = |a: usize, b: usize, k: f64| ((star[a].0 + star[b].0) * k, (star[a].1 + star[b].1) * k);
+    let (z12, z13, z23) = (pair(0, 1, kt[0]), pair(0, 2, kt[1]), pair(1, 2, kt[2]));
+    let half = |a: (f64, f64), b: (f64, f64), c: (f64, f64)| (0.5 * (a.0 + b.0 - c.0), 0.5 * (a.1 + b.1 - c.1));
+    [half(z12, z13, z23), half(z12, z23, z13), half(z13, z23, z12)]
+}
+
+/// A three-winding transformer with each winding pair's impedance multiplied by its own KT (IEC 60909-0, 6.3.3), in
+/// both sequences: the factors come from the positive-sequence pair impedances, on winding 1's voltage, and apply to
+/// the positive-sequence star (R, X) and the zero-sequence one (R0, X0) alike.
 pub fn three_winding_corrected(t: &Transformer3, cmax: f64) -> Transformer3 {
     let k1 = t.windings[0].rated_kv;
     let refer = |w: usize| (k1 / t.windings[w].rated_kv).powi(2);
-    let star: Vec<(f64, f64)> = (0..3)
-        .map(|w| (t.windings[w].r * refer(w), t.windings[w].x * refer(w)))
-        .collect();
-    let pair = |a: usize, b: usize| {
-        let (r, x) = (star[a].0 + star[b].0, star[a].1 + star[b].1);
-        let s = t.windings[a].rated_mva.min(t.windings[b].rated_mva);
-        let kt = 0.95 * cmax / (1.0 + 0.6 * x / (k1 * k1 / s));
-        (r * kt, x * kt)
+    let on_k1 = |f: &dyn Fn(usize) -> (f64, f64)| -> [(f64, f64); 3] {
+        [0, 1, 2].map(|w| {
+            let (r, x) = f(w);
+            (r * refer(w), x * refer(w))
+        })
     };
-    let (z12, z13, z23) = (pair(0, 1), pair(0, 2), pair(1, 2));
-    let half = |a: (f64, f64), b: (f64, f64), c: (f64, f64)| (0.5 * (a.0 + b.0 - c.0), 0.5 * (a.1 + b.1 - c.1));
-    let corrected = [half(z12, z13, z23), half(z12, z23, z13), half(z13, z23, z12)];
+    let positive = on_k1(&|w| (t.windings[w].r, t.windings[w].x));
+    let zero = on_k1(&|w| t.windings[w].zero_sequence());
+    let kt = pair_factors(positive, t.windings.map(|w| w.rated_mva), k1, cmax);
+    let (positive, zero) = (correct_star(positive, kt), correct_star(zero, kt));
     let mut out = t.clone();
-    for (w, (r, x)) in corrected.into_iter().enumerate() {
-        out.windings[w].r = r / refer(w);
-        out.windings[w].x = x / refer(w);
+    for w in 0..3 {
+        out.windings[w].r = positive[w].0 / refer(w);
+        out.windings[w].x = positive[w].1 / refer(w);
+        out.windings[w].r0 = zero[w].0 / refer(w);
+        out.windings[w].x0 = zero[w].1 / refer(w);
     }
     out
 }
@@ -222,6 +242,8 @@ mod tests {
         let kt = 0.95 * 1.1 / (1.0 + 0.6 * x_pair);
         for k in 0..3 {
             assert!((c.windings[k].x - 10.0 * kt).abs() < 1e-12 && (c.windings[k].r - kt).abs() < 1e-12);
+            // Without zero-sequence data the zero sequence is the positive one, corrected alike.
+            assert!((c.windings[k].x0 - 10.0 * kt).abs() < 1e-12 && (c.windings[k].r0 - kt).abs() < 1e-12);
         }
     }
 }

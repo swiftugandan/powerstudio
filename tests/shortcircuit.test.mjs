@@ -7,10 +7,12 @@ import { riverside } from '../src/samples/riverside.js';
 
 for (const name of ['ieee14', 'riverside']) {
   for (const fault of /** @type {const} */ (['3ph', '2ph', '1ph'])) {
-    for (const mode of /** @type {const} */ (['max', 'min'])) {
+    // Maximum and minimum currents, and maximum currents through the oracle's fault impedance.
+    for (const mode of /** @type {const} */ (['max', 'min', 'max-zf'])) {
       test(`${name} ${fault} ${mode}: Ik″, ip and Ith match pandapower at every busbar`, () => {
         const ref = golden(name).shortcircuit[`${fault}-${mode}`];
-        const r = studies.shortcircuit(input(name), { fault, mode, kappa: 'C', lvTolerance: '10', location: '', tK: 1, lineTemperature: 20 });
+        const zf = mode === 'max-zf' ? { faultR: golden(name).faultImpedance.r, faultX: golden(name).faultImpedance.x } : {};
+        const r = studies.shortcircuit(input(name), { fault, mode: mode === 'min' ? 'min' : 'max', kappa: 'C', lvTolerance: '10', location: '', tK: 1, lineTemperature: 20, ...zf });
         assert.equal(r.buses.length, Object.keys(ref).length);
         for (const b of r.buses) {
           for (const k of /** @type {const} */ (['ikss', 'ip', 'ith'])) {

@@ -33,7 +33,8 @@
  *   `tMin` (Ik″ for unbalanced faults), which IEC 60909 defines for maximum currents; Ith the thermal equivalent
  *   current for the duration `tK`.
  * @typedef {{ id: string, iFrom: number, iTo: number }} BranchContribution
- * @typedef {{ fault: FaultType, mode: 'max' | 'min', kappaMethod: 'B' | 'C', tMin: number, tK: number, buses: FaultResult[], location: string,
+ * @typedef {{ fault: FaultType, mode: 'max' | 'min', kappaMethod: 'B' | 'C', tMin: number, tK: number, faultR: number, faultX: number,
+ *   buses: FaultResult[], location: string,
  *   contributions: BranchContribution[], deenergized: string[], warnings: string[] }} ShortCircuitResult
  * @typedef {{ kind: 'loading' | 'undervoltage' | 'overvoltage', id: string, value: number, limit: number, inBase: boolean }} Violation
  * @typedef {{ id: string, cls: string, elements: string[], converged: boolean, message: string, maxLoading: number,

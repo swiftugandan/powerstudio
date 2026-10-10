@@ -392,7 +392,8 @@ export class Dock {
   renderShortCircuit() {
     const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').ShortCircuitResult, ms: number }} */ (app.results.shortcircuit);
     const where = r.location ? `at ${this.nameOf(r.location)}` : 'at every busbar';
-    const pill = h('span', { class: 'pill neutral', text: `${enumLabel('fault', r.fault)} · ${r.mode === 'max' ? 'maximum' : 'minimum'} · κ method ${r.kappaMethod}` });
+    const zf = r.faultR || r.faultX ? ` · ZF ${fixed(r.faultR, 2)} + j${fixed(r.faultX, 2)} Ω` : '';
+    const pill = h('span', { class: 'pill neutral', text: `${enumLabel('fault', r.fault)} · ${r.mode === 'max' ? 'maximum' : 'minimum'} · κ method ${r.kappaMethod}${zf}` });
     const summary = h('div', { class: 'summary', html: `<span>Fault <b>${esc(where)}</b></span><span>Busbars <b>${r.buses.length}</b></span><span>Time <b>${duration(ms)}</b></span>` });
     const items = /** @type {Array<[string, string]>} */ ([['buses', 'Busbars']]);
     if (r.contributions.length) items.push(['contrib', `Contributions ${r.contributions.length}`]);

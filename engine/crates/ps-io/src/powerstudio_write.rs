@@ -131,29 +131,27 @@ impl Doc<'_> {
         );
     }
 
-    /// A transformer element from a branch's per-unit form between `hv` (base `vh`) and `lv` (base `vl`): the LV
-    /// rated voltage `lv_rated` (the LV base when `None`), the present ratio in the rated HV voltage, the impedance as
-    /// uk and uR on the rating, the magnetising admittance as iron losses and no-load current, or as shunt elements
-    /// where those cannot express it. Keeping the rated voltages keeps uk as the nameplate gives it, which the
-    /// short-circuit correction factors read.
-    #[allow(clippy::too_many_arguments)]
-    fn transformer(
-        &mut self,
-        wanted: &str,
-        name: &str,
-        hv: (&str, f64),
-        lv: (&str, f64),
-        p: &TransformerPu,
-        rating: f64,
-        on: bool,
-        conns: Option<(Winding, Winding)>,
-        extra: Value,
-        lv_rated: Option<f64>,
-    ) -> Option<String> {
-        if p.z.re < 0.0 || p.z.im <= 0.0 {
+    /// A transformer element from a branch's per-unit form (`TransformerData`): the LV rated voltage (the LV base
+    /// when none is given), the present ratio in the rated HV voltage, the impedance as uk and uR on the rating and
+    /// the zero-sequence one as uk0 and uR0, the magnetising admittance as iron losses and no-load current, or as
+    /// shunt elements where those cannot express it. Keeping the rated voltages keeps uk as the nameplate gives it,
+    /// which the short-circuit correction factors read.
+    fn transformer(&mut self, wanted: &str, name: &str, d: TransformerData, extra: Value) -> Option<String> {
+        let TransformerData {
+            hv,
+            lv,
+            p,
+            z0,
+            rating,
+            on,
+            conns,
+            lv_rated,
+        } = d;
+        let z0 = z0.filter(|z| *z != C64::ZERO).unwrap_or(p.z);
+        if p.z.re < 0.0 || p.z.im <= 0.0 || z0.re < 0.0 || z0.im <= 0.0 {
             // Negative resistance or no positive reactance, as star equivalents and some grid data have, which uk and
             // uR cannot express: the transformer keeps the ratio, any positive resistance and a small reactance, and a
-            // line from an intermediate busbar on the LV base carries the rest of the impedance.
+            // line from an intermediate busbar on the LV base carries the rest of the impedance, in both sequences.
             const X_HEAD: f64 = 1e-4;
             let mid = self.push(
                 "bus",
@@ -169,32 +167,34 @@ impl Doc<'_> {
                     shift: p.shift,
                 },
             ));
-            let head = TransformerPu {
-                z: C64::new(p.z.re.max(0.0), X_HEAD),
-                y_to: C64::ZERO,
-                ..*p
-            };
+            let (head, head0) = (C64::new(p.z.re.max(0.0), X_HEAD), C64::new(z0.re.max(0.0), X_HEAD));
             let id = self.transformer(
                 wanted,
                 name,
-                hv,
-                (&mid, lv.1),
-                &head,
-                rating,
-                on,
-                conns,
+                TransformerData {
+                    lv: (&mid, lv.1),
+                    p: TransformerPu {
+                        z: head,
+                        y_to: C64::ZERO,
+                        ..p
+                    },
+                    z0: Some(head0),
+                    ..d
+                },
                 extra,
-                lv_rated,
             )?;
             let zb = lv.1 * lv.1 / self.sb;
-            let (r, x) = (p.z.re.min(0.0) * zb, (p.z.im - X_HEAD) * zb);
+            let ((r, x), (r0, x0)) = (
+                ((p.z.re - head.re) * zb, (p.z.im - head.im) * zb),
+                ((z0.re - head0.re) * zb, (z0.im - head0.im) * zb),
+            );
             self.push(
                 "line",
                 &format!("{wanted}.z"),
                 name,
                 json!({
                     "from": mid, "to": lv.0, "inService": on, "length": 1, "parallel": 1, "r1": r, "x1": x, "b1": 0,
-                    "ratedA": 0, "r0": r.abs(), "x0": x.abs().max(1e-6), "b0": 0,
+                    "ratedA": 0, "r0": r0, "x0": x0, "b0": 0,
                 }),
             );
             self.shunt(&format!("{wanted}.y2"), name, lv.0, lv.1, p.y_to, on);
@@ -211,6 +211,7 @@ impl Doc<'_> {
         let (vn_hv, on_rating) = (p.ratio * hv.1 * scale, sn / self.sb / (scale * scale));
         let uk = p.z.abs() * on_rating * 100.0;
         let ur = p.z.re * on_rating * 100.0;
+        let (uk0, ur0) = (z0.abs() * on_rating * 100.0, z0.re * on_rating * 100.0);
         // Magnetising admittance: the document draws it half at each winding or all at one (behind the ratio on the
         // HV side), from iron losses and no-load current, which cannot be capacitive or negative. Whatever that cannot
         // hold goes into shunt elements, which is exact (the HV one moves outside the ratio).
@@ -255,17 +256,35 @@ impl Doc<'_> {
         let clock = (shift / 30.0).round();
         let whole = (shift - 30.0 * clock).abs() < 1e-9;
         let clock = (clock as i64).rem_euclid(12) as u8;
+        // The connections decide the zero sequence, so they come first: a listed group with both connections at the
+        // clock number, else at the nearest listed clock with the difference as additional shift (the total shift,
+        // and so the load flow, is the same). Without a listed group for the connections, one with winding 1's, else
+        // any, as before.
+        let wrap = |deg: f64| (deg + 180.0).rem_euclid(360.0) - 180.0;
+        let exact = conns.and_then(|(a, b)| group_of(a, b, clock)).filter(|_| whole);
+        let nearest = conns.and_then(|(a, b)| {
+            VECTOR_GROUPS
+                .iter()
+                .filter_map(|g| crate::powerstudio::vector_group(g).map(|v| (*g, v)))
+                .filter(|(_, v)| v.0 == a && v.1 == b)
+                .map(|(g, v)| (g, wrap(shift - 30.0 * f64::from(v.2))))
+                .min_by(|x, y| x.1.abs().total_cmp(&y.1.abs()))
+        });
         let listed = |c: u8| match conns {
-            Some((a, b)) => group_of(a, b, c).or_else(|| any_group(c)),
+            Some((a, _)) => first_winding_group(a, c).or_else(|| any_group(c)),
             None => any_group(c),
         };
-        let (group, extra_shift) = match (whole, listed(clock)) {
-            (true, Some(g)) => (g, 0.0),
-            _ => (listed(0).unwrap_or("YNyn0"), (shift + 180.0).rem_euclid(360.0) - 180.0),
+        let (group, extra_shift) = match (exact, nearest) {
+            (Some(g), _) => (g, 0.0),
+            (None, Some((g, rest))) => (g, rest),
+            (None, None) => match (whole, listed(clock)) {
+                (true, Some(g)) => (g, 0.0),
+                _ => (listed(0).unwrap_or("YNyn0"), wrap(shift)),
+            },
         };
         let mut fields = json!({
             "hv": hv.0, "lv": lv.0, "inService": on, "sn": sn, "vnHV": vn_hv, "vnLV": vn_lv, "uk": uk, "ur": ur,
-            "i0": i0, "pfe": pfe, "magnetising": placement, "vectorGroup": group, "shift": extra_shift, "uk0": uk, "ur0": ur,
+            "i0": i0, "pfe": pfe, "magnetising": placement, "vectorGroup": group, "shift": extra_shift, "uk0": uk0, "ur0": ur0,
             "tapStep": 0, "tapPos": 0, "tapNeutral": 0, "tapMin": 0, "tapMax": 0,
         });
         if let (Value::Object(f), Value::Object(e)) = (&mut fields, extra) {
@@ -273,6 +292,21 @@ impl Doc<'_> {
         }
         Some(self.push("trafo", wanted, name, fields))
     }
+}
+
+/// What a transformer element is written from: its busbars (identifier and base voltage), its per-unit form
+/// between them, the zero-sequence series impedance in the same per unit where the model has one, its rating,
+/// state, connections and LV rated voltage.
+#[derive(Clone, Copy)]
+struct TransformerData<'a> {
+    hv: (&'a str, f64),
+    lv: (&'a str, f64),
+    p: TransformerPu,
+    z0: Option<C64>,
+    rating: f64,
+    on: bool,
+    conns: Option<(Winding, Winding)>,
+    lv_rated: Option<f64>,
 }
 
 /// Converts a model into a PowerStudio document.
@@ -433,20 +467,17 @@ fn lines(d: &mut Doc) {
         }
         if (a.1 - b.1).abs() > 1e-12 * a.1.max(b.1) {
             // Ends of different base voltage: a transformer at the ratio of the bases, as the per-unit data mean.
-            if d.transformer(
-                &l.id,
-                &l.name,
-                (&a.0, a.1),
-                (&b.0, b.1),
-                &p,
-                d.sb,
-                l.in_service,
-                None,
-                json!({}),
-                None,
-            )
-            .is_none()
-            {
+            let data = TransformerData {
+                hv: (&a.0, a.1),
+                lv: (&b.0, b.1),
+                p,
+                z0: Some(line_pu(l, a.1, b.1, d.sb, ps_net::Seq::Zero).z),
+                rating: d.sb,
+                on: l.in_service,
+                conns: None,
+                lv_rated: None,
+            };
+            if d.transformer(&l.id, &l.name, data, json!({})).is_none() {
                 d.count("branch(es) between different voltages that could not be written left out");
             }
             continue;
@@ -593,6 +624,14 @@ fn group_of(conn1: Winding, conn2: Winding, clock: u8) -> Option<&'static str> {
         .copied()
 }
 
+/// The document's first vector group with winding 1's connection and the clock, when it lists one.
+fn first_winding_group(conn1: Winding, clock: u8) -> Option<&'static str> {
+    VECTOR_GROUPS
+        .iter()
+        .find(|g| crate::powerstudio::vector_group(g).is_some_and(|v| v.0 == conn1 && v.2 == clock))
+        .copied()
+}
+
 fn transformers2(d: &mut Doc) {
     let m = d.m;
     for (k, t) in m.transformers2.iter().enumerate() {
@@ -632,19 +671,30 @@ fn transformers2(d: &mut Doc) {
         if let Value::Object(o) = &mut extra {
             o.insert("onLoadTaps".into(), Value::Bool(t.on_load_taps));
             o.insert("tapRange".into(), json!(t.tap_range_pct));
+            for (key, v) in [
+                ("rnHV", t.rn[0]),
+                ("xnHV", t.xn[0]),
+                ("rnLV", t.rn[1]),
+                ("xnLV", t.xn[1]),
+            ] {
+                o.insert(key.into(), json!(v));
+            }
         }
-        let written = d.transformer(
-            &t.id,
-            &t.name,
-            (&a.0, a.1),
-            (&b.0, b.1),
-            &p,
-            t.rated_mva,
-            t.in_service,
+        let zero = TransformerOptions {
+            seq: ps_net::Seq::Zero,
+            ..Default::default()
+        };
+        let data = TransformerData {
+            hv: (&a.0, a.1),
+            lv: (&b.0, b.1),
+            p,
+            z0: Some(transformer2_pu(t, a.1, b.1, d.sb, zero).z),
+            rating: t.rated_mva,
+            on: t.in_service,
             conns,
-            extra,
-            Some(t.rated_kv2),
-        );
+            lv_rated: Some(t.rated_kv2),
+        };
+        let written = d.transformer(&t.id, &t.name, data, extra);
         match written {
             Some(id) => {
                 d.trafo_ids.insert(t.id.clone(), id);
@@ -663,6 +713,14 @@ fn transformers3(d: &mut Doc) {
         let ends: Option<Vec<(String, f64)>> = t.windings.iter().map(|w| d.bus(w.node)).collect();
         let Some(ends) = ends else { continue };
         let pus: Vec<TransformerPu> = (0..3).map(|w| transformer3_winding_pu(t, w, ends[w].1, d.sb)).collect();
+        // The windings' zero-sequence impedances, through the same conversion.
+        let mut zero = t.clone();
+        for w in &mut zero.windings {
+            (w.r, w.x) = w.zero_sequence();
+        }
+        let zs: Vec<C64> = (0..3)
+            .map(|w| transformer3_winding_pu(&zero, w, ends[w].1, d.sb).z)
+            .collect();
         let open: Vec<usize> = (0..3).filter(|&w| t.windings[w].open).collect();
         if !open.is_empty() {
             d.count("three-winding transformer(s) with an open winding written with that winding left out");
@@ -683,20 +741,23 @@ fn transformers3(d: &mut Doc) {
         );
         d.internal.push((star.clone(), Internal::Star(k)));
         for w in (0..3).filter(|w| !open.contains(w)) {
-            let conns = Some((t.windings[w].conn, t.windings[0].conn));
-            let id = format!("{}.w{}", t.id, w + 1);
-            let rating = t.windings[w].rated_mva;
+            // The winding's own connection decides its zero sequence; the star side stands for the star point.
+            let wd = &t.windings[w];
+            let data = TransformerData {
+                hv: (&ends[w].0, ends[w].1),
+                lv: (&star, k1),
+                p: pus[w],
+                z0: Some(zs[w]),
+                rating: wd.rated_mva,
+                on: t.in_service,
+                conns: Some((wd.conn, Winding::Yn)),
+                lv_rated: None,
+            };
             d.transformer(
-                &id,
+                &format!("{}.w{}", t.id, w + 1),
                 &t.name,
-                (&ends[w].0, ends[w].1),
-                (&star, k1),
-                &pus[w],
-                rating,
-                t.in_service,
-                conns,
-                json!({}),
-                None,
+                data,
+                json!({ "rnHV": wd.rn, "xnHV": wd.xn }),
             );
         }
         d.count("three-winding transformer(s) written as a star busbar with three two-winding transformers");

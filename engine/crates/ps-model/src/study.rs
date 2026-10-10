@@ -153,6 +153,10 @@ pub struct ShortCircuitSettings {
     pub t_k: f64,
     /// Conductor temperature at the end of the short circuit, °C, for the lines' resistance in the minimum case.
     pub line_temperature: f64,
+    /// Fault resistance in each faulted phase, Ω.
+    pub fault_r: f64,
+    /// Fault reactance in each faulted phase, Ω.
+    pub fault_x: f64,
 }
 
 impl Default for ShortCircuitSettings {
@@ -166,6 +170,8 @@ impl Default for ShortCircuitSettings {
             t_min: 0.1,
             t_k: 1.0,
             line_temperature: 80.0,
+            fault_r: 0.0,
+            fault_x: 0.0,
         }
     }
 }
