@@ -110,67 +110,117 @@ fn chunks_merge_to_the_sequential_result() {
     }
 }
 
-/// Screening never misses an outage that a full load flow flags: every outage with a violation the base case does
-/// not have (thermal or voltage) is solved in full, on every PSS/E reference case and on the 2,000-bus ACTIVSg grid.
-/// Prints how many outages screening judged safe.
-#[test]
-fn screening_never_misses_what_full_ac_flags() {
-    use ps_model::study::LoadFlowSettings;
-    let mut models: Vec<(String, ps_model::Model)> = Vec::new();
-    let cases = json("tests/oracle/psse-cases.json");
-    for case in cases["cases"].as_array().unwrap() {
-        if case["loadflow"] != false {
-            models.push((case["name"].as_str().unwrap().into(), psse_import(case).model));
+/// What screening gets wrong on one model: outages that a full load flow flags (a violation the base case does not
+/// have, or no solution) but screening judged safe, and the largest difference between a screened outage's estimate
+/// and its full solution (highest loading in %, lowest and highest voltage in p.u.).
+struct Screening {
+    misses: Vec<String>,
+    outages: usize,
+    flagged: usize,
+    screened: usize,
+    loading_error: f64,
+    voltage_error: f64,
+}
+
+fn screening(name: &str, model: &ps_model::Model, study: &ps_model::study::StudyCase) -> Option<Screening> {
+    let full = contingency::run(model, study, &mut Silent).ok()?;
+    let mut study = study.clone();
+    study.contingency.screening = true;
+    let screened = contingency::run(model, &study, &mut Silent).unwrap();
+    let flagged: Vec<&str> = full
+        .cases
+        .iter()
+        .filter(|c| c.violations.iter().any(|v| !v.in_base) || !c.converged)
+        .map(|c| c.id.as_str())
+        .collect();
+    let mut misses = Vec::new();
+    for id in &flagged {
+        if let Some(sc) = screened.cases.iter().find(|c| c.id == *id && c.screened) {
+            let fc = full.cases.iter().find(|c| c.id == *id).unwrap();
+            let what: Vec<String> = fc
+                .violations
+                .iter()
+                .filter(|v| !v.in_base)
+                .map(|v| format!("{} {} {:.4} (limit {:.3})", v.kind, v.id, v.value, v.limit))
+                .collect();
+            misses.push(format!(
+                "{name}: {id} [{}; estimate {:.2} %]{}",
+                what.join(", "),
+                sc.max_loading.unwrap_or(0.0),
+                if fc.converged { "" } else { " (does not converge)" }
+            ));
         }
     }
-    let text = std::fs::read_to_string(repo(".cache/reference/case_ACTIVSg2000.m")).unwrap();
-    models.push((
-        "activsg2000".into(),
-        ps_io::matpower_model::to_model(&ps_io::matpower::parse(&text).unwrap()).model,
-    ));
+    let (mut loading_error, mut voltage_error) = (0.0_f64, 0.0_f64);
+    for sc in screened.cases.iter().filter(|c| c.screened) {
+        let fc = full.cases.iter().find(|c| c.id == sc.id).unwrap();
+        let diff = |a: Option<f64>, b: Option<f64>| a.zip(b).map_or(0.0, |(a, b)| (a - b).abs());
+        loading_error = loading_error.max(diff(sc.max_loading, fc.max_loading));
+        voltage_error = voltage_error
+            .max(diff(sc.min_v, fc.min_v))
+            .max(diff(sc.max_v, fc.max_v));
+    }
+    Some(Screening {
+        misses,
+        outages: full.cases.len(),
+        flagged: flagged.len(),
+        screened: screened.effort.screened,
+        loading_error,
+        voltage_error,
+    })
+}
+
+/// The reference models of the screening guarantee: every PSS/E reference case that solves, or the 2,000-bus ACTIVSg
+/// grid.
+fn screening_models(activsg: bool) -> Vec<(String, ps_model::Model)> {
+    if activsg {
+        let text = std::fs::read_to_string(repo(".cache/reference/case_ACTIVSg2000.m")).unwrap();
+        return vec![(
+            "activsg2000".into(),
+            ps_io::matpower_model::to_model(&ps_io::matpower::parse(&text).unwrap()).model,
+        )];
+    }
+    let cases = json("tests/oracle/psse-cases.json");
+    cases["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|case| case["loadflow"] != false)
+        .map(|case| (case["name"].as_str().unwrap().into(), psse_import(case).model))
+        .collect()
+}
+
+/// Screening never misses an outage that a full load flow flags: every outage with a violation the base case does
+/// not have (thermal or voltage) is solved in full. The estimates of the outages it clears stay well inside the drift
+/// an element must show to count when it is already inside the margins. Prints how many outages screening judged
+/// safe.
+fn screening_guarantee(activsg: bool, limits: bool) {
+    let mut loadflow = ps_model::study::LoadFlowSettings {
+        max_iter: 50,
+        ..ps_model::study::LoadFlowSettings::plain()
+    };
+    if limits {
+        loadflow.enforce_q_limits = true;
+        loadflow.voltage_dependent_loads = true;
+    }
+    let study = ps_model::study::StudyCase {
+        loadflow,
+        ..Default::default()
+    };
+    let label = if limits { "Q limits and ZIP loads" } else { "plain" };
     let mut misses = Vec::new();
-    for (name, model) in &models {
-        let mut study = ps_model::study::StudyCase {
-            loadflow: LoadFlowSettings {
-                max_iter: 50,
-                ..LoadFlowSettings::plain()
-            },
-            ..Default::default()
-        };
-        let Ok(full) = contingency::run(model, &study, &mut Silent) else {
+    let (mut loading_error, mut voltage_error) = (0.0_f64, 0.0_f64);
+    for (name, model) in &screening_models(activsg) {
+        let Some(s) = screening(&format!("{name} ({label})"), model, &study) else {
             continue;
         };
-        study.contingency.screening = true;
-        let screened = contingency::run(model, &study, &mut Silent).unwrap();
-        let flagged: Vec<&str> = full
-            .cases
-            .iter()
-            .filter(|c| c.violations.iter().any(|v| !v.in_base) || !c.converged)
-            .map(|c| c.id.as_str())
-            .collect();
-        for id in &flagged {
-            if let Some(sc) = screened.cases.iter().find(|c| c.id == *id && c.screened) {
-                let fc = full.cases.iter().find(|c| c.id == *id).unwrap();
-                let what: Vec<String> = fc
-                    .violations
-                    .iter()
-                    .filter(|v| !v.in_base)
-                    .map(|v| format!("{} {} {:.3} (limit {:.3})", v.kind, v.id, v.value, v.limit))
-                    .collect();
-                misses.push(format!(
-                    "{name}: {id} [{}; estimate {:.1} %]{}",
-                    what.join(", "),
-                    sc.max_loading.unwrap_or(0.0),
-                    if fc.converged { "" } else { " (does not converge)" }
-                ));
-            }
-        }
         eprintln!(
-            "{name}: {} outages, {} flagged by full AC, {} judged safe by screening",
-            full.cases.len(),
-            flagged.len(),
-            screened.effort.screened
+            "{name} ({label}): {} outages, {} flagged by full AC, {} judged safe by screening; estimate error {:.1e} %, {:.1e} p.u.",
+            s.outages, s.flagged, s.screened, s.loading_error, s.voltage_error
         );
+        misses.extend(s.misses);
+        loading_error = loading_error.max(s.loading_error);
+        voltage_error = voltage_error.max(s.voltage_error);
     }
     assert!(
         misses.is_empty(),
@@ -178,6 +228,131 @@ fn screening_never_misses_what_full_ac_flags() {
         misses.len(),
         misses.join("\n")
     );
+    assert!(
+        loading_error < contingency::SCREEN_DRIFT_LOADING / 10.0,
+        "loading estimate off by {loading_error} %"
+    );
+    assert!(
+        voltage_error < contingency::SCREEN_DRIFT_V / 10.0,
+        "voltage estimate off by {voltage_error} p.u."
+    );
+}
+
+/// The screening guarantee on every PSS/E reference case, with the plain settings.
+#[test]
+fn screening_never_misses_on_the_psse_cases() {
+    screening_guarantee(false, false);
+}
+
+/// The screening guarantee on every PSS/E reference case, with reactive limits and voltage-dependent loads.
+#[test]
+fn screening_never_misses_on_the_psse_cases_with_limits() {
+    screening_guarantee(false, true);
+}
+
+/// The screening guarantee on the 2,000-bus ACTIVSg grid, with the plain settings.
+#[test]
+fn screening_never_misses_on_activsg2000() {
+    screening_guarantee(true, false);
+}
+
+/// The screening guarantee on the 2,000-bus ACTIVSg grid, with reactive limits and voltage-dependent loads.
+#[test]
+fn screening_never_misses_on_activsg2000_with_limits() {
+    screening_guarantee(true, true);
+}
+
+/// Screening holds its guarantee for an element parked just inside its limit in the base case, where an outage can
+/// push it over by less than the drift an element inside the margins must show: each line of IEEE 14 in turn at
+/// 99.99 % of its limit, and each busbar's band in turn with an edge 0.0001 p.u. from its base voltage (lower, then
+/// upper). A bus above its band in the base case must still be checked against the lower edge.
+#[test]
+fn screening_never_misses_an_element_parked_at_its_limit() {
+    let imp = input("ieee14");
+    let base = loadflow::run(
+        &imp.model,
+        &LoadFlowRun {
+            settings: imp.study.loadflow,
+            outages: Default::default(),
+            start: None,
+        },
+    );
+    let (mut misses, mut flagged, mut screened) = (Vec::new(), 0, 0);
+    let mut check = |name: String, model: ps_model::Model| {
+        let s = screening(&name, &model, &imp.study).unwrap();
+        flagged += s.flagged;
+        screened += s.screened;
+        misses.extend(s.misses);
+    };
+    for k in 0..imp.model.lines.len() {
+        let mut model = imp.model.clone();
+        let line = &mut model.lines[k];
+        let loading = base
+            .branches
+            .iter()
+            .find(|b| b.id == line.id)
+            .and_then(|b| b.loading)
+            .unwrap();
+        for l in &mut line.limits {
+            l.amps *= loading / 99.99;
+        }
+        check(format!("{} at 99.99 %", line.id), model);
+    }
+    for k in 0..imp.model.nodes.len() {
+        let mut model = imp.model.clone();
+        let node = &mut model.nodes[k];
+        let Some(b) = base.buses.iter().find(|b| b.id == node.id) else {
+            continue;
+        };
+        node.v_min = b.vm - 1e-4;
+        check(format!("{} band from {:.4}", node.id, node.v_min), model);
+    }
+    for k in 0..imp.model.nodes.len() {
+        let mut model = imp.model.clone();
+        let node = &mut model.nodes[k];
+        let Some(b) = base.buses.iter().find(|b| b.id == node.id) else {
+            continue;
+        };
+        node.v_max = b.vm + 1e-4;
+        check(format!("{} band up to {:.4}", node.id, node.v_max), model);
+    }
+    eprintln!("{flagged} outages flagged by full AC, {screened} judged safe by screening");
+    // An element within the drift of its limit sends every outage to the full solve; before that rule, 24 outages
+    // here were screened that full AC flags.
+    assert!(flagged > 0);
+    assert!(
+        misses.is_empty(),
+        "screening missed {}: {}",
+        misses.len(),
+        misses.join("\n")
+    );
+}
+
+/// Screening stays off, and the report says why, when a control the decoupled solution keeps fixed would move: here
+/// the tap changers of the IEEE 300 case that regulate voltage.
+#[test]
+fn screening_is_off_while_tap_changers_regulate() {
+    let cases = json("tests/oracle/psse-cases.json");
+    let case = cases["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "ieee300")
+        .unwrap();
+    let model = psse_import(case).model;
+    let mut study = ps_model::study::StudyCase::default();
+    study.contingency.screening = true;
+    study.loadflow.tap_control = true;
+    let r = contingency::run(&model, &study, &mut Silent).unwrap();
+    assert_eq!(r.effort.screened, 0);
+    assert!(
+        r.notes.iter().any(|n| n.contains("tap changers regulate")),
+        "{:?}",
+        r.notes
+    );
+    study.loadflow.tap_control = false;
+    let r = contingency::run(&model, &study, &mut Silent).unwrap();
+    assert!(r.effort.screened > 0 && r.notes.is_empty());
 }
 
 /// A remedial action fires on the contingency it names when its condition holds, and the case reports the state after

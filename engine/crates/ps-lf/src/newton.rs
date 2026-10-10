@@ -149,6 +149,8 @@ pub struct Solution {
     pub va: Vec<f64>,
     /// Bus kinds as finally solved.
     pub kind: Vec<BusKind>,
+    /// Whether the final equations held each bus's voltage magnitude (a control's target).
+    pub v_held: Vec<bool>,
     /// Machine outputs, in network order.
     pub machines: Vec<UnitOutput>,
     /// Grid outputs, in network order.
@@ -684,6 +686,12 @@ impl Work {
         for g in &self.net.grids {
             kind[g.bus] = BusKind::Reference;
         }
+        // The buses whose voltage magnitude the final equations held: a reference whose machines all reached a limit
+        // keeps its angle but not its voltage.
+        let v_held = s.map_or_else(
+            || vec![false; n],
+            |s| s.st.v_fixed.iter().map(Option::is_some).collect(),
+        );
         let sch = self.schedule(opt);
         let loads = self
             .net
@@ -727,6 +735,7 @@ impl Work {
             vm,
             va,
             kind,
+            v_held,
             machines,
             grids,
             loads,

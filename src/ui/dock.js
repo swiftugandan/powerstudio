@@ -288,6 +288,7 @@ export class Dock {
     const work = e.screened ? `<span title="Outages the quick decoupled solution cleared, and those solved by a full load flow">Screened <b>${e.screened}</b> of <b>${r.cases.length}</b></span>` : '';
     const summary = h('div', { class: 'summary', html: `<span>Contingencies <b>${r.cases.length}</b></span>${work}${acted ? `<span>Remedial actions on <b>${acted}</b></span>` : ''}<span>Loading limit <b>${r.limit} %</b></span><span>Base case max <b>${fixed(r.base.maxLoading, 1)} %</b></span><span>Time <b>${duration(ms)}</b></span>` });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary);
+    const notes = r.notes.map(n => h('div', { class: 'dock-note', html: `${icon('info', 14)}<span>${esc(n)}</span>` }));
     const describe = (/** @type {import('../engine/reports.js').ContingencyCase} */ c) => c.violations.map(v => v.kind === 'loading' ? `${this.nameOf(v.id)} ${fixed(v.value, 0)} %` : `${this.nameOf(v.id)} ${fixed(v.value, 3)} p.u.`).join(', ');
     const own = new Map(app.store.doc.study.contingency.list.map(c => [c.id, c.name || c.id]));
     const ruleName = new Map(app.store.doc.study.contingency.remedial.map(x => [x.id, x.name || x.id]));
@@ -312,7 +313,7 @@ export class Dock {
       ...(acted ? [{ key: 'remedial', label: 'Remedial actions', value: (/** @type {any} */ c) => c.remedial.map((/** @type {string} */ id) => ruleName.get(id) ?? id).join(', '),
         title: (/** @type {any} */ c) => (c.remedial.length ? `${c.violationsBefore} violation${c.violationsBefore === 1 ? '' : 's'} before the actions` : '') }] : []),
     ], r.cases, 'contingency', 'n1', 'state', 1);
-    this.mount([bar], table);
+    this.mount([bar, ...notes], table);
   }
 
   renderRms() {

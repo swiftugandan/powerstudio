@@ -193,12 +193,27 @@ decoupled iterations on its full AC equations, in the XB form (B′ from branch 
 the full susceptance matrix for magnitudes), starting
 from the base solution. B′ and B″ are factorised once for the base network; the outage enters as a rank-two
 correction of those factors (the Woodbury identity), so no outage needs a factorisation of its own. The iterations
-stop at 1e-4 p.u. of mismatch and converge in three or four. When the result keeps every branch below
+stop at 1e-5 p.u. of mismatch and converge in four or five. When the result keeps every branch below
 (100 − margin) % of the loading limit and every voltage the voltage margin inside its band, the case is reported as
 screened with the estimate's highest loading; anything else, including iterations that do not converge, gets the full
-Newton load flow. An element already inside the margins in the base case counts only when the outage worsens it (by
-0.1 % of loading or 0.001 p.u.), so a base-case near-overload does not send every outage to the full solve. The
-defaults are 5 % and 0.01 p.u.
+Newton load flow. An element already inside the margins in the base case counts when the outage worsens it (by
+0.1 % of loading or 0.001 p.u., the drift), so a base-case loading of 96 % does not send every outage to the full
+solve; it always counts once the estimate comes within the drift of the limit itself, so an element parked just under
+its limit cannot cross it unseen. A voltage band is judged by side: a bus above its band in the base case is still
+checked against the lower edge. A bus whose voltage a control holds keeps it in the full solution as well, so it is
+not judged. The defaults are 5 % and 0.01 p.u. A screened case reports the decoupled solution's
+loadings and voltages, which differ from the full solution's by at most 0.0005 % and 3e-6 p.u. on the reference
+cases.
+
+The decoupled solution holds the base solution's controls where they are, so it models what follows the voltage
+without moving a control and turns the rest away. Voltage-dependent loads take their power at the new voltages, and
+a static var compensator held at a limit gives B·V² at its new voltage. With reactive limits respected, the reactive
+power each voltage-held bus must supply after the outage is checked against the room its machines have left, and a
+bus held at a limit must not come within 1e-4 p.u. of the voltage that would release it; either sends the outage to
+the full solve. The buses whose voltage the base solution held come from the solver itself, since a reference machine
+that reaches a limit keeps its angle but not its voltage. Controls that the outage would move rule screening out
+for the whole run, with a note in the report saying which: machines regulating remote busbars, an imbalance shared
+among several units, regulating tap changers or phase shifters, and switched shunts.
 
 A first version estimated with one linear step from the base factors. It missed voltage collapses: on IEEE 57 it moved
 the lowest voltage by 0.01 p.u. where the full solution falls to 0.65. The outage-corrected iterations are the fix,
@@ -251,9 +266,16 @@ the decoupled voltage model (B″). Both take a branch outage as a low-rank corr
 - `engine/crates/ps-study/tests/contingency.rs`: every case equals a separate load flow with the element out; Line 1-2
   out overloads Line 1-5 on the IEEE 14 sample; radial outages report the lost nodes; chunked runs merge to exactly the
   sequential report; and the screening guarantee, which runs every PSS/E case and ACTIVSg2000 with and without
-  screening and requires every outage that full AC flags (a new violation or no solution) to have been solved in full.
-  Screening clears 2,585 of ACTIVSg2000's 3,206 branch outages, and takes ACTIVSg10k from 26 to 11.5 ms per outage
-  natively. A remedial action relieves the IEEE 14 overload and leaves every other outage unchanged.
+  screening, once with the plain settings and once with reactive limits and voltage-dependent loads, and requires
+  every outage that full AC flags (a new violation or no solution) to have been solved in full, and the screened
+  estimates to stay within a tenth of the drift of the full solution. With limits on, screening clears 2,111 of
+  ACTIVSg2000's outages; ieee300 and rts96, whose machines nearly all lose voltage control at their limits, clear
+  none, because the decoupled iterations do not converge on them. Another test checks that regulating tap changers
+  turn screening off with a note. A second test parks each line
+  of IEEE 14 in turn at 99.99 % of its limit and each busbar's band edge 0.0001 p.u. from its voltage, below and
+  above: the cases the drift rule alone let through (24 outages before the limit rule) and a bus over its band in the
+  base case falling under it. Screening clears 2,584 of ACTIVSg2000's 3,206
+  branch outages, and takes ACTIVSg10k from 26 to 11.5 ms per outage natively. A remedial action relieves the IEEE 14 overload and leaves every other outage unchanged.
 - `tests/contingency.test.mjs` and `tests/contingencies.test.mjs`: the same through WebAssembly, the file's checks, and
   removal and undo in the document.
 

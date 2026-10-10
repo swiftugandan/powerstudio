@@ -38,7 +38,7 @@
  *   violations: Violation[], screened: boolean, remedial: string[], violationsBefore: number }} ContingencyCase
  * @typedef {{ base: ContingencyCase, cases: ContingencyCase[], worstLoading: Record<string, { value: number, outage: string }>,
  *   worstVoltage: Record<string, { min: number, minOutage: string, max: number, maxOutage: string }>, limit: number,
- *   effort: { reused: number, rebuilt: number, screened: number }, timing: { totalMs: number } }} ContingencyResult
+ *   effort: { reused: number, rebuilt: number, screened: number }, timing: { totalMs: number }, notes: string[] }} ContingencyResult
  * @typedef {import('../core/document.js').SimEvent} SimEvent
  * @typedef {{ id: string, name: string, delta: Float32Array, speed: Float32Array, pe: Float32Array }} MachineTrace
  * @typedef {{ t: Float32Array, machines: MachineTrace[], busIds: string[], voltages: Float32Array[], events: Array<SimEvent & { applied: boolean, note: string }>,

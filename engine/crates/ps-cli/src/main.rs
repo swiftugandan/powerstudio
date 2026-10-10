@@ -23,7 +23,7 @@ use std::process::ExitCode;
 use ps_study::{LoadFlowRun, Silent, api};
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] [--sv <out.xml>]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]\n       ps contingency <input>... [--gens] [--screen] [--tol <MVA>] [--from <k>] [--to <k>]";
+const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] [--sv <out.xml>]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]\n       ps contingency <input>... [--gens] [--screen] [--qlim] [--tol <MVA>] [--from <k>] [--to <k>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -197,6 +197,7 @@ fn run(args: &[String]) -> Result<String, String> {
             };
             study.contingency.gens = flag(args, "--gens");
             study.contingency.screening = flag(args, "--screen");
+            study.loadflow.enforce_q_limits = flag(args, "--qlim");
             let from = value(args, "--from").and_then(|v| v.parse().ok()).unwrap_or(0);
             let to = value(args, "--to").and_then(|v| v.parse().ok()).unwrap_or(usize::MAX);
             let t0 = ps_num::clock::now_ms();

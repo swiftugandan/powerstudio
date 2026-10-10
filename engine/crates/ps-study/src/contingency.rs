@@ -143,6 +143,8 @@ pub struct ContingencyReport {
     pub effort: Effort,
     /// Where the time went.
     pub timing: Timing,
+    /// What the analysis wants the user to know about how it ran, such as why screening did not apply.
+    pub notes: Vec<String>,
 }
 
 /// A chunk's results, in outage order and unsorted.
@@ -163,6 +165,8 @@ pub struct Chunk {
     pub effort: Effort,
     /// Where the time went.
     pub timing: Timing,
+    /// What the analysis wants the user to know about how it ran.
+    pub notes: Vec<String>,
 }
 
 /// The contingencies a study case selects, in order: lines, transformers, generators and HVDC links one at a time
@@ -362,18 +366,20 @@ fn bridges(net: &PuNetwork) -> HashSet<usize> {
 
 /// Fast decoupled iterations of a screened outage, and the largest mismatch they must reach, p.u.
 const SCREEN_ITERATIONS: usize = 10;
-const SCREEN_TOLERANCE: f64 = 1e-4;
-/// Changes an estimate must make to count for an element already inside the margins in the base case: loading in
-/// %, voltage in p.u. (well above the estimate's error at 1e-4 p.u. of mismatch).
-const SCREEN_DRIFT_LOADING: f64 = 0.1;
-const SCREEN_DRIFT_V: f64 = 1e-3;
+const SCREEN_TOLERANCE: f64 = 1e-5;
+/// The change in loading, %, an estimate must show to count for a branch already inside the margins in the base
+/// case, and how close to the loading limit it may come before it counts whatever its change. The screening test
+/// holds the estimate's error to a tenth of it.
+pub const SCREEN_DRIFT_LOADING: f64 = 0.1;
+/// The same for voltages, p.u.
+pub const SCREEN_DRIFT_V: f64 = 1e-3;
 
 /// What screening needs: the decoupled models of the base network (B′ and B″, factorised once), its admittance
 /// matrix and its solved state.
 ///
 /// Each single-branch outage is solved by fast decoupled iterations from the base solution on the full AC equations
 /// with the branch out, reusing the base network's factorised B′ and B″ (so no factorisation per outage). When they
-/// reach 1e-4 p.u. within ten iterations, the branches' flows and the buses' voltages are judged at that state with
+/// reach 1e-5 p.u. within ten iterations, the branches' flows and the buses' voltages are judged at that state with
 /// the margins; otherwise, or when anything comes within the margins, the outage gets a full Newton load flow.
 struct Screen {
     dc: ps_lf::DcModel,
@@ -386,20 +392,107 @@ struct Screen {
     /// Buses whose angle is fixed (references) and whose voltage magnitude a control holds.
     reference: Vec<bool>,
     fixed: Vec<bool>,
-    /// Branches and buses that already violate a limit in the base case (their violations are the base case's).
+    /// Branches and buses that already violate a limit in the base case (their violations are the base case's): buses
+    /// by side, since an outage can take a bus above its band in the base case below it.
     branch_in_base: HashSet<usize>,
-    bus_in_base: HashSet<usize>,
+    low_in_base: HashSet<usize>,
+    high_in_base: HashSet<usize>,
     /// Loading above which an outage is solved in full, %.
     threshold: f64,
+    /// The loading limit itself, %.
+    limit: f64,
     margin_v: f64,
     /// Base loading of every branch, %.
     base_loading: Vec<Option<f64>>,
+    /// Loads whose power follows their voltage (with voltage-dependent loads on), by index into the network's loads.
+    zip_loads: Vec<usize>,
+    /// Static var compensators held at a limit, whose output then follows the square of their voltage: bus and limit
+    /// at 1 p.u.
+    held_svcs: Vec<(usize, f64)>,
+    /// The reactive limits that hold the base solution, when the study respects them.
+    reactive: Option<Reactive>,
+}
+
+/// What screening checks of reactive limits: the room each voltage-controlled bus's machines have left, and the buses
+/// held at a limit with their voltage targets.
+struct Reactive {
+    /// Per bus: how far its machines' reactive power may rise and fall before a limit, p.u. (zero where none control).
+    up: Vec<f64>,
+    down: Vec<f64>,
+    /// Buses held at a limit: bus, +1 at the upper limit (voltage below target) or −1 at the lower, voltage target.
+    held: Vec<(usize, i8, f64)>,
+}
+
+impl Reactive {
+    fn new(net: &ps_lf::PuNetwork, sol: &Solution) -> Self {
+        let n = net.buses.len();
+        let (mut up, mut down) = (vec![0.0; n], vec![0.0; n]);
+        let mut grid_bus = vec![false; n];
+        for g in &net.grids {
+            grid_bus[g.bus] = true;
+        }
+        // A machine with a reactive range under 1 Mvar does not control voltage when limits apply; leaving it out
+        // only shrinks the room.
+        let tiny = 1.0 / net.base_mva;
+        for (m, g) in net.machines.iter().enumerate() {
+            let Some(out) = sol.machines.get(m) else { continue };
+            let held = sol.v_held.get(g.bus).copied().unwrap_or(false);
+            if g.mode == ps_lf::MachineMode::Pq
+                || !held
+                || grid_bus[g.bus]
+                || out.at_limit != 0
+                || g.q_max - g.q_min < tiny
+            {
+                continue;
+            }
+            let s = if g.kind == ps_lf::UnitKind::Svc {
+                sol.vm[g.bus] * sol.vm[g.bus]
+            } else {
+                1.0
+            };
+            up[g.bus] += (g.q_max * s - out.q).max(0.0);
+            down[g.bus] += (out.q - g.q_min * s).max(0.0);
+        }
+        let held = sol
+            .held
+            .iter()
+            .filter_map(|&(m, dir)| net.machines.get(m).map(|g| (g.bus, dir, g.v_set)))
+            .collect();
+        Self { up, down, held }
+    }
+}
+
+/// The reactive power a screened machine must keep clear of its limits, and the voltage a bus held at a limit must keep
+/// clear of its target, p.u.: ten times the estimate's error at 1e-5 p.u. of mismatch.
+const SCREEN_Q_MARGIN: f64 = 1e-4;
+const SCREEN_RELEASE_V: f64 = 1e-4;
+
+/// Why screening does not apply to a study, when it does not: the decoupled solution keeps the base solution's
+/// controls as they are, so a control that an outage would move rules it out.
+fn screening_ruled_out(net: &ps_lf::PuNetwork, lf: &ps_model::study::LoadFlowSettings) -> Option<&'static str> {
+    use ps_model::study::Balance;
+    let controlling = |g: &&ps_lf::PuMachine| g.mode != ps_lf::MachineMode::Pq;
+    if lf.remote_voltage && net.machines.iter().filter(controlling).any(|g| g.reg_bus != g.bus) {
+        return Some("machines regulate remote busbars");
+    }
+    if lf.balance != Balance::Reference {
+        return Some("the imbalance is shared among several units");
+    }
+    if (lf.tap_control || lf.phase_control) && !net.taps.is_empty() {
+        return Some("tap changers regulate");
+    }
+    if lf.shunt_control && !net.shunt_controls.is_empty() {
+        return Some("switched shunts regulate");
+    }
+    None
 }
 
 impl Screen {
-    fn new(base: &Base, sol: &Solution, base_case: &Case, st: &ps_model::study::ContingencySettings) -> Option<Self> {
-        let dc = ps_lf::DcModel::new(&base.net)?;
-        let fixed: Vec<bool> = sol.kind.iter().map(|k| *k != ps_lf::BusKind::Pq).collect();
+    fn new(base: &Base, sol: &Solution, base_case: &Case, study: &StudyCase) -> Option<Self> {
+        let st = &study.contingency;
+        let net = &base.net;
+        let dc = ps_lf::DcModel::new(net)?;
+        let fixed = sol.v_held.clone();
         let vmodel = ps_lf::VoltageModel::new(&base.net, &fixed)?;
         let y = ps_lf::Ybus::build(&base.net, &[]);
         let injections = ps_lf::bus_injections(&y, &sol.vm, &sol.va);
@@ -410,12 +503,17 @@ impl Screen {
             .filter(|v| v.kind == "loading")
             .map(|v| v.id.as_str())
             .collect();
-        let bus_ids: HashSet<&str> = base_case
-            .violations
-            .iter()
-            .filter(|v| v.kind != "loading")
-            .map(|v| v.id.as_str())
-            .collect();
+        let in_base = |kind: &str| -> HashSet<usize> {
+            let ids: HashSet<&str> = base_case
+                .violations
+                .iter()
+                .filter(|v| v.kind == kind)
+                .map(|v| v.id.as_str())
+                .collect();
+            (0..base.monitor.buses.len())
+                .filter(|&b| ids.contains(base.monitor.buses[b].0.as_str()))
+                .collect()
+        };
         Some(Self {
             dc,
             vmodel,
@@ -428,10 +526,10 @@ impl Screen {
             branch_in_base: (0..base.monitor.branches.len())
                 .filter(|&b| loading_ids.contains(base.monitor.branches[b].0.as_str()))
                 .collect(),
-            bus_in_base: (0..base.monitor.buses.len())
-                .filter(|&b| bus_ids.contains(base.monitor.buses[b].0.as_str()))
-                .collect(),
+            low_in_base: in_base("undervoltage"),
+            high_in_base: in_base("overvoltage"),
             threshold: st.max_loading * (1.0 - st.screening_margin / 100.0),
+            limit: st.max_loading,
             margin_v: st.screening_voltage,
             base_loading: {
                 let out = outcome(&base.net, sol, &base.monitor, &base.real_bus);
@@ -441,6 +539,21 @@ impl Screen {
                 }
                 v
             },
+            zip_loads: if study.loadflow.voltage_dependent_loads {
+                (0..net.loads.len())
+                    .filter(|&k| net.loads[k].p_zip[2] != 1.0 || net.loads[k].q_zip[2] != 1.0)
+                    .collect()
+            } else {
+                Vec::new()
+            },
+            held_svcs: sol
+                .held
+                .iter()
+                .filter_map(|&(m, dir)| net.machines.get(m).map(|g| (g, dir)))
+                .filter(|(g, _)| g.kind == ps_lf::UnitKind::Svc)
+                .map(|(g, dir)| (g.bus, if dir > 0 { g.q_max } else { g.q_min }))
+                .collect(),
+            reactive: study.loadflow.enforce_q_limits.then(|| Reactive::new(net, sol)),
         })
     }
 
@@ -456,12 +569,23 @@ impl Screen {
         let mut vm = self.vm.clone();
         let mut v: Vec<C64> = (0..n).map(|i| C64::from_polar(vm[i], va[i])).collect();
         let mut cur = vec![C64::ZERO; n];
-        // The mismatches of the base schedule (the base solution's injections) with the branch out.
+        // The mismatches of the base schedule (the base solution's injections, with voltage-dependent loads and
+        // compensators held at a limit at the new voltages) with the branch out.
         let mismatch = |v: &[C64], cur: &mut [C64]| -> Vec<C64> {
             self.y.mul(v, cur);
             cur[br.f] -= br.yff * v[br.f] + br.yft * v[br.t];
             cur[br.t] -= br.ytf * v[br.f] + br.ytt * v[br.t];
-            (0..n).map(|i| self.s[i] - v[i] * cur[i].conj()).collect()
+            let mut ds: Vec<C64> = (0..n).map(|i| self.s[i] - v[i] * cur[i].conj()).collect();
+            for &l in &self.zip_loads {
+                let load = &net.loads[l];
+                let (p0, q0, _, _) = load.at(self.vm[load.bus], true);
+                let (p, q, _, _) = load.at(v[load.bus].abs(), true);
+                ds[load.bus] += C64::new(p0 - p, q0 - q);
+            }
+            for &(b, q) in &self.held_svcs {
+                ds[b] += C64::new(0.0, q * (v[b].norm_sqr() - self.vm[b] * self.vm[b]));
+            }
+            ds
         };
         // B′ and B″ without the branch: low-rank corrections of the base factors.
         let dc_change = self.dc.without_branch(k)?;
@@ -502,14 +626,44 @@ impl Screen {
         if !converged {
             return None;
         }
+        if let Some(r) = &self.reactive {
+            // The reactive power each voltage-controlled bus must now supply beyond the base case's, against the room
+            // its machines have; and a bus held at a limit must not reach the voltage that would release it.
+            let ds = mismatch(&v, &mut cur);
+            // The reference machines too: they keep the angle but lose the voltage at a limit like any other.
+            for b in (0..n).filter(|&b| self.fixed[b]) {
+                let dq = -ds[b].im;
+                if dq > r.up[b] - SCREEN_Q_MARGIN || -dq > r.down[b] - SCREEN_Q_MARGIN {
+                    return None;
+                }
+            }
+            for &(b, dir, target) in &r.held {
+                let released = if dir > 0 {
+                    vm[b] > target - SCREEN_RELEASE_V
+                } else {
+                    vm[b] < target + SCREEN_RELEASE_V
+                };
+                if released {
+                    return None;
+                }
+            }
+        }
         for (b, (_, lo, hi)) in base.monitor.buses.iter().enumerate() {
-            if !base.real_bus[b] || self.bus_in_base.contains(&b) {
+            // A bus whose voltage a control holds keeps it in the full solution too (a reactive limit that would release
+            // it is checked above), so only a violation the base case already has could show there.
+            if !base.real_bus[b] || self.fixed[b] {
                 continue;
             }
-            // A voltage inside the margin counts when the outage moves it further towards the band's edge.
+            // A voltage inside the margin counts when the outage moves it further towards the band's edge, and always
+            // when it comes within the drift of the edge itself; a side the base case already violates is the base
+            // case's.
             let (v, v0) = (vm[b], self.vm[b]);
-            let low = v < lo + self.margin_v && v < v0 - SCREEN_DRIFT_V;
-            let high = v > hi - self.margin_v && v > v0 + SCREEN_DRIFT_V;
+            let low = !self.low_in_base.contains(&b)
+                && v < lo + self.margin_v
+                && (v < v0 - SCREEN_DRIFT_V || v < lo + SCREEN_DRIFT_V);
+            let high = !self.high_in_base.contains(&b)
+                && v > hi - self.margin_v
+                && (v > v0 + SCREEN_DRIFT_V || v > hi - SCREEN_DRIFT_V);
             if low || high || !v.is_finite() {
                 return None;
             }
@@ -532,8 +686,10 @@ impl Screen {
                 continue;
             };
             loadings.push((l, load));
-            // A loading inside the margin counts when the outage raises it.
-            let raised = self.base_loading[l].is_none_or(|b| load > b + SCREEN_DRIFT_LOADING);
+            // A loading inside the margin counts when the outage raises it, and always when it comes within the drift
+            // of the limit itself.
+            let raised = self.base_loading[l].is_none_or(|b| load > b + SCREEN_DRIFT_LOADING)
+                || load > self.limit - SCREEN_DRIFT_LOADING;
             if load > self.threshold && raised && !self.branch_in_base.contains(&l) {
                 return None;
             }
@@ -552,6 +708,7 @@ struct Prepared {
     base_dead: HashSet<String>,
     post_duration: Option<f64>,
     limit: f64,
+    notes: Vec<String>,
 }
 
 fn prepare(model: &Model, study: &StudyCase) -> Result<Prepared, String> {
@@ -614,10 +771,14 @@ fn prepare(model: &Model, study: &StudyCase) -> Result<Prepared, String> {
         calc,
         real_bus,
     };
-    let screen = if st.screening {
-        Screen::new(&base, &sol, &base_case, st)
-    } else {
-        None
+    let mut notes = Vec::new();
+    let screen = match (st.screening, screening_ruled_out(&base.net, &study.loadflow)) {
+        (false, _) => None,
+        (true, Some(why)) => {
+            notes.push(format!("Screening is off for this study: {why}, which the quick decoupled solution cannot follow, so every outage gets a full load flow."));
+            None
+        }
+        (true, None) => Screen::new(&base, &sol, &base_case, study),
     };
     Ok(Prepared {
         base,
@@ -627,6 +788,7 @@ fn prepare(model: &Model, study: &StudyCase) -> Result<Prepared, String> {
         base_dead,
         post_duration,
         limit,
+        notes,
     })
 }
 
@@ -773,6 +935,7 @@ pub fn run_chunk(
         base_dead,
         post_duration,
         limit,
+        notes,
     } = prepare(model, study)?;
     let base_dead: HashSet<&str> = base_dead.iter().map(String::as_str).collect();
     let mut cache = Cache::default();
@@ -781,10 +944,7 @@ pub fn run_chunk(
     let total = range.len();
     let index = model.index();
     let mut cases = Vec::with_capacity(total);
-    let mut worst_loading: Vec<(String, WorstLoading)> = Vec::new();
-    let mut wl_index: HashMap<String, usize> = HashMap::new();
-    let mut worst_voltage: Vec<(String, WorstVoltage)> = Vec::new();
-    let mut wv_index: HashMap<String, usize> = HashMap::new();
+    let mut worst = Worst::default();
     let mut effort = Effort::default();
     for (done, c) in list[range].iter().enumerate() {
         let (found, cls, missing) = resolve(&index, c);
@@ -808,22 +968,18 @@ pub fn run_chunk(
                 &Status {
                     converged: true,
                     message: format!(
-                        "Screened: the linear estimate keeps every branch below {:.0} % of its limit and every voltage inside its band.",
+                        "Screened: the decoupled solution keeps every branch below {:.0} % of its limit and every voltage inside its band.",
                         100.0 - study.contingency.screening_margin
                     ),
                 },
-                None,
+                Some(&est),
                 &base.monitor,
                 limit,
                 Some(&base_case),
                 Vec::new(),
             );
             case.screened = true;
-            case.max_loading = est
-                .loadings
-                .iter()
-                .map(|x| x.1)
-                .fold(None, |m: Option<f64>, x| Some(m.map_or(x, |m| m.max(x))));
+            worst.record(&est, &base.monitor, &c.id);
             cases.push(case);
             progress.report((done + 1) as f64, total as f64);
             continue;
@@ -909,52 +1065,7 @@ pub fn run_chunk(
             .as_ref()
             .map_or_else(|| solved.monitor(&base), |a| a.monitor(&base));
         if let Some(out) = &out {
-            for &(b, value) in &out.loadings {
-                let id = &monitor.branches[b].0;
-                match wl_index.get(id) {
-                    Some(&k) if value <= worst_loading[k].1.value => {}
-                    Some(&k) => {
-                        worst_loading[k].1 = WorstLoading {
-                            value,
-                            outage: c.id.clone(),
-                        }
-                    }
-                    None => {
-                        wl_index.insert(id.clone(), worst_loading.len());
-                        worst_loading.push((
-                            id.clone(),
-                            WorstLoading {
-                                value,
-                                outage: c.id.clone(),
-                            },
-                        ));
-                    }
-                }
-            }
-            for &(b, vm) in &out.voltages {
-                let id = &monitor.buses[b].0;
-                let k = *wv_index.entry(id.clone()).or_insert_with(|| {
-                    worst_voltage.push((
-                        id.clone(),
-                        WorstVoltage {
-                            min: f64::INFINITY,
-                            min_outage: String::new(),
-                            max: f64::NEG_INFINITY,
-                            max_outage: String::new(),
-                        },
-                    ));
-                    worst_voltage.len() - 1
-                });
-                let w = &mut worst_voltage[k].1;
-                if vm < w.min {
-                    w.min = vm;
-                    w.min_outage.clone_from(&c.id);
-                }
-                if vm > w.max {
-                    w.max = vm;
-                    w.max_outage.clone_from(&c.id);
-                }
-            }
+            worst.record(out, monitor, &c.id);
         }
         cases.push(case);
         progress.report((done + 1) as f64, total as f64);
@@ -962,14 +1073,76 @@ pub fn run_chunk(
     Ok(Chunk {
         base: base_case,
         cases,
-        worst_loading,
-        worst_voltage,
+        worst_loading: worst.loading,
+        worst_voltage: worst.voltage,
         limit,
         effort,
         timing: Timing {
             total_ms: ps_num::clock::now_ms() - t0,
         },
+        notes,
     })
+}
+
+/// The worst loading of every branch and the voltage extremes of every bus over the cases so far, in first-seen order.
+#[derive(Default)]
+struct Worst {
+    loading: Vec<(String, WorstLoading)>,
+    loading_at: HashMap<String, usize>,
+    voltage: Vec<(String, WorstVoltage)>,
+    voltage_at: HashMap<String, usize>,
+}
+
+impl Worst {
+    /// Takes in one case's outcome; a tie keeps the earlier case.
+    fn record(&mut self, out: &Outcome, monitor: &Monitor, case: &str) {
+        for &(b, value) in &out.loadings {
+            let id = &monitor.branches[b].0;
+            match self.loading_at.get(id) {
+                Some(&k) if value <= self.loading[k].1.value => {}
+                Some(&k) => {
+                    self.loading[k].1 = WorstLoading {
+                        value,
+                        outage: case.to_string(),
+                    }
+                }
+                None => {
+                    self.loading_at.insert(id.clone(), self.loading.len());
+                    self.loading.push((
+                        id.clone(),
+                        WorstLoading {
+                            value,
+                            outage: case.to_string(),
+                        },
+                    ));
+                }
+            }
+        }
+        for &(b, vm) in &out.voltages {
+            let id = &monitor.buses[b].0;
+            let k = *self.voltage_at.entry(id.clone()).or_insert_with(|| {
+                self.voltage.push((
+                    id.clone(),
+                    WorstVoltage {
+                        min: f64::INFINITY,
+                        min_outage: String::new(),
+                        max: f64::NEG_INFINITY,
+                        max_outage: String::new(),
+                    },
+                ));
+                self.voltage.len() - 1
+            });
+            let w = &mut self.voltage[k].1;
+            if vm < w.min {
+                w.min = vm;
+                w.min_outage = case.to_string();
+            }
+            if vm > w.max {
+                w.max = vm;
+                w.max_outage = case.to_string();
+            }
+        }
+    }
 }
 
 struct Status {
@@ -1163,7 +1336,7 @@ pub fn detailed(model: &Model, study: &StudyCase, list: &[Contingency]) -> Resul
 pub fn merge(chunks: Vec<Chunk>) -> Result<ContingencyReport, String> {
     let mut iter = chunks.into_iter();
     let first = iter.next().ok_or("there are no contingency results to merge")?;
-    let (base, limit) = (first.base.clone(), first.limit);
+    let (base, limit, notes) = (first.base.clone(), first.limit, first.notes.clone());
     let mut cases = Vec::new();
     let mut worst_loading: BTreeMap<String, WorstLoading> = BTreeMap::new();
     let mut worst_voltage: BTreeMap<String, WorstVoltage> = BTreeMap::new();
@@ -1222,6 +1395,7 @@ pub fn merge(chunks: Vec<Chunk>) -> Result<ContingencyReport, String> {
         limit,
         effort,
         timing,
+        notes,
     })
 }
 
