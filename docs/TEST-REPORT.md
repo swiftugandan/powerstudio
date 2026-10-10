@@ -1,8 +1,45 @@
 # Test report
 
 Numbers are copied from the runs; nothing here is estimated. Re-run the commands in [TESTING.md](TESTING.md) to
-reproduce them. The first two sections cover the Rust engine's phases 2 and 1 (local runs only: they have not been
-pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+reproduce them. The first three sections cover the Rust engine's phases 3, 2 and 1 (local runs only: they have not
+been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
+
+## Steady-state completeness, phase 3 (commit `48a21f6`, 2026-10-10, local)
+
+Same environment as phases 1 and 2 (Apple M5 Pro, Chromium 156, Node 26). Local runs only: phase 3 has not been
+pushed, so CI has not run it.
+
+| Suite | Result |
+| --- | --- |
+| Type checking (`npm run check`, both configs) | passed |
+| Engine format and lints (`npm run lint:engine`) | passed, no warnings |
+| Engine tests, native (`cargo test --release --workspace`) | 72 passed, 0 failed |
+| Node tests on the WebAssembly engine (`npm test`) | 72 passed, 0 failed |
+| Browser tests (`npm run test:browser`), both projects | 32 passed, 0 failed, 16 skipped (screenshot captures) |
+| Pages build (`npm run build:pages`) | built; `dist/PowerStudio.html` 1,404,730 bytes, sha256 `21d0084110869d0d1c6731ecedd06203dca6bd56d0535914ff5a5de04524e561` |
+
+The engine module is 1,947,569 bytes (636,313 gzip-compressed), sha256
+`ff3e77d52724b9e9b496fb41763ada78199bff2ee28eabb8e7066e6220cefe8d`.
+
+Agreement, by the engine tests in `engine/crates/ps-study/tests/`:
+
+| Comparison | Cases | Worst agreement |
+| --- | --- | --- |
+| Load flow controls against OpenLoadFlow (`controls.rs`) | 323 variants: each control alone, all together, stressed targets, on the PSS/E cases, ACTIVSg2000 and 10k | 2.9e-9 p.u., 9.2e-4 MW |
+| Contingencies against PowSyBl security analysis (`security.rs`) | every single-element outage of 22 PSS/E cases and ACTIVSg2000 (5,819 outages; 74 left out where OpenLoadFlow does not solve or the outage cuts its slack bus off) | 5.6e-6 MW, 1.5e-8 p.u. (the goldens' nine digits) |
+| PTDFs against PowSyBl DC sensitivity analysis (`sensitivity.rs`) | IEEE 14, 39, 118 | 5.0e-11 |
+| Screening against full AC (`contingency.rs`) | 22 PSS/E cases and ACTIVSg2000, plain and with reactive limits and ZIP loads; IEEE 14 with each element parked at its limit | no outage that full AC flags is missed; estimates within 0.0005 % and 3.4e-6 p.u. |
+| Area interchange against its definition (`interchange.rs`) | IEEE 300, two-area, IEEE 300 through the editor's document | every controlled area within its tolerance or at its slack machines' limits |
+
+Scale in Chromium 156 (`scripts/browser-bench.mjs`, and the app on the built file):
+
+| Measurement | Result | Bar |
+| --- | --- | --- |
+| ACTIVSg25k load flow, cold start | 210 ms, 4 iterations | under 2 s: met |
+| ACTIVSg70k load flow from stored voltages | 747 ms, 6 iterations, 377 MB | under 0.5 s: missed (phase 4) |
+| ACTIVSg70k load flow, cold start | does not converge (nor in OpenLoadFlow) | under 2 s: missed |
+| ACTIVSg10k N-1, 12,899 contingencies, 8 workers, plain settings | 81 s in full, 62 s with screening | under 2 min: met |
+| ACTIVSg10k N-1 as the file opens (reactive limits on) | 199 s, 208 s with screening | under 2 min: missed (phase 4) |
 
 ## Data exchange, phase 2 (commit `4d9926d`, 2026-10-09, local)
 
@@ -168,7 +205,7 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
 | Live site in a browser | Opened https://swiftugandan.github.io/powerstudio/ in local Chromium: the website showed the build-time figures (13.393 MW, 27.35 kA, 10 of 20, stays in step); its "Open PowerStudio" button opened `/app/`, which drew with WebGPU (Apple, metal-3) and converged the IEEE 14 load flow in 3 iterations, with no page errors |
 | Opened from disk | `dist/PowerStudio.html` over `file://` in local Chromium drew with WebGPU, solved the load flow and saved to IndexedDB |
 
-## Not verified (as of phase 2)
+## Not verified (as of phase 3)
 
 - Firefox, Safari and Chromium on Windows; WebGPU on Linux with a real GPU.
 - Touch and pinch gestures on a real phone (the phone layout was tested at 390 × 844 in Chromium).
@@ -180,3 +217,6 @@ swing frequency within 1 % (`tests/rms.test.mjs`).
   test systems were read.
 - PSS/E itself: RAW files written by PowerStudio were read by PowerStudio and by PowSyBl, not by PSS/E.
 - The engine build in CI, and its reproducibility on a second machine.
+- Area interchange against PSS/E itself: it is tested against the area record's definition only.
+- CGMES contingency data, which no conformity configuration carries.
+- Responsiveness of the app during a 10,000-bus N-1 (frames under 100 ms), which phase 4 measures.

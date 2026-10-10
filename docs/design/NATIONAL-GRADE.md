@@ -470,7 +470,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | **0. Spikes** — done | Sparse LU in `wasm32` on ACTIVSg25k and 70k; faer confirmed; WebAssembly memory measured | See the phase 0 results below |
 | **1. Engine foundation** — done | Rust workspace, model and operations, snapshot format, topology processor, per-unit network, and all four 0.1 calculations ported at 0.1 parity (sparse Newton-Raphson with 0.1's controls, short circuit, N-1, classical stability; the national-grade versions are phases 3, 5 and 6); coordinator and worker pool; `ps-cli` | Every 0.1 oracle test passes on the engine; ACTIVSg25k solves within target; the JavaScript solvers are deleted. See the phase 1 results below |
 | **2. Data exchange** — done | CGMES 2.4.15 and 3.0 import (EQ, TP, SSH, SV, DL, GL) and SSH/SV export; PSS/E RAW import and export; validation reports | CGMES conformity configurations and ACTIVSg cases import and agree with PowSyBl to the fidelity bar |
-| **3. Steady-state completeness** | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis |
+| **3. Steady-state completeness** — done, two bars missed | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis. See the phase 3 results below |
 | **4. Workspace at scale** (runs alongside 2 and 3) | Projects, variants, scenarios, study cases; data manager; substation diagrams; renderer at scale; result browser and comparison; reports | A 70,000-bus project is usable end to end with no frame over 100 ms |
 | **5. Dynamics** | DAE solver, events, DYR import, wave D1, then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases |
 | **6. Short circuit** | Breaking and steady-state currents, DC component, power station units, converter sources, all fault types; the superposition method | The TR 60909-4 example network from pandapower's open test suite reproduced to its stated tolerances for three-phase and line-to-line faults, maximum and minimum, power station units included |
@@ -570,6 +570,44 @@ is gone: one importer per format, in the engine. Automatic layout now takes 0.3 
 
 SSH export moves to phase 4. SSH carries the set points an operator edits, and edits on an imported model arrive
 with the workspace on the model; until then an exported SSH would repeat the input.
+
+### Phase 3 results (2026-10-10, local)
+
+Agreement with PowSyBl is met throughout; the scale bar is met for N-1 with the plain settings and missed in two
+places, both carried to phase 4 below.
+
+- **Controls agree with OpenLoadFlow.** Every control of section 5.5 is an outer loop with OpenLoadFlow's order and
+  rules (docs/ENGINE.md): distributed slack in five modes, reactive limits with switching back, remote and shared
+  voltage control, tap changers, phase shifters, switched shunts, voltage-dependent (ZIP) loads, HVDC links as
+  injections, SVCs and STATCOMs. 323 variants (each control alone, all together, and with stressed targets) across the
+  PSS/E cases and ACTIVSg2000 and 10k agree to 2.9e-9 p.u. and 9.2e-4 MW. Area interchange control follows the PSS/E
+  area record instead, because PowSyBl reads PDES with the opposite sign (docs/research/sources.md), and is tested
+  against its own definition. Exponential loads are not modelled; no reference case uses them.
+- **Methods.** Newton-Raphson takes a quadratic Armijo line search and, cold, a no-load voltage profile. Fast decoupled
+  is not offered as a solver of its own: Newton on faer's supernodal LU solves ACTIVSg25k from a cold start in four
+  iterations, and the decoupled method's place is screening, where it runs on the base case's factors.
+- **Sensitivities.** PTDF, LODF and the decoupled voltage model; PTDFs agree with PowSyBl's DC sensitivity analysis
+  to 5e-11.
+- **Contingency engine.** Single and multiple outages, busbar faults, generator and HVDC outages and user lists with a
+  documented JSON file; per-end permanent and temporary limits with the time to act; the base case solved once and
+  re-used (its matrix pattern and ordering for non-bridge branch outages, its voltages and reactive limit state
+  for all); remedial actions
+  as declarative rules recorded in the result; screening that a test proves never misses what full AC flags, on 22
+  PSS/E cases and ACTIVSg2000, with and without reactive limits. Every single-element outage of those cases agrees
+  with PowSyBl's security analysis to 5.6e-6 MW and 1.5e-8 p.u. CGMES contingency data is not read: no conformity
+  configuration carries any.
+- **Scale, in Chromium 156 on an Apple M5 Pro (15 workers available, 8 used).** ACTIVSg10k N-1 (12,899 contingencies)
+  takes 81 s with every outage solved in full and 62 s with screening, under the 2-minute bar. Opened from its file,
+  ACTIVSg10k now runs with reactive limits, because its solution has machines at their limits and without them two
+  of its machines force 3,500 Mvar through one line; with limits the N-1 takes 199 s, over the bar, and screening
+  clears none of it (docs/ENGINE.md gives the reason). ACTIVSg25k solves in 210 ms from a cold start and ACTIVSg70k in
+  747 ms from its stored voltages, against the 0.5 s warm-start bar; ACTIVSg70k does not converge from a cold start,
+  in PowerStudio or in OpenLoadFlow.
+
+Carried to phase 4: the 0.5 s warm start at 70,000 buses, which needs the resident model of phase 4 so that a re-solve
+re-uses its ordering and symbolic analysis (78 ms of the 528 ms natively); and N-1 with reactive limits at 10,000
+buses, where each outage still switches tens of machines in three to six rounds of Newton. Measured responsiveness
+during an N-1 (no frame over 100 ms) is part of phase 4's renderer work.
 
 ## 12. Risks
 
