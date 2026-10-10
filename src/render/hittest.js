@@ -1,9 +1,10 @@
 /** Hit testing on the diagram, in world coordinates, independent of the rendering backend. */
 
-import { bar, route, stub, branchKeys, bendHandle, distToSegment, BAR_WIDTH, SYMBOL } from './geometry.js';
+import { bar, route, stub, branchKeys, distToSegment, routeHandles, BAR_WIDTH, SYMBOL } from './geometry.js';
 
 /** @typedef {import('../core/catalog.js').Element} Element
- * @typedef {{ id: string, part: 'body' | 'end0' | 'end1' | 'bend' | 'endA' | 'endB' }} Hit */
+ * @typedef {{ id: string, part: 'body' | 'end0' | 'end1' | 'bend' | 'segment' | 'endA' | 'endB', index?: number }} Hit
+ *   `segment` is a handle on segment `index` of a selected branch's route; `bend`, that of an automatic route's middle */
 
 /**
  * Where elements are drawn, for finding the few near a point among a national network's. Everything on a single-line
@@ -135,8 +136,10 @@ export function hitTest(elements, p, zoom, selection, index) {
     } else if (el && (el.cls === 'line' || el.cls === 'trafo')) {
       const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
       if (a && b) {
-        const pts = route(el, a, b), hb = bendHandle(pts);
-        if (hb && Math.hypot(p.x - hb.x, p.y - hb.y) < tol + 4) return { id: el.id, part: 'bend' };
+        const pts = route(el, a, b);
+        for (const hd of routeHandles(el, pts, zoom)) {
+          if (Math.hypot(p.x - hd.x, p.y - hd.y) < tol + 4) return { id: el.id, part: hd.bend ? 'bend' : 'segment', index: hd.index };
+        }
         if (Math.hypot(p.x - pts[0].x, p.y - pts[0].y) < tol + 3) return { id: el.id, part: 'endA' };
         const z = pts[pts.length - 1];
         if (Math.hypot(p.x - z.x, p.y - z.y) < tol + 3) return { id: el.id, part: 'endB' };

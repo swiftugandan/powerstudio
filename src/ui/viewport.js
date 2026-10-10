@@ -527,6 +527,12 @@ export class Viewport {
   onDouble(e) {
     const { sx, sy } = this.local(/** @type {any} */ (e));
     const p = this.camera.toWorld(sx, sy);
+    // On a selected branch's route handle, a double click takes that jog out of a route shaped by hand.
+    const handle = hitTest(this.app.store.doc.elements, p, this.camera.zoom, this.app.selection, this.index());
+    if (handle?.part === 'segment' && /** @type {unknown[]} */ (this.app.store.get(handle.id)?.route ?? []).length) {
+      this.app.removeRouteSegment(handle.id, /** @type {number} */ (handle.index));
+      return;
+    }
     const id = this.labelAt(p)?.owner ?? hitTest(this.app.store.doc.elements, p, this.camera.zoom, new Set(), this.index())?.id;
     if (id) { this.app.setSelection([id]); this.app.focusInspector(); }
   }

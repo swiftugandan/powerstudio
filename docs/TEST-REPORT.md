@@ -4,6 +4,22 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## Routing, CAD phase C3 (2026-10-10, local, branch `cad`)
+
+| Check | Result |
+| --- | --- |
+| Shaped routes stay orthogonal and meet both bars at right angles, 2,000 random bar positions, orientations and corner lists | Passed |
+| Moving each segment of a Z route both ways, a straight route's jog, removing a jog | Routes valid in every case |
+| A line blocked by a busbar across its way, routed around it | Crosses nothing; orthogonal |
+| 500 random branches across a field of 625 busbars | 499 of 499 routed, none crossing a busbar or symbol, about 60 ms (budget 200 ms) |
+| Browser: shape a route by dragging, undo, redo, straighten; a new line from Bus 5 to Bus 3 drawn around Bus 4 | Passed in all four projects |
+| Oracle goldens after exporting the inputs with the new `route` field | Recomputed byte for byte |
+
+The random routes found two faults before they shipped: corners that doubled back could cancel out and leave a route
+setting off along its own bar, and simplifying a polyline could leave two identical points side by side. The first
+search took 700 ms for the 500 branches, testing every obstacle at every node; marking each obstacle's index range
+on the grid once brought it to 60 ms.
+
 ## Precision editing, CAD phase C2 (2026-10-10, local, branch `cad`)
 
 | Check | Result |

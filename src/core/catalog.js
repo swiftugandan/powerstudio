@@ -5,7 +5,7 @@
  * engineer enters them; the engine converts them to its model on import (engine/crates/ps-io/src/powerstudio.rs). */
 
 /**
- * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus' | 'trafo' | 'controller' | 'labels'} FieldType
+ * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus' | 'trafo' | 'controller' | 'labels' | 'route'} FieldType
  * @typedef {'basic' | 'loadflow' | 'shortcircuit' | 'rms' | 'graphic'} FieldGroup
  * @typedef {{
  *   key: string, label: string, type: FieldType, group: FieldGroup, default: unknown,
@@ -40,6 +40,9 @@ const name = /** @type {FieldSpec} */ ({ key: 'name', label: 'Name', type: 'stri
 export const LABEL_SLOTS = Object.freeze(['name', 'box', 'endA', 'endB', 'mid']);
 /** Where the user dragged an element's labels: per slot, the offset from the label's default position. Edits
  * replace the whole value, so every element can share the frozen empty default. */
+/** The corners of a route the user shaped; empty for an automatic route. Edits replace the whole value. */
+const routeField = /** @type {FieldSpec} */ ({ key: 'route', label: 'Route', type: 'route', group: 'graphic', default: Object.freeze([]),
+  help: 'An automatic route follows its busbars; a route you shaped keeps its bends. Straighten it to make it automatic again.' });
 const labels = /** @type {FieldSpec} */ ({ key: 'labels', label: 'Labels', type: 'labels', group: 'graphic', default: Object.freeze({}),
   help: 'Labels dragged by hand keep their place; reset them to let the diagram place them again.' });
 /** Position of a connection along its bus bar, from -0.5 (start) to 0.5 (end). @param {string} key @param {string} label */
@@ -252,6 +255,7 @@ export const CLASSES = {
       num('b0', 'Zero-sequence B0′', 1.8, { unit: 'µS/km', min: 0, group: 'shortcircuit' }),
       attach('fromPos', 'From connection'), attach('toPos', 'To connection'),
       num('bend', 'Route offset', 0, { group: 'graphic', help: 'Moves the middle segment of the route.' }),
+      routeField,
       labels,
     ],
   },
@@ -306,6 +310,7 @@ export const CLASSES = {
         help: 'As the unit transformer of a power station unit without an on-load tap changer: how far its taps may move the voltage either way, for KSO.' }),
       attach('hvPos', 'HV connection'), attach('lvPos', 'LV connection'),
       num('bend', 'Route offset', 0, { group: 'graphic', help: 'Moves the middle segment of the route.' }),
+      routeField,
       labels,
     ],
   },
@@ -463,6 +468,11 @@ export function checkValue(f, v) {
     case 'string': case 'bus': case 'trafo': return typeof v === 'string' ? '' : `${f.label} must be text.`;
     case 'bool': return typeof v === 'boolean' ? '' : `${f.label} must be true or false.`;
     case 'enum': return f.options?.includes(/** @type {string} */ (v)) ? '' : `${f.label} must be one of ${f.options?.join(', ')}.`;
+    case 'route': {
+      if (!Array.isArray(v)) return `${f.label} must be a list of corners.`;
+      for (const c of v) if (!Array.isArray(c) || c.length !== 2 || !c.every(x => typeof x === 'number' && Number.isFinite(x))) return `${f.label}: each corner must be two numbers.`;
+      return '';
+    }
     case 'labels': {
       if (!v || typeof v !== 'object' || Array.isArray(v)) return `${f.label} must map label slots to offsets.`;
       for (const [slot, o] of Object.entries(v)) {

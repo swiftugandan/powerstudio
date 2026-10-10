@@ -1,7 +1,7 @@
 /** Builds the display list of the single-line diagram from the document, the result annotations and the editor state. */
 
 import { DisplayList, withAlpha } from './displaylist.js';
-import { bar, route, longestSegment, stub, bendHandle, branchKeys, bounds, BAR_WIDTH, SYMBOL } from './geometry.js';
+import { bar, route, longestSegment, stub, routeHandles, branchKeys, bounds, BAR_WIDTH, SYMBOL } from './geometry.js';
 import { conservativeMeasure } from './metrics.js';
 import { SpatialHash, LabelIndex, COST, placeLabels, labelKey } from './labels.js';
 
@@ -522,9 +522,9 @@ export function buildOverlay(input) {
     } else if (el.cls === 'line' || el.cls === 'trafo') {
       const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
       if (!a || !b) continue;
-      const pts = route(el, a, b), h = bendHandle(pts);
+      const pts = route(el, a, b);
       for (const p of [pts[0], pts[pts.length - 1]]) list.circle(p.x, p.y, 4.5, P.bg, P.select, 1.6);
-      if (h) list.rect(h.x - 4.5, h.y - 4.5, 9, 9, P.bg, P.select, 1.6, 4.5);
+      for (const h of routeHandles(el, pts, input.zoom ?? 1)) list.rect(h.x - 4.5, h.y - 4.5, 9, 9, P.bg, P.select, 1.6, h.bend ? 4.5 : 1.5);
     }
   }
   if (preview) drawPreview(list, P, preview, buses);

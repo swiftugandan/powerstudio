@@ -70,6 +70,7 @@ export function fieldRow(f, value, commit, ctx = {}) {
   const id = ctx.id ?? `f-${f.key}-${Math.random().toString(36).slice(2, 7)}`;
   if (f.type === 'controller') return controllerRows(f, /** @type {Record<string, unknown> | null} */ (value), commit, id);
   if (f.type === 'labels') return labelRows(f, /** @type {Record<string, unknown>} */ (value));
+  if (f.type === 'route') return routeRows(f, /** @type {unknown[]} */ (value));
   const label = h('label', { for: id, text: ctx.labelOverride ?? f.label, title: f.help });
   const error = h('div', { class: 'field-error', role: 'alert', hidden: true });
   const wrap = h('div', { class: 'field' });
@@ -195,5 +196,17 @@ function labelRows(f, value) {
   const label = h('span', { class: 'label', text: f.label, title: f.help });
   const wrap = h('div', { class: 'field field-summary' }, h('span', { text: moved ? `${moved} placed by hand` : 'Placed automatically' }),
     moved ? h('button', { type: 'button', class: 'btn sm', 'data-cmd': 'labels.reset', text: 'Reset' }) : null);
+  return [label, wrap];
+}
+
+/**
+ * Whether a branch's route is automatic or shaped by hand, with a way back to automatic.
+ * @param {FieldSpec} f @param {unknown[] | undefined} value @returns {HTMLElement[]}
+ */
+function routeRows(f, value) {
+  const corners = value?.length ?? 0;
+  const label = h('span', { class: 'label', text: f.label, title: f.help });
+  const wrap = h('div', { class: 'field field-summary' }, h('span', { text: corners ? `Shaped by hand, ${corners} bend${corners === 1 ? '' : 's'}` : 'Automatic' }),
+    corners ? h('button', { type: 'button', class: 'btn sm', 'data-cmd': 'route.straighten', text: 'Straighten' }) : null);
   return [label, wrap];
 }

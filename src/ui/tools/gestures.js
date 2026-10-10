@@ -2,7 +2,7 @@
  * writes through `store.transact` with one coalescing key, so the whole drag is one step in the history. */
 
 import { Gesture } from './tool.js';
-import { bar, branchKeys, attachPoint } from '../../render/geometry.js';
+import { bar, branchKeys, attachPoint, route, moveSegment } from '../../render/geometry.js';
 import { inRect } from '../../render/hittest.js';
 
 /**
@@ -98,7 +98,15 @@ export class MoveGesture extends EditGesture {
       if (el?.cls === 'bus') this.bars.push({ ...el });
     }
     this.bars.sort((a, b) => +(b.id === lead) - +(a.id === lead));
-    this.snapper = vp.snapper(new Set(this.bars.map(b => b.id)));
+    const moving = new Set(this.bars.map(b => b.id));
+    this.snapper = vp.snapper(moving);
+    /** Routes shaped by hand between two moving busbars, which move with them. @type {Array<[string, Array<[number, number]>]>} */
+    this.routes = [];
+    for (const el of vp.app.store.doc.elements) {
+      if (el.cls !== 'line' && el.cls !== 'trafo') continue;
+      const k = branchKeys(el), corners = /** @type {Array<[number, number]>} */ (el.route);
+      if (corners.length && moving.has(/** @type {string} */ (el[k.a])) && moving.has(/** @type {string} */ (el[k.b]))) this.routes.push([el.id, corners]);
+    }
   }
 
   /** @override @param {Pointer} e */
@@ -111,6 +119,7 @@ export class MoveGesture extends EditGesture {
     this.status = `Δx ${signed(to.dx)}  Δy ${signed(to.dy)}`;
     this.write(this.bars.length > 1 ? 'Move busbars' : 'Move busbar', tx => {
       for (const b of this.bars) { tx.set(b.id, 'x', /** @type {number} */ (b.x) + to.dx); tx.set(b.id, 'y', /** @type {number} */ (b.y) + to.dy); }
+      for (const [id, corners] of this.routes) tx.set(id, 'route', corners.map(([x, y]) => [x + to.dx, y + to.dy]));
     });
   }
 }
@@ -155,6 +164,29 @@ export class ResizeGesture extends EditGesture {
     this.vp.setGuides(at.guides);
     this.status = `Length ${hi - lo}`;
     this.write('Resize busbar', tx => { tx.set(id, 'len', hi - lo); tx.set(id, horizontal ? 'x' : 'y', (lo + hi) / 2); });
+  }
+}
+
+/** Moves one segment of a branch's route across itself, shaping the route by hand (a jog where it meets a bar). */
+export class SegmentGesture extends EditGesture {
+  /** @param {Viewport} vp @param {Element} el @param {number} index @param {Point} start */
+  constructor(vp, el, index, start) {
+    super(vp);
+    const k = branchKeys(el), store = vp.app.store;
+    this.id = el.id;
+    this.index = index;
+    this.start = start;
+    this.pts = route(el, /** @type {Element} */ (store.get(/** @type {string} */ (el[k.a]))), /** @type {Element} */ (store.get(/** @type {string} */ (el[k.b]))));
+    const a = this.pts[index], b = this.pts[index + 1];
+    this.axis = Math.abs(a.x - b.x) < 1e-9 ? 'x' : 'y';
+  }
+
+  /** @override @param {Pointer} e */
+  move(e) {
+    const raw = this.axis === 'x' ? e.p.x - this.start.x : e.p.y - this.start.y;
+    const d = e.alt ? Math.round(raw) : Math.round(raw / 10) * 10;
+    this.status = `Segment ${signed(d)}`;
+    this.write('Shape route', tx => tx.set(this.id, 'route', d ? moveSegment(this.pts, this.index, d) : /** @type {Element} */ (this.store.get(this.id)).route));
   }
 }
 

@@ -57,6 +57,15 @@ and vertical (Rotate, R), moves machines, loads and shunts to the other side of 
 the connections of the selected busbars evenly (Spread connections). Lay out diagram lays the whole diagram out again
 from the network's topology. Each is one step you can undo; right-click a selection for the ones that apply.
 
+**Routes.** A line or transformer runs an automatic route that follows its busbars wherever they go; dragging its
+middle segment moves that segment. Select a branch to see a handle on each segment: drag any segment across itself
+to shape the route by hand (a segment that meets a busbar gets a jog, so the route still leaves the bar at right
+angles), and double-click a handle to take that jog out again. A route shaped by hand keeps its bends and stays
+square to its busbars when they move; the inspector's Diagram group says which kind a route is. On the Arrange tab,
+Route around obstacles finds, for each selected branch, the route with the fewest bends that crosses no busbar or
+symbol, and Straighten route makes routes automatic again. A line or transformer you draw whose automatic route
+would cross a busbar or symbol is routed around it from the start.
+
 Selected elements can be cut, copied, pasted, duplicated, deleted, moved a grid step at a time with the arrow keys
 (five steps with Shift) and switched in or out of service (Shift+O). Every change can be undone (Ctrl+Z) and redone
 (Ctrl+Shift+Z).

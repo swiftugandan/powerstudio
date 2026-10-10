@@ -380,6 +380,30 @@ test('selects by window or crossing, and clicking again where elements stack rea
   await expect(selected('D4')).toHaveAttribute('aria-selected', 'false');
 });
 
+test('shapes a route by dragging a segment, straightens it, and routes a new line around a busbar in its way', async ({ page }) => {
+  const { at, drag, select } = await onDiagram(page);
+  const routeRow = page.locator('#inspector-panel .field-summary', { hasText: /Automatic|Shaped by hand/ });
+  // Transformer 4-9 leaves Bus 4 at x −250 + 0.4 × 240 = −184 and runs down to y 240: drag that first segment right.
+  await select('T2');
+  await expect(routeRow).toContainText('Automatic');
+  await drag(await at(-184, 190), await at(-144, 190));
+  await expect(routeRow).toContainText('Shaped by hand');
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(routeRow).toContainText('Automatic');
+  await page.keyboard.press('ControlOrMeta+Shift+Z');
+  await routeRow.getByRole('button', { name: 'Straighten' }).click();
+  await expect(routeRow).toContainText('Automatic');
+  // A line from Bus 5 down to Bus 3 would cross Bus 4 on the way: it is drawn around it.
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('L');
+  const from = await at(-250, -160), to = await at(-350, 360);
+  await page.mouse.click(from.x, from.y);
+  await page.mouse.click(to.x, to.y);
+  await page.keyboard.press('Escape');
+  await page.locator('#inspector-panel summary', { hasText: 'Diagram' }).click();
+  await expect(routeRow).toContainText('Shaped by hand');
+});
+
 test('keeps work in the browser across a reload', async ({ page }) => {
   await open(page, 'sample=riverside');
   const name = page.locator('#doc-name');

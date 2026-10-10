@@ -1,6 +1,6 @@
 # Diagram editing to professional CAD standard
 
-Status: approved 2026-10-10; C0 to C2 done locally on branch `cad` (docs/TEST-REPORT.md), C3 and C4 to follow.
+Status: approved 2026-10-10; C0 to C3 done locally on branch `cad` (docs/TEST-REPORT.md), C4 to follow.
 Follows release 1.0.0 (docs/design/NATIONAL-GRADE.md); planned as release 1.1.
 
 ## 1. Summary

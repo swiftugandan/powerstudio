@@ -6,6 +6,8 @@ import { emptyDocument, nextId, normalizeSteps, validateForCalculation, busesOf 
 import { makeElement, CLASSES } from './core/catalog.js';
 import { snap } from './core/layout.js';
 import { align, distribute, sameLength, rotate, flip, spreadConnections } from './core/diagram-ops.js';
+import { obstaclesOf, blocked, avoidingRoute } from './render/routing.js';
+import { route as routeOf, removeSegment, branchKeys } from './render/geometry.js';
 import { SAMPLES } from './samples/index.js';
 import { projectFromDocument, projectFromParts, composeSteps, route, partTexts, allParts, activeCase, PROJECT_FORMAT, projectFileHead, projectFromFile } from './core/project.js';
 import { Commands } from './ui/commands.js';
@@ -704,8 +706,8 @@ export class App {
         return;
       }
       const cable = va <= 36;
-      this.create(makeElement('line', id, { name: `${a.name} – ${b.name}`, from: aId, to: bId, fromPos: aPos, toPos: bPos, length: cable ? 3 : 20,
-        ...(cable ? { r1: 0.125, x1: 0.11, b1: 125.7, r0: 0.5, x0: 0.33, b0: 125.7, ratedA: 0.42 } : {}) }), 'Add line');
+      this.create(this.routed(makeElement('line', id, { name: `${a.name} – ${b.name}`, from: aId, to: bId, fromPos: aPos, toPos: bPos, length: cable ? 3 : 20,
+        ...(cable ? { r1: 0.125, x1: 0.11, b1: 125.7, r0: 0.5, x0: 0.33, b0: 125.7, ratedA: 0.42 } : {}) })), 'Add line');
       return;
     }
     const [hv, lv, hvPos, lvPos] = va >= vb ? [a, b, aPos, bPos] : [b, a, bPos, aPos];
@@ -713,7 +715,47 @@ export class App {
     const params = vl < 1 ? { sn: 0.63, uk: 6, ur: 1.0, uk0: 6, ur0: 1.0, i0: 0.3, pfe: 1, vectorGroup: 'Dyn5' }
       : vh >= 100 ? { sn: 40, uk: 12, ur: 0.4, uk0: 12, ur0: 0.4, i0: 0.05, pfe: 20, vectorGroup: 'YNyn0' }
       : { sn: 10, uk: 8, ur: 0.6, uk0: 8, ur0: 0.6, i0: 0.2, pfe: 8, vectorGroup: 'Dyn11' };
-    this.create(makeElement('trafo', id, { name: `${hv.name} / ${lv.name}`, hv: hv.id, lv: lv.id, hvPos, lvPos, vnHV: vh, vnLV: vl, ...params }), 'Add transformer');
+    this.create(this.routed(makeElement('trafo', id, { name: `${hv.name} / ${lv.name}`, hv: hv.id, lv: lv.id, hvPos, lvPos, vnHV: vh, vnLV: vl, ...params })), 'Add transformer');
+  }
+
+  /** A new branch, routed around busbars and symbols when its automatic route would cross one. @param {Element} el */
+  routed(el) {
+    const buses = this.busMap(), k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
+    if (!a || !b) return el;
+    const obstacles = obstaclesOf(this.store.doc.elements);
+    if (!blocked(routeOf(el, a, b), obstacles)) return el;
+    const corners = avoidingRoute(el, buses, obstacles);
+    if (corners) el.route = corners;
+    return el;
+  }
+
+  /** The document's busbars by id. */
+  busMap() { return new Map(this.store.doc.elements.filter(e => e.cls === 'bus').map(b => [b.id, b])); }
+
+  /**
+   * Routes the selected branches around busbars and symbols, keeping each one's ends; reports any it could not.
+   */
+  routeAround() {
+    const branches = this.selectedOf('line', 'trafo'), buses = this.busMap(), obstacles = obstaclesOf(this.store.doc.elements);
+    /** @type {Array<[string, string, unknown]>} */
+    const changes = [];
+    let failed = 0;
+    for (const el of branches) {
+      const corners = avoidingRoute(el, buses, obstacles);
+      if (corners) changes.push([el.id, 'route', corners]); else failed++;
+    }
+    this.arrangeSelection('Route around obstacles', changes);
+    if (failed) toast('warn', `${failed} of ${branches.length} branches have no way round nearby; their routes are unchanged.`, { title: 'Routing' });
+  }
+
+  /** Takes a jog out of the selected branch's route shaped by hand: the segment `index` and its corners.
+   * @param {string} id @param {number} index */
+  removeRouteSegment(id, index) {
+    const el = this.store.get(id), buses = this.busMap();
+    if (!el) return;
+    const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
+    if (!a || !b) return;
+    this.store.transact('Remove bend', tx => tx.set(id, 'route', removeSegment(routeOf(el, a, b), index)));
   }
 
   /** @param {'gen' | 'extgrid' | 'load' | 'shunt'} cls @param {string} busId @param {number} pos @param {'above' | 'below'} side */
@@ -1263,7 +1305,7 @@ export class App {
       }
       if (el.cls !== 'bus') items.push({ label: el.inService === false ? 'Switch into service' : 'Switch out of service', icon: 'power', hint: 'Shift+O', run: () => this.toggleService() });
       // The arrange commands that apply to the selection.
-      const arranging = ['arrange.alignCentre', 'arrange.alignMiddle', 'arrange.distributeH', 'arrange.distributeV', 'arrange.sameLength', 'arrange.rotate', 'arrange.flip', 'arrange.spread', 'select.connected']
+      const arranging = ['arrange.alignCentre', 'arrange.alignMiddle', 'arrange.distributeH', 'arrange.distributeV', 'arrange.sameLength', 'arrange.rotate', 'arrange.flip', 'arrange.spread', 'route.avoid', 'route.straighten', 'select.connected']
         .map(id => this.commands.get(id)).filter(/** @returns {cmd is import('./ui/commands.js').Command} */ cmd => !!cmd && (cmd.enabled?.() ?? true));
       if (arranging.length) {
         items.push('separator', ...arranging.map(cmd => ({ label: cmd.label, icon: cmd.icon, hint: cmd.keys?.[0], run: () => this.commands.run(cmd.id) })));
@@ -1420,6 +1462,11 @@ export class App {
     arrange('arrange.spread', 'Spread connections', 'spread', 1, () => spreadConnections(doc(), buses()), 'Space the connections of the selected busbars evenly along them');
     c.add({ id: 'arrange.flip', label: 'Flip side', icon: 'flip', keys: ['X'], group: 'Arrange', hint: 'Move the selected machines, grids, loads and shunts to the other side of their busbars',
       enabled: () => this.selectedOf('gen', 'extgrid', 'load', 'shunt').length > 0, run: () => this.arrangeSelection('Flip side', flip(this.selectedOf('gen', 'extgrid', 'load', 'shunt'))) });
+    const shaped = () => this.selectedOf('line', 'trafo').filter(e => /** @type {unknown[]} */ (e.route).length || e.bend);
+    c.add({ id: 'route.straighten', label: 'Straighten route', icon: 'straighten', group: 'Arrange', hint: 'Make the selected branches\' routes automatic again',
+      enabled: () => shaped().length > 0, run: () => this.arrangeSelection('Straighten route', shaped().flatMap(e => [[e.id, 'route', []], [e.id, 'bend', 0]])) });
+    c.add({ id: 'route.avoid', label: 'Route around obstacles', icon: 'routeAround', group: 'Arrange', hint: 'Route the selected branches around busbars and symbols, with as few bends as can be',
+      enabled: () => this.selectedOf('line', 'trafo').length > 0, run: () => this.routeAround() });
     c.add({ id: 'select.connected', label: 'Select connected', icon: 'selectConnected', group: 'Select', hint: 'Add what the selection connects to: a busbar\'s connections, an element\'s busbars', enabled: sel, run: () => this.selectRelated('connected') });
     c.add({ id: 'select.sameClass', label: 'Select same kind', icon: 'selectClass', group: 'Select', hint: 'Select every element of the kinds selected', enabled: sel, run: () => this.selectRelated('class') });
     c.add({ id: 'select.voltageLevel', label: 'Select voltage level', icon: 'selectLevel', group: 'Select', hint: 'Select every element at the voltage levels of the selection', enabled: sel, run: () => this.selectRelated('level') });

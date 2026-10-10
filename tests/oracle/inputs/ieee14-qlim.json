@@ -221,6 +221,7 @@
    "fromPos": 0,
    "toPos": 0,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -242,6 +243,7 @@
    "fromPos": 0.4,
    "toPos": -0.4,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -263,6 +265,7 @@
    "fromPos": 0.15,
    "toPos": -0.3,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -284,6 +287,7 @@
    "fromPos": 0.42,
    "toPos": -0.4,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -305,6 +309,7 @@
    "fromPos": 0.3,
    "toPos": -0.3,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -326,6 +331,7 @@
    "fromPos": 0.3,
    "toPos": -0.15,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -347,6 +353,7 @@
    "fromPos": 0,
    "toPos": 0,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -368,6 +375,7 @@
    "fromPos": 0.3,
    "toPos": -0.3,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -389,6 +397,7 @@
    "fromPos": 0.2,
    "toPos": -0.3,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -410,6 +419,7 @@
    "fromPos": 0.5,
    "toPos": -0.5,
    "bend": 60,
+   "route": [],
    "labels": {}
   },
   {
@@ -431,6 +441,7 @@
    "fromPos": 0.5,
    "toPos": -0.5,
    "bend": 60,
+   "route": [],
    "labels": {}
   },
   {
@@ -452,6 +463,7 @@
    "fromPos": 0.45,
    "toPos": -0.4,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -473,6 +485,7 @@
    "fromPos": 0.3,
    "toPos": 0.3,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -494,6 +507,7 @@
    "fromPos": 0.4,
    "toPos": -0.3,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -515,6 +529,7 @@
    "fromPos": 0,
    "toPos": 0,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -559,6 +574,7 @@
    "hvPos": 0.5,
    "lvPos": -0.5,
    "bend": 60,
+   "route": [],
    "labels": {}
   },
   {
@@ -603,6 +619,7 @@
    "hvPos": 0.4,
    "lvPos": -0.45,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {
@@ -647,6 +664,7 @@
    "hvPos": 0.5,
    "lvPos": -0.5,
    "bend": 60,
+   "route": [],
    "labels": {}
   },
   {
@@ -691,6 +709,7 @@
    "hvPos": 0.5,
    "lvPos": -0.5,
    "bend": 60,
+   "route": [],
    "labels": {}
   },
   {
@@ -735,6 +754,7 @@
    "hvPos": 0,
    "lvPos": -0.2,
    "bend": 0,
+   "route": [],
    "labels": {}
   },
   {

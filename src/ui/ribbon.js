@@ -39,6 +39,7 @@ export const TABS = [
     { label: 'Align', items: [{ stack: ['arrange.alignLeft', 'arrange.alignCentre', 'arrange.alignRight'] }, { stack: ['arrange.alignTop', 'arrange.alignMiddle', 'arrange.alignBottom'] }] },
     { label: 'Spacing', items: [{ stack: ['arrange.distributeH', 'arrange.distributeV', 'arrange.sameLength'] }] },
     { label: 'Turn', items: [{ cmd: 'arrange.rotate', size: 'large' }, { cmd: 'arrange.flip', size: 'large' }] },
+    { label: 'Routes', items: [{ cmd: 'route.avoid', size: 'large' }, { cmd: 'route.straighten', size: 'large' }] },
     { label: 'Connections', items: [{ cmd: 'arrange.spread', size: 'large' }, { cmd: 'layout.arrange', size: 'large' }] },
   ] },
   { id: 'view', label: 'View', groups: [

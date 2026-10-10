@@ -2,9 +2,9 @@
  * ends), or draws a marquee from empty space. */
 
 import { Tool } from './tool.js';
-import { PanGesture, MarqueeGesture, MoveGesture, SlideGesture, ResizeGesture, BendGesture, ReconnectGesture, LabelGesture } from './gestures.js';
+import { PanGesture, MarqueeGesture, MoveGesture, SlideGesture, ResizeGesture, BendGesture, ReconnectGesture, LabelGesture, SegmentGesture } from './gestures.js';
 import { hitTest, hitAll } from '../../render/hittest.js';
-import { route, branchKeys, bendHandle } from '../../render/geometry.js';
+import { route, branchKeys, routeHandles, distToSegment } from '../../render/geometry.js';
 
 /**
  * @typedef {import('./tool.js').Pointer} Pointer
@@ -58,23 +58,31 @@ export class SelectTool extends Tool {
     if (hit.part === 'end0' || hit.part === 'end1') return new ResizeGesture(vp, el, hit.part === 'end0' ? 0 : 1);
     if (hit.part === 'endA' || hit.part === 'endB') return new ReconnectGesture(vp, el.id, hit.part === 'endA' ? 'A' : 'B');
     if (hit.part === 'bend') return new BendGesture(vp, el, this.bendAxis(el) ?? 'y', e.p);
+    if (hit.part === 'segment') return new SegmentGesture(vp, el, /** @type {number} */ (hit.index), e.p);
     if (el.cls === 'gen' || el.cls === 'extgrid' || el.cls === 'load' || el.cls === 'shunt') {
       return app.selection.size === 1 ? new SlideGesture(vp, el.id) : new MoveGesture(vp, e.p);
     }
     if (el.cls === 'line' || el.cls === 'trafo') {
-      // Dragging the only selected branch reroutes it; in a larger selection it moves the busbars.
-      const axis = this.bendAxis(el);
-      return app.selection.size === 1 && axis ? new BendGesture(vp, el, axis, e.p) : new MoveGesture(vp, e.p);
+      // Dragging the only selected branch moves the segment under the pointer; in a larger selection, the busbars.
+      if (app.selection.size !== 1) return new MoveGesture(vp, e.p);
+      const pts = this.routeOf(el), i = nearestSegment(pts, e.p);
+      const automaticMiddle = routeHandles(el, pts, Infinity).find(hd => hd.index === i)?.bend;
+      return automaticMiddle ? new BendGesture(vp, el, this.bendAxis(el) ?? 'y', e.p) : new SegmentGesture(vp, el, i, e.p);
     }
     return new MoveGesture(vp, e.p, el.id);
   }
 
-  /** The axis a branch's middle segment moves on, or null for a route without one. @param {Element} el */
-  bendAxis(el) {
+  /** A branch's route as drawn. @param {Element} el */
+  routeOf(el) {
     const store = this.vp.app.store, k = branchKeys(el);
-    const a = store.get(/** @type {string} */ (el[k.a])), b = store.get(/** @type {string} */ (el[k.b]));
-    const hb = a && b ? bendHandle(route(el, a, b)) : null;
-    return hb ? /** @type {'x' | 'y'} */ (hb.axis) : null;
+    return route(el, /** @type {Element} */ (store.get(/** @type {string} */ (el[k.a]))), /** @type {Element} */ (store.get(/** @type {string} */ (el[k.b]))));
+  }
+
+  /** The axis an automatic route's middle segment moves on, or null for a route without one. @param {Element} el */
+  bendAxis(el) {
+    const pts = this.routeOf(el);
+    if (pts.length !== 4) return null;
+    return Math.abs(pts[1].y - pts[2].y) < 1e-6 ? 'y' : 'x';
   }
 
   /** @override @param {Pointer} e */
@@ -100,4 +108,11 @@ export class PanTool extends Tool {
 
   /** @override */
   hover() {}
+}
+
+/** The segment of a polyline nearest to a point. @param {{ x: number, y: number }[]} pts @param {{ x: number, y: number }} p */
+function nearestSegment(pts, p) {
+  let best = 0, d = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) { const di = distToSegment(p, pts[i], pts[i + 1]); if (di < d) { d = di; best = i; } }
+  return best;
 }

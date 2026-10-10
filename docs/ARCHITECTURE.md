@@ -142,6 +142,16 @@ Hit testing (`hittest.js`) works on the geometry in world coordinates, so it doe
 stubs) sorted by position, so the pointer looks at the band of segments around it rather than at every element; a
 test checks that it finds exactly what a full scan finds.
 
+**Routes (`geometry.js`, `routing.js`).** A branch's route is automatic (no corners in its `route` field: three
+segments with a `bend` offset) or shaped by hand (its corners). A shaped route is repaired whenever it is read
+(`orthogonal`): it leaves its first bar at right angles, turns at each corner, keeps its first and last corners
+clear of the bars, and enters its last bar at right angles, so it stays square however the bars move; corners that
+double back are cancelled. `moveSegment` and `removeSegment` are the edits a drag and a double-click make.
+`routing.js` routes around obstacles by the method of Wybrow, Marriott and Stuckey (2009): stems out of each bar,
+then A* over the orthogonal visibility graph of the padded busbars and symbols nearby, with each bend costing 40
+units of length. Obstacles become index ranges on the graph's grid, so a route takes about a tenth of a
+millisecond; 500 take about 60 ms.
+
 **Diagram input (`src/ui/tools/`).** The viewport owns the camera, the frames and the renderer, and hands pointer
 input to the active tool as normalised events (world and screen position, modifiers). A tool (`select.js`, `place.js`)
 decides what a press does and returns a gesture (`gestures.js`: pan, marquee, move, slide, resize, bend, reconnect,
