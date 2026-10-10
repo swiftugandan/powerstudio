@@ -15,6 +15,7 @@ import { Dock } from './ui/dock.js';
 import { Viewport } from './ui/viewport.js';
 import { EngineClient, CancelledError } from './ui/engine-client.js';
 import { engineDigest } from './engine/module.js';
+import { adapt } from './engine/reports.js';
 import { savePrefs, newDocId, serialise } from './ui/persistence.js';
 import { applyTheme, readPalette } from './ui/theme.js';
 import { buildOverlay } from './ui/overlay.js';
@@ -476,7 +477,7 @@ export class App {
   onChange(change) {
     // The calculation workers keep their own copies of the document.
     if (change.source === 'load') this.engine.setDocument(this.store.doc); else this.engine.applyOps(change.ops);
-    if (change.source === 'load') this.dock.sheet.reset();
+    if (change.source === 'load') { this.dock.sheet.reset(); this.dock.projectOpened(); }
     // Every edit lands in its part of the project: the base, a variant, the scenario or the study case.
     else for (const part of route(this.project, change.ops)) this.dirtyParts.add(part);
     if (change.network || change.study) this.networkRevision++;
@@ -752,15 +753,14 @@ export class App {
       // A calculation the user starts goes in the project's run log; recalculations on edit do not.
       const record = !opt.auto;
       let start = kind === 'loadflow' ? this.start : null;
-      let { result, ms, record: hashes } = await this.engine.run(kind, doc, start ? { start } : {}, progress, { record });
+      let { result, ms, record: hashes, bytes } = await this.engine.run(kind, doc, start ? { start } : {}, progress, { record });
       if (start && !result.converged) {
         this.start = start = null;
         const cold = await this.engine.run(kind, doc, {}, progress, { record });
-        result = cold.result;
+        ({ result, record: hashes, bytes } = cold);
         ms += cold.ms;
-        hashes = cold.record;
       }
-      if (hashes) void this.recordRun(kind, result, ms, hashes, start);
+      if (hashes) void this.recordRun(kind, result, ms, hashes, start, bytes);
       if (kind === 'loadflow' && result.converged) this.start = startOf(result);
       this.results[kind] = { result, ms, revision };
       // The calculation is over once its result is stored: other commands work while the result is shown.
@@ -802,9 +802,10 @@ export class App {
    * engine, the hashes of its inputs and its report, and its outcome. A load flow solved from a previous solution
    * names that start's hash too, since the result depends on it to within the tolerance.
    * @param {CalcKind} kind @param {any} r @param {number} ms @param {import('./ui/engine-client.js').Hashes} hashes
-   * @param {import('./engine/reports.js').StartVoltages | null} start
+   * @param {import('./engine/reports.js').StartVoltages | null} start @param {Uint8Array} bytes the report, kept compressed
+   * so the run can be compared with others
    */
-  async recordRun(kind, r, ms, hashes, start) {
+  async recordRun(kind, r, ms, hashes, start, bytes) {
     const p = this.project, c = activeCase(p), now = new Date();
     try {
       const outcome = kind === 'loadflow' ? { converged: r.converged, iterations: r.iterations, lossesMw: r.totals.losses, warnings: r.warnings.length }
@@ -820,10 +821,23 @@ export class App {
         inputs: { modelSha256: hashes.model ?? '', studySha256: hashes.study ?? '', startSha256: start ? await sha256(JSON.stringify(start)) : '' },
         outcome, resultsSha256: hashes.results, durationMs: Math.round(ms),
       };
-      await this.library.addRun(this.docId, rec);
+      const id = this.docId;
+      await this.library.addRun(id, rec);
+      const report = await new Response(new Blob([/** @type {Uint8Array<ArrayBuffer>} */ (bytes)]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+      await this.library.putResult(id, rec.run, kind, report);
+      this.dock.runsChanged();
     } catch (error) {
       this.log('warn', `The run was not added to the run log: ${error instanceof Error ? error.message : error}`);
     }
+  }
+
+  /** A recorded run's results, read back from its stored report, or null when none is stored.
+   * @param {string} run @param {CalcKind} kind */
+  async runResult(run, kind) {
+    const blob = await this.library.getResult(this.docId, run);
+    if (!blob) return null;
+    const text = await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    return adapt(kind, JSON.parse(text));
   }
 
   /** Logs the outcome of a calculation in plain words. @param {CalcKind} kind @param {any} r @param {number} ms @param {boolean} auto */

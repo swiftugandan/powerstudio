@@ -166,7 +166,12 @@ case, scenario and variants by name, the engine's version and the SHA-256 of its
 loads), the SHA-256 of the model as calculated (`Model::content_hash`, so moving or renaming on the diagram does not
 change it), of the study case and of the report without its timings, all computed in the engine, and the outcome. A
 load flow solved from a previous solution also names that start's hash, since its result depends on the start to
-within the tolerance. Recalculations on edit are not recorded.
+within the tolerance. Recalculations on edit are not recorded. Each recorded run also keeps its report as the engine
+wrote it, gzip-compressed (`results`, version 4 of the database), so the results dock can compare the current load
+flow with any recorded one: difference columns beside the values they compare (Δu, ΔAngle, ΔLoading, ΔP), and a
+filter to the rows that changed. The result tables also filter to rows near or beyond their limits, and the
+contingency results list each branch's and busbar's worst post-contingency state with the outage behind it, so "every
+branch above 90 % in any contingency" is one click. The Project page's run log deletes a run with its report.
 
 **Workers (`src/worker/`, `src/ui/engine-client.js`).** Each worker holds one engine instance, created from the
 compiled module the page sends it, so the module is compiled once however many workers start. The engine client

@@ -58,7 +58,12 @@ export async function projectPage(app) {
           await changed(['manifest', `variant:${v.id}`], affected);
         }, v)) : [empty('No variants. A variant holds planned changes to the equipment, such as a new line, kept apart from the network as built.')]),
       recordingPanel(app, draw),
-      runLog(runs));
+      runLog(runs, async run => {
+        await app.library.removeRun(app.docId, run.run);
+        runs.splice(runs.indexOf(run), 1);
+        app.dock.runsChanged();
+        await draw();
+      }));
   };
   await draw();
   return [root];
@@ -152,13 +157,14 @@ function recordingPanel(app, draw) {
         : 'Changes go to the base model. Add a variant to the active study case to record planned changes apart from it.' })));
 }
 
-/** The run log, newest first. @param {import('./persistence.js').RunRecord[]} runs */
-function runLog(runs) {
+/** The run log, newest first, each run with a button that deletes it and its stored results.
+ * @param {import('./persistence.js').RunRecord[]} runs @param {(run: import('./persistence.js').RunRecord) => Promise<void>} remove */
+function runLog(runs, remove) {
   const head = h('div', { class: 'project-head' }, h('h2', { html: `${icon('history', 17)}<span>Run log</span>` }));
   if (!runs.length) return h('section', { class: 'project-section' }, head, empty('No runs yet. Every calculation you start is recorded here with the hashes of its inputs and results, so it can be reproduced.'));
   const short = (/** @type {string} */ x) => (x ? x.slice(0, 10) : '—');
   const table = h('table', { class: 'grid runs' },
-    h('thead', {}, h('tr', {}, ...['Time', 'Calculation', 'Study case', 'Outcome', 'Model', 'Results', 'Duration'].map(t => h('th', { text: t })))),
+    h('thead', {}, h('tr', {}, ...['Time', 'Calculation', 'Study case', 'Outcome', 'Model', 'Results', 'Duration', ''].map(t => h('th', { text: t })))),
     h('tbody', {}, ...[...runs].reverse().map(r => h('tr', {},
       h('td', { text: new Date(r.time).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) }),
       h('td', { text: KIND[r.kind] ?? r.kind }),
@@ -166,7 +172,9 @@ function runLog(runs) {
       h('td', { text: outcome(r) }),
       h('td', { class: 'mono', text: short(r.inputs.modelSha256), title: r.inputs.modelSha256 }),
       h('td', { class: 'mono', text: short(r.resultsSha256), title: r.resultsSha256 }),
-      h('td', { class: 'num', text: `${(r.durationMs / 1000).toFixed(2)} s` })))));
+      h('td', { class: 'num', text: `${(r.durationMs / 1000).toFixed(2)} s` }),
+      h('td', { class: 'actions' }, h('button', { type: 'button', class: 'icon-btn sm', title: 'Delete this run and its stored results', 'aria-label': 'Delete run', html: icon('delete', 15),
+        onclick: async () => { if (await confirm('Delete run', 'Delete this run from the log, with its stored results?', 'Delete')) await remove(r); } }))))));
   return h('section', { class: 'project-section' }, head, h('div', { class: 'runs-wrap' }, table));
 }
 

@@ -40,6 +40,16 @@ export class Dock {
     this.sorts = {};
     this.lfView = 'buses';
     this.scView = 'buses';
+    this.n1View = 'cases';
+    /** Which rows the result tables show: all, near the limits, beyond them, or changed from a compared run. */
+    this.rowFilter = 'all';
+    /** A recorded load flow the current one is compared with. @type {{ run: string, result: import('../engine/reports.js').LoadFlowResult } | null} */
+    this.compare = null;
+    /** The project's recorded runs, once read (null until then). @type {import('./persistence.js').RunRecord[] | null} */
+    this.runList = null;
+    this.runListLoading = false;
+    /** Whether the next render starts the table at the top (the rows it shows changed). */
+    this.fromTop = false;
     this.rmsVar = 'delta';
     /** @type {Set<string>} */
     this.rmsHidden = new Set();
@@ -107,7 +117,8 @@ export class Dock {
     this.body.classList.remove('column');
     this.current = null;
     const app = this.app;
-    const scroll = this.body.scrollTop;
+    const scroll = this.fromTop ? 0 : this.body.scrollTop;
+    this.fromTop = false;
     if (this.tab !== 'rms') this.plot = null;
     if (this.tab === 'output') this.renderLog();
     else if (this.tab === 'data') { const { toolbar, sheet } = this.sheet.render(this.body); this.mount([toolbar], sheet); }
@@ -172,7 +183,8 @@ export class Dock {
   /** @param {Array<[string, string]>} items @param {string} value @param {(v: string) => void} set */
   segmented(items, value, set) {
     const seg = h('div', { class: 'seg', role: 'group' });
-    for (const [v, label] of items) seg.append(h('button', { type: 'button', 'aria-pressed': String(v === value), text: label, onclick: () => { set(v); this.render(); } }));
+    // Another view or filter shows other rows: they start at the top.
+    for (const [v, label] of items) seg.append(h('button', { type: 'button', 'aria-pressed': String(v === value), text: label, onclick: () => { set(v); this.fromTop = true; this.render(); } }));
     return seg;
   }
 
@@ -184,6 +196,66 @@ export class Dock {
 
   /** @param {string} id */
   nameOf(id) { return this.app.store.get(id)?.name || id; }
+
+  /** The run log changed: its list is read again when next shown. */
+  runsChanged() {
+    this.runList = null;
+    if (this.tab === 'loadflow') this.render();
+  }
+
+  /** Another project opened: no run to compare with yet. */
+  projectOpened() {
+    this.runList = null;
+    this.compare = null;
+  }
+
+  /**
+   * Which rows to show: a segmented control of named filters, falling back to all when the current one does not apply.
+   * @param {Array<[string, string, (row: any) => boolean]>} filters @param {any[]} rows
+   */
+  filtered(filters, rows) {
+    const all = /** @type {Array<[string, string, (row: any) => boolean]>} */ ([['all', 'All', () => true], ...filters]);
+    const chosen = all.find(f => f[0] === this.rowFilter) ?? all[0];
+    const seg = this.segmented(all.map(([v, label]) => [v, label]), chosen[0], v => { this.rowFilter = v; });
+    seg.setAttribute('aria-label', 'Rows to show');
+    return { seg, rows: chosen[0] === 'all' ? rows : rows.filter(chosen[2]) };
+  }
+
+  /** The control that chooses a recorded load flow to compare with, or null when the project has none. */
+  compareControl() {
+    const app = this.app;
+    if (this.runList === null) {
+      if (!this.runListLoading) {
+        this.runListLoading = true;
+        app.library.runs(app.docId).then(list => { this.runList = list; }, () => { this.runList = []; })
+          .finally(() => { this.runListLoading = false; if (this.tab === 'loadflow') this.render(); });
+      }
+      return null;
+    }
+    const runs = this.runList.filter(r => r.kind === 'loadflow').reverse();
+    if (!runs.length) return null;
+    const when = (/** @type {string} */ t) => new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const select = /** @type {HTMLSelectElement} */ (h('select', { class: 'input compare', 'aria-label': 'Compare with a recorded run' },
+      h('option', { value: '', text: 'Compare with a recorded run…' }),
+      ...runs.map(r => h('option', { value: r.run, text: `${when(r.time)} · ${[r.studyCase, r.scenario, ...r.variants].filter(Boolean).join(' · ')}` }))));
+    select.value = this.compare?.run ?? '';
+    select.addEventListener('change', async () => {
+      const run = select.value;
+      if (!run) { this.compare = null; this.render(); return; }
+      select.disabled = true;
+      try {
+        const result = await app.runResult(run, 'loadflow');
+        if (!result) { app.toast('info', 'The results of that run were not stored.'); this.compare = null; }
+        else this.compare = { run, result: /** @type {import('../engine/reports.js').LoadFlowResult} */ (result) };
+      } catch (error) {
+        app.toast('error', error instanceof Error ? error.message : String(error), { title: 'The run could not be read' });
+        this.compare = null;
+      }
+      this.fromTop = true;
+      this.render();
+    });
+    return select;
+  }
 
   staleNote() { return isResult(this.tab) && this.app.resultsStale(this.tab) ? h('span', { class: 'pill warn', html: `${icon('warning', 13)}Calculated before the last edit` }) : null; }
 
@@ -202,6 +274,8 @@ export class Dock {
     const view = (this.lfView === 'controls' && !regulated) || (this.lfView === 'areas' && !r.areas.length) || (this.lfView === 'warnings' && !listed) ? 'buses' : this.lfView;
     const seg = this.segmented(views, view, v => { this.lfView = v; });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), seg);
+    /** @type {HTMLElement | null} */
+    let filters = null;
     let table;
     if (view === 'warnings') {
       /** @typedef {{ id: string, kind: string, text: string }} WarningRow */
@@ -247,29 +321,52 @@ export class Dock {
       ], rows, 'load-flow-controls', 'lf-controls', 'name');
     } else if (view === 'buses') {
       const busEl = (/** @type {string} */ id) => app.store.get(id);
+      const other = this.compare ? new Map(this.compare.result.buses.map(b => [b.id, b])) : null;
+      const du = (/** @type {any} */ b) => { const o = other?.get(b.id); return o ? b.vm - o.vm : NaN; };
+      const dva = (/** @type {any} */ b) => { const o = other?.get(b.id); return o ? b.va - o.va : NaN; };
+      const band = (/** @type {any} */ b) => { const e = busEl(b.id); return e ? { lo: /** @type {number} */ (e.vmin), hi: /** @type {number} */ (e.vmax) } : null; };
+      const shown = this.filtered([
+        ['near', 'Near limits', b => { const x = band(b); return !!x && (b.vm < x.lo + 0.01 || b.vm > x.hi - 0.01); }],
+        ['out', 'Outside band', b => { const x = band(b); return !!x && (b.vm < x.lo || b.vm > x.hi); }],
+        ...(other ? /** @type {Array<[string, string, (b: any) => boolean]>} */ ([['changed', 'Changed', b => !(Math.abs(du(b)) <= 1e-4 && Math.abs(dva(b)) <= 0.01)]]) : []),
+      ], r.buses);
+      filters = shown.seg;
       table = this.table([
         { key: 'name', label: 'Busbar', value: (/** @type {any} */ b) => this.nameOf(b.id) },
         { key: 'type', label: 'Type', value: (/** @type {any} */ b) => b.type },
         { key: 'kv', label: 'U', unit: 'kV', num: true, value: (/** @type {any} */ b) => b.kv, text: (/** @type {any} */ b) => fixed(b.kv, 3) },
         { key: 'vm', label: 'u', unit: 'p.u.', num: true, value: (/** @type {any} */ b) => b.vm, text: (/** @type {any} */ b) => fixed(b.vm, 4),
           cls: (/** @type {any} */ b) => { const e = busEl(b.id); return e && (b.vm < /** @type {number} */ (e.vmin) || b.vm > /** @type {number} */ (e.vmax)) ? 'bad' : ''; } },
+        ...(other ? [{ key: 'du', label: 'Δu', unit: 'p.u.', num: true, value: du, text: (/** @type {any} */ b) => signed(du(b), 4), cls: (/** @type {any} */ b) => (Math.abs(du(b)) > 0.01 ? 'warn' : '') }] : []),
         { key: 'va', label: 'Angle', unit: '°', num: true, value: (/** @type {any} */ b) => b.va, text: (/** @type {any} */ b) => fixed(b.va, 3) },
+        ...(other ? [{ key: 'dva', label: 'ΔAngle', unit: '°', num: true, value: dva, text: (/** @type {any} */ b) => signed(dva(b), 3) }] : []),
         { key: 'p', label: 'P injected', unit: 'MW', num: true, value: (/** @type {any} */ b) => b.p, text: (/** @type {any} */ b) => fixed(b.p, 3) },
         { key: 'q', label: 'Q injected', unit: 'Mvar', num: true, value: (/** @type {any} */ b) => b.q, text: (/** @type {any} */ b) => fixed(b.q, 3) },
-      ], r.buses, 'load-flow-busbars', 'lf-buses', 'name');
+      ], shown.rows, 'load-flow-busbars', 'lf-buses', 'name');
     } else if (view === 'branches') {
+      const other = this.compare ? new Map(this.compare.result.branches.map(b => [b.id, b])) : null;
+      const dl = (/** @type {any} */ b) => { const o = other?.get(b.id); return o && Number.isFinite(b.loading) && Number.isFinite(o.loading) ? b.loading - o.loading : NaN; };
+      const dp = (/** @type {any} */ b) => { const o = other?.get(b.id); return o ? b.pFrom - o.pFrom : NaN; };
+      const shown = this.filtered([
+        ['near', 'Above 90 %', b => b.loading >= 90],
+        ['out', 'Above 100 %', b => b.loading > 100],
+        ...(other ? /** @type {Array<[string, string, (b: any) => boolean]>} */ ([['changed', 'Changed', b => !(Math.abs(dl(b)) <= 0.05 && Math.abs(dp(b)) <= 0.01)]]) : []),
+      ], r.branches);
+      filters = shown.seg;
       table = this.table([
         { key: 'name', label: 'Branch', value: (/** @type {any} */ b) => this.nameOf(b.id) },
         { key: 'cls', label: 'Type', value: (/** @type {any} */ b) => CLASSES[/** @type {'line' | 'trafo'} */ (b.cls)].label },
         { key: 'loading', label: 'Loading', unit: '%', num: true, value: (/** @type {any} */ b) => b.loading, text: (/** @type {any} */ b) => fixed(b.loading, 1),
           bar: (/** @type {any} */ b) => Number.isFinite(b.loading) ? { pct: b.loading, color: loadCss(b.loading) } : null, cls: (/** @type {any} */ b) => b.loading > 100 ? 'bad' : '' },
+        ...(other ? [{ key: 'dloading', label: 'ΔLoading', unit: '%', num: true, value: dl, text: (/** @type {any} */ b) => signed(dl(b), 1), cls: (/** @type {any} */ b) => (dl(b) > 5 ? 'warn' : '') }] : []),
         { key: 'pFrom', label: 'P from', unit: 'MW', num: true, value: (/** @type {any} */ b) => b.pFrom, text: (/** @type {any} */ b) => fixed(b.pFrom, 3) },
+        ...(other ? [{ key: 'dp', label: 'ΔP from', unit: 'MW', num: true, value: dp, text: (/** @type {any} */ b) => signed(dp(b), 3) }] : []),
         { key: 'qFrom', label: 'Q from', unit: 'Mvar', num: true, value: (/** @type {any} */ b) => b.qFrom, text: (/** @type {any} */ b) => fixed(b.qFrom, 3) },
         { key: 'pTo', label: 'P to', unit: 'MW', num: true, value: (/** @type {any} */ b) => b.pTo, text: (/** @type {any} */ b) => fixed(b.pTo, 3) },
         { key: 'qTo', label: 'Q to', unit: 'Mvar', num: true, value: (/** @type {any} */ b) => b.qTo, text: (/** @type {any} */ b) => fixed(b.qTo, 3) },
         { key: 'iFrom', label: 'I max', unit: 'kA', num: true, value: (/** @type {any} */ b) => Math.max(b.iFrom, b.iTo), text: (/** @type {any} */ b) => fixed(Math.max(b.iFrom, b.iTo), 4) },
         { key: 'pLoss', label: 'Losses', unit: 'kW', num: true, value: (/** @type {any} */ b) => b.pLoss * 1000, text: (/** @type {any} */ b) => fixed(b.pLoss * 1000, 1) },
-      ], r.branches, 'load-flow-branches', 'lf-branches', 'loading', -1);
+      ], shown.rows, 'load-flow-branches', 'lf-branches', 'loading', -1);
     } else {
       const rows = [
         ...r.gens.map(u => ({ ...u, kind: 'gen' })), ...r.grids.map(u => ({ ...u, kind: 'extgrid' })),
@@ -286,7 +383,10 @@ export class Dock {
     // A few short notes show as pills; more go to the Warnings view.
     const notes = [...r.warnings, ...(r.deenergized.length ? [`De-energised: ${r.deenergized.map(id => this.nameOf(id)).join(', ')}`] : [])];
     const pills = notes.length > 0 && notes.length <= 3 && notes.every(n => n.length <= 200);
-    this.mount([bar, pills ? h('div', { class: 'dock-toolbar', html: notes.map(n => `<span class="pill warn">${icon('warning', 13)}${esc(n)}</span>`).join('') }) : null], table);
+    // Filters for the busbar and branch tables, and the comparison with a recorded run.
+    const compare = this.compareControl();
+    const second = filters || compare ? this.toolbar(filters ?? h('span'), h('span', { class: 'grow' }), compare ?? h('span')) : null;
+    this.mount([bar, second, pills ? h('div', { class: 'dock-toolbar', html: notes.map(n => `<span class="pill warn">${icon('warning', 13)}${esc(n)}</span>`).join('') }) : null], table);
   }
 
   renderShortCircuit() {
@@ -332,8 +432,11 @@ export class Dock {
     const e = r.effort, acted = r.cases.filter(c => c.remedial.length).length;
     const work = e.screened ? `<span title="Outages the quick decoupled solution cleared, and those solved by a full load flow">Screened <b>${e.screened}</b> of <b>${r.cases.length}</b></span>` : '';
     const summary = h('div', { class: 'summary', html: `<span>Contingencies <b>${r.cases.length}</b></span>${work}${acted ? `<span>Remedial actions on <b>${acted}</b></span>` : ''}<span>Loading limit <b>${r.limit} %</b></span><span>Base case max <b>${fixed(r.base.maxLoading, 1)} %</b></span><span>Time <b>${duration(ms)}</b></span>` });
-    const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary);
+    const views = /** @type {Array<[string, string]>} */ ([['cases', `Contingencies ${r.cases.length}`], ['branches', `Branches ${Object.keys(r.worstLoading).length}`], ['buses', `Busbars ${Object.keys(r.worstVoltage).length}`]]);
+    const view = views.some(v => v[0] === this.n1View) ? this.n1View : 'cases';
+    const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), this.segmented(views, view, v => { this.n1View = v; }));
     const notes = r.notes.map(n => h('div', { class: 'dock-note', html: `${icon('info', 14)}<span>${esc(n)}</span>` }));
+    if (view !== 'cases') { this.renderWorst(r, view, bar, notes); return; }
     const describe = (/** @type {import('../engine/reports.js').ContingencyCase} */ c) => c.violations.map(v => v.kind === 'loading' ? `${this.nameOf(v.id)} ${fixed(v.value, 0)} %` : `${this.nameOf(v.id)} ${fixed(v.value, 3)} p.u.`).join(', ');
     const own = new Map(app.store.doc.study.contingency.list.map(c => [c.id, c.name || c.id]));
     const ruleName = new Map(app.store.doc.study.contingency.remedial.map(x => [x.id, x.name || x.id]));
@@ -344,6 +447,7 @@ export class Dock {
       const v = c.violations.length ? `${c.violations.length} violation${c.violations.length === 1 ? '' : 's'}` : 'Secure';
       return c.screened ? `${v} (screened)` : c.remedial.length ? `${v} after action` : v;
     };
+    const shownCases = this.filtered([['viol', 'With violations', c => !c.converged || c.violations.length > 0]], r.cases);
     const table = this.table([
       { key: 'name', label: 'Contingency', value: (/** @type {any} */ c) => own.get(c.id) ?? this.nameOf(c.id) },
       { key: 'cls', label: 'Type', value: (/** @type {any} */ c) => kindOf(c) },
@@ -357,8 +461,43 @@ export class Dock {
       { key: 'viol', label: 'Violations', value: (/** @type {any} */ c) => describe(c), title: (/** @type {any} */ c) => describe(c) },
       ...(acted ? [{ key: 'remedial', label: 'Remedial actions', value: (/** @type {any} */ c) => c.remedial.map((/** @type {string} */ id) => ruleName.get(id) ?? id).join(', '),
         title: (/** @type {any} */ c) => (c.remedial.length ? `${c.violationsBefore} violation${c.violationsBefore === 1 ? '' : 's'} before the actions` : '') }] : []),
-    ], r.cases, 'contingency', 'n1', 'state', 1);
-    this.mount([bar, ...notes], table);
+    ], shownCases.rows, 'contingency', 'n1', 'state', 1);
+    this.mount([bar, this.toolbar(shownCases.seg), ...notes], table);
+  }
+
+  /**
+   * The worst post-contingency state of each branch or busbar, and the outage that causes it.
+   * @param {import('../engine/reports.js').ContingencyResult} r @param {string} view @param {HTMLElement} bar @param {HTMLElement[]} notes
+   */
+  renderWorst(r, view, bar, notes) {
+    const own = new Map(this.app.store.doc.study.contingency.list.map(c => [c.id, c.name || c.id]));
+    const name = (/** @type {string} */ id) => own.get(id) ?? this.nameOf(id);
+    if (view === 'branches') {
+      const rows = Object.entries(r.worstLoading).map(([id, w]) => ({ id, value: w.value, outage: w.outage }));
+      const shown = this.filtered([['near', 'Above 90 %', b => b.value >= 90], ['out', 'Above 100 %', b => b.value > 100]], rows);
+      const table = this.table([
+        { key: 'name', label: 'Branch', value: (/** @type {any} */ b) => this.nameOf(b.id) },
+        { key: 'value', label: 'Worst loading', unit: '%', num: true, value: (/** @type {any} */ b) => b.value, text: (/** @type {any} */ b) => fixed(b.value, 1),
+          bar: (/** @type {any} */ b) => ({ pct: b.value, color: loadCss(b.value) }), cls: (/** @type {any} */ b) => (b.value > r.limit ? 'bad' : '') },
+        { key: 'outage', label: 'Under the outage of', value: (/** @type {any} */ b) => name(b.outage) },
+      ], shown.rows, 'contingency-worst-loading', 'n1-branches', 'value', -1);
+      this.mount([bar, this.toolbar(shown.seg), ...notes], table);
+      return;
+    }
+    const band = (/** @type {string} */ id) => this.app.store.get(id);
+    const rows = Object.entries(r.worstVoltage).map(([id, w]) => ({ id, ...w }));
+    const outside = (/** @type {any} */ b) => { const e = band(b.id); return !!e && (b.min < /** @type {number} */ (e.vmin) || b.max > /** @type {number} */ (e.vmax)); };
+    const shown = this.filtered([['out', 'Outside band', outside]], rows);
+    const table = this.table([
+      { key: 'name', label: 'Busbar', value: (/** @type {any} */ b) => this.nameOf(b.id) },
+      { key: 'min', label: 'Lowest u', unit: 'p.u.', num: true, value: (/** @type {any} */ b) => b.min, text: (/** @type {any} */ b) => fixed(b.min, 4),
+        cls: (/** @type {any} */ b) => { const e = band(b.id); return e && b.min < /** @type {number} */ (e.vmin) ? 'bad' : ''; } },
+      { key: 'minOutage', label: 'Under the outage of', value: (/** @type {any} */ b) => (b.minOutage ? name(b.minOutage) : '') },
+      { key: 'max', label: 'Highest u', unit: 'p.u.', num: true, value: (/** @type {any} */ b) => b.max, text: (/** @type {any} */ b) => fixed(b.max, 4),
+        cls: (/** @type {any} */ b) => { const e = band(b.id); return e && b.max > /** @type {number} */ (e.vmax) ? 'bad' : ''; } },
+      { key: 'maxOutage', label: 'Under the outage of', value: (/** @type {any} */ b) => (b.maxOutage ? name(b.maxOutage) : '') },
+    ], shown.rows, 'contingency-worst-voltage', 'n1-buses', 'min', 1);
+    this.mount([bar, this.toolbar(shown.seg), ...notes], table);
   }
 
   renderRms() {
@@ -411,4 +550,11 @@ export class Dock {
     if (!this.current) return null;
     return { name: this.current.name, text: toCSV(this.current.columns, this.current.rows) };
   }
+}
+
+/** A difference with its sign, or a dash when one run lacks the element. @param {number} v @param {number} digits */
+function signed(v, digits) {
+  if (!Number.isFinite(v)) return '—';
+  const t = fixed(v, digits);
+  return v > 0 && Number(t) !== 0 ? `+${t}` : t;
 }

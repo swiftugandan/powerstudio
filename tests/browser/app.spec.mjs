@@ -309,6 +309,33 @@ test('records a planned change in a variant, turns it off and on, logs the run, 
   await expect(page.locator('table.runs tbody tr')).toHaveCount(1);
 });
 
+test('compares a load flow with a recorded run and filters to what changed', async ({ page }) => {
+  await open(page);
+  await loadFlow(page);
+  // A heavier load, then a second load flow the user starts.
+  await page.locator('.dock-tab[data-tab="data"]').click();
+  await page.locator('.sheet-toolbar select').selectOption('load');
+  const p = page.locator('table.sheet tbody tr[data-id="D2"] td[data-key="p"]');
+  await p.click();
+  await page.keyboard.type('60');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Alt+L');
+  await page.locator('.dock-tab[data-tab="loadflow"]').click();
+  await page.locator('.dock-toolbar .seg button', { hasText: /^Branches/ }).click();
+  const compare = page.locator('select.compare');
+  await expect(compare.locator('option')).toHaveCount(3);
+  await compare.selectOption({ index: 2 });
+  await expect(page.locator('table.grid th[data-key="dloading"]')).toBeVisible();
+  const all = await page.locator('table.grid tbody tr[data-id]').count();
+  await page.locator('.dock-toolbar .seg button', { hasText: 'Changed' }).click();
+  const changed = await page.locator('table.grid tbody tr[data-id]').count();
+  expect(changed).toBeGreaterThan(0);
+  expect(changed).toBeLessThanOrEqual(all);
+  // Filters by loading need no comparison.
+  await page.locator('.dock-toolbar .seg button', { hasText: 'Above 100 %' }).click();
+  await expect(page.locator('table.grid tbody tr[data-id]')).toHaveCount(0);
+});
+
 test('short circuit, contingency and stability run from the palette and the ribbon', async ({ page }) => {
   await open(page);
   await palette(page, 'short circuit');

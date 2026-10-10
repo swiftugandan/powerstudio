@@ -5,12 +5,13 @@
  * A project is stored in parts, so an edit rewrites only the part it changed: the base document's JSON (`documents`,
  * the store version 1 and 2 kept whole documents in), its catalogue entry (`meta`: name, size, last save), and its
  * manifest, variants and scenarios (`parts`, keyed `<project>/manifest`, `<project>/variant/<id>`,
- * `<project>/scenario/<id>`). Run records go in `runs`, keyed `<project>/<run>`. A document saved before projects
+ * `<project>/scenario/<id>`). Run records go in `runs`, keyed `<project>/<run>`, and each run's report, compressed, in
+`results` under the same key, so two runs can be compared later. A document saved before projects
  * (versions 1 and 2) has no parts and opens as a project with one study case. OPFS would suit large files, but
  * Chromium refuses it to pages opened from a file, which PowerStudio supports; IndexedDB keeps large values as files and
  * works from both. */
 
-const DB = 'powerstudio', STORE = 'documents', META = 'meta', PARTS = 'parts', RUNS = 'runs', VERSION = 3;
+const DB = 'powerstudio', STORE = 'documents', META = 'meta', PARTS = 'parts', RUNS = 'runs', RESULTS = 'results', VERSION = 4;
 
 /** @typedef {import('../core/document.js').PowerDocument} PowerDocument */
 /** What the library lists: a document's name, last save and size. @typedef {{ id: string, name: string, updated: number, elements: number }} DocMeta */
@@ -57,6 +58,8 @@ export class DocumentLibrary {
     this.memoryParts = new Map();
     /** @type {Map<string, RunRecord & { key: string, project: string }>} */
     this.memoryRuns = new Map();
+    /** @type {Map<string, { key: string, project: string, kind: string, report: Blob }>} */
+    this.memoryResults = new Map();
     this.persistent = false;
   }
 
@@ -67,7 +70,7 @@ export class DocumentLibrary {
         req.onupgradeneeded = event => {
           const db = req.result, tx = /** @type {IDBTransaction} */ (req.transaction);
           if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'id' }).createIndex('updated', 'updated');
-          for (const name of [PARTS, RUNS]) {
+          for (const name of [PARTS, RUNS, RESULTS]) {
             if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'key' }).createIndex('project', 'project');
           }
           if (!db.objectStoreNames.contains(META)) {
@@ -97,12 +100,12 @@ export class DocumentLibrary {
   }
 
   /** @template T @param {IDBTransactionMode} mode
-   * @param {(s: IDBObjectStore, meta: IDBObjectStore, parts: IDBObjectStore, runs: IDBObjectStore) => IDBRequest<T>} fn
+   * @param {(s: IDBObjectStore, meta: IDBObjectStore, parts: IDBObjectStore, runs: IDBObjectStore, results: IDBObjectStore) => IDBRequest<T>} fn
    * @returns {Promise<T>} */
   request(mode, fn) {
     return new Promise((resolve, reject) => {
-      const tx = /** @type {IDBDatabase} */ (this.db).transaction([STORE, META, PARTS, RUNS], mode);
-      const req = fn(tx.objectStore(STORE), tx.objectStore(META), tx.objectStore(PARTS), tx.objectStore(RUNS));
+      const tx = /** @type {IDBDatabase} */ (this.db).transaction([STORE, META, PARTS, RUNS, RESULTS], mode);
+      const req = fn(tx.objectStore(STORE), tx.objectStore(META), tx.objectStore(PARTS), tx.objectStore(RUNS), tx.objectStore(RESULTS));
       tx.oncomplete = () => resolve(req.result);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error ?? new Error('Storage transaction aborted.'));
@@ -177,6 +180,30 @@ export class DocumentLibrary {
     await this.request('readwrite', (_, __, ___, runs) => runs.put(row));
   }
 
+  /** Stores a run's report (the engine's JSON, gzip-compressed). @param {string} id @param {string} run @param {string} kind
+   * @param {Blob} report */
+  async putResult(id, run, kind, report) {
+    const row = { key: `${id}/${run}`, project: id, kind, report };
+    if (!this.db) { this.memoryResults.set(row.key, row); return; }
+    await this.request('readwrite', (_, __, ___, ____, results) => results.put(row));
+  }
+
+  /** A run's stored report, or undefined. @param {string} id @param {string} run @returns {Promise<Blob | undefined>} */
+  async getResult(id, run) {
+    const key = `${id}/${run}`;
+    const row = this.db
+      ? /** @type {{ report: Blob } | undefined} */ (await this.request('readonly', (_, __, ___, ____, results) => results.get(key)))
+      : this.memoryResults.get(key);
+    return row?.report;
+  }
+
+  /** Deletes a run from the log, with its report. @param {string} id @param {string} run */
+  async removeRun(id, run) {
+    const key = `${id}/${run}`;
+    if (!this.db) { this.memoryRuns.delete(key); this.memoryResults.delete(key); return; }
+    await this.request('readwrite', (_, __, ___, runs, results) => { results.delete(key); return runs.delete(key); });
+  }
+
   /** A project's run log, oldest first. @param {string} id @returns {Promise<RunRecord[]>} */
   async runs(id) {
     const all = this.db
@@ -185,16 +212,17 @@ export class DocumentLibrary {
     return all.map(({ key: _, project: __, ...r }) => /** @type {RunRecord} */ (r)).sort((a, b) => a.time.localeCompare(b.time));
   }
 
-  /** Deletes a project with its parts and run log. @param {string} id */
+  /** Deletes a project with its parts, run log and stored reports. @param {string} id */
   async remove(id) {
     if (!this.db) {
       this.memory.delete(id);
       for (const [k, p] of this.memoryParts) if (p.project === id) this.memoryParts.delete(k);
       for (const [k, r] of this.memoryRuns) if (r.project === id) this.memoryRuns.delete(k);
+      for (const [k, r] of this.memoryResults) if (r.project === id) this.memoryResults.delete(k);
       return;
     }
-    await this.request('readwrite', (s, m, parts, runs) => {
-      for (const store of [parts, runs]) {
+    await this.request('readwrite', (s, m, parts, runs, results) => {
+      for (const store of [parts, runs, results]) {
         store.index('project').getAllKeys(id).onsuccess = e => {
           for (const key of /** @type {IDBValidKey[]} */ (/** @type {IDBRequest} */ (e.target).result)) store.delete(key);
         };

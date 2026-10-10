@@ -191,7 +191,8 @@ export class EngineClient {
    * record's hashes (the engine version, the model, the study case and the report).
    * @param {CalcKind} kind @param {import('../core/document.js').PowerDocument} doc @param {Record<string, unknown>} [options]
    * @param {OnProgress} [onProgress] @param {{ record?: boolean }} [opt]
-   * @returns {Promise<{ result: any, ms: number, record?: Hashes }>}
+   * @returns {Promise<{ result: any, ms: number, record?: Hashes, bytes: Uint8Array }>} `bytes` is the report as the
+   * engine wrote it (JSON)
    */
   async run(kind, doc, options = {}, onProgress, opt = {}) {
     if (this.busy) this.cancel();
@@ -205,7 +206,7 @@ export class EngineClient {
         ? await this.contingency(token, module, doc, onProgress, !!opt.record)
         : await this.exec(0, module, kind, doc, options, onProgress, !!opt.record);
       this.check(token);
-      return { result: adapt(kind, jsonPayload(bytes)), ms: performance.now() - t0, record };
+      return { result: adapt(kind, jsonPayload(bytes)), ms: performance.now() - t0, record, bytes };
     } finally {
       this.active--;
     }
