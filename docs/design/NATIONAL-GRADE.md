@@ -360,15 +360,20 @@ the engine.
 
 ### 8.2 Diagrams
 
-- **Several diagrams per project:** a network overview (schematic or geographic from CGMES GL), substation
-  single-line diagrams generated from the node-breaker model (busbar sections, bays, breakers, disconnectors), and
-  user-drawn diagrams. Imported CGMES DL layouts are used when present.
-- **Renderer at scale:** the display-list design stays, but the scene becomes persistent GPU buffers with a range per
-  element, updated incrementally when an element or its results change, instead of rebuilt per change. A spatial grid
-  index serves culling and hit testing. Levels of detail draw a 70,000-bus overview as substations and corridors when
-  zoomed out, and full detail when zoomed in; labels have their own detail tiers.
-- **Canvas 2D fallback** cannot draw every element of a national overview each frame. At large scale it draws the
-  coarser level of detail and caches tiles, and says so on the badge.
+What this release has (phase 4):
+
+- **One network diagram per project**, drawn by the editor or laid out on import. Above 400 busbars the layout is
+  multilevel, so regions stay together and branches stay short.
+- **Renderer at scale:** the display-list design stays. A diagram rebuilds in steps of a few milliseconds per frame,
+  keeping the previous one on screen meanwhile; a sorted segment index serves hit testing; Canvas 2D draws a large
+  diagram through a cache covering the view and says so on the badge. Levels of detail bring voltage levels in from
+  the highest as the view comes closer, keep violations visible at every zoom, and show labels and symbols once they
+  are legible.
+
+Deferred by ADR 12: substation single-line diagrams generated from the node-breaker model (busbar sections, bays,
+breakers, disconnectors), several diagrams per project, and CGMES DL and GL layouts. The persistent GPU buffers updated
+per element and the tiled Canvas 2D cache this section first planned were not needed: the stepped rebuild and the
+view cache keep every frame of the 70,000-bus measurements under 100 ms (phase 4 results).
 
 ### 8.3 Data manager and results
 
@@ -461,6 +466,7 @@ writes a difference report. The design's own verification makes this comparison 
 | 9 | Short circuit validated against open references only (pandapower's encoding of the TR 60909-4 and VDE examples); it stays "IEC 60909-style" | Buying the standard to claim conformance: the project makes no purchases. Claiming conformance from formulas alone: not evidence |
 | 10 | The WebAssembly boundary is one exported function, `ps_call`, taking and returning an envelope (u32 header length, JSON header, binary payload), plus `ps_alloc` and `ps_free`; no generated bindings | `wasm-bindgen`: generated glue tied to a tool version, many exports that grow with the engine. A single entry point keeps the boundary stable and the build free of extra tools |
 | 11 | Model classes are tables of records addressed by identifier, not columns of fields | Columnar storage: the solvers never read the model directly (they read the per-unit network), so columns would add bookkeeping to every import and edit without a measured benefit |
+| 12 | The workspace stays on the editor's bus-branch document for release 1. The canonical model serves node-breaker where calculations need it: imports, topology processing, per-unit conversion, busbar faults, the model hash. The editor expresses switching as in-service states, which scenarios hold, and as busbar contingencies; substation diagrams wait. A move to the canonical model is a later major version, once the catalogue has switch and terminal classes, a substation layout exists, and documents migrate | Moving the workspace in phase 4: everything validated sits on the editor document (the catalogue, the store's operations and the project router, the import gate, the data manager, the layout, the oracle inputs) and version 0.1 documents are deployed, so the move would re-derive all of it and take phases 5 to 7. Drawing substations from a retained import snapshot: a model the user's edits never reach, two truths in one project |
 
 ## 11. Roadmap
 
@@ -472,7 +478,7 @@ Each phase is sized when the one before it ends; no phase starts on assumptions 
 | **1. Engine foundation** — done | Rust workspace, model and operations, snapshot format, topology processor, per-unit network, and all four 0.1 calculations ported at 0.1 parity (sparse Newton-Raphson with 0.1's controls, short circuit, N-1, classical stability; the national-grade versions are phases 3, 5 and 6); coordinator and worker pool; `ps-cli` | Every 0.1 oracle test passes on the engine; ACTIVSg25k solves within target; the JavaScript solvers are deleted. See the phase 1 results below |
 | **2. Data exchange** — done | CGMES 2.4.15 and 3.0 import (EQ, TP, SSH, SV, DL, GL) and SSH/SV export; PSS/E RAW import and export; validation reports | CGMES conformity configurations and ACTIVSg cases import and agree with PowSyBl to the fidelity bar |
 | **3. Steady-state completeness** — done, two bars missed | Remaining equipment and controls (section 5.5); sensitivities; contingency engine with screening, AC verification, remedial actions | 70,000-bus load flow and 10,000-bus N-1 within the scale bar; agreement with PowSyBl security analysis. See the phase 3 results below |
-| **4. Workspace at scale** (runs alongside 2 and 3) | Projects, variants, scenarios, study cases; data manager; substation diagrams; renderer at scale; result browser and comparison; reports | A 70,000-bus project is usable end to end with no frame over 100 ms |
+| **4. Workspace at scale** (runs alongside 2 and 3) | Projects, variants, scenarios, study cases; data manager; renderer at scale; result browser and comparison; reports. Substation diagrams deferred by ADR 12 | A 70,000-bus project is usable end to end with no frame over 100 ms |
 | **5. Dynamics** | DAE solver, events, DYR import, wave D1, then D2 and D3 | Each wave agrees with ANDES or Dynawo on published cases |
 | **6. Short circuit** | Breaking and steady-state currents, DC component, power station units, converter sources, all fault types; the superposition method | The TR 60909-4 example network from pandapower's open test suite reproduced to its stated tolerances for three-phase and line-to-line faults, maximum and minimum, power station units included |
 | **7. Release hardening** | Reproducible builds, SBOM, attestations, Firefox and WebKit test projects, accessibility audit, user guide, operator benchmark kit | The assurance bar passes; 1.0.0 released |
