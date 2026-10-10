@@ -108,7 +108,8 @@ The stability goldens (`tests/oracle/golden/dyn-*.json`) come from ANDES 2.0.0 (
 PSS/E RAW and DYR files, which `node scripts/fetch-reference.mjs` downloads from ANDES's repository at a pinned commit
 into `.cache/reference` (they are never copied into the repository). `tests/oracle/dyn-cases.json` lists the cases:
 the files, the events, ANDES's step (`tstep`), the engine's (`step`), the sampling, and for models no published DYR case
-uses, a `replace` entry giving a machine another control. ANDES is in the oracle environment
+uses, a `replace` entry giving a machine another control (named parameters are written in ANDES's DYR order by
+name, which settles ESST1A, whose order ANDES's table changes), and `loads` for voltage-dependent loads. ANDES is in the oracle environment
 (`scripts/oracle/requirements.txt`):
 
 ```sh

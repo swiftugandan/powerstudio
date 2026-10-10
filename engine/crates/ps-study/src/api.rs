@@ -85,6 +85,11 @@ struct RmsOptions {
     t_end: Option<f64>,
     dt: Option<f64>,
     events: Option<Vec<ps_model::study::SimEvent>>,
+    load_p_power: Option<f64>,
+    load_p_current: Option<f64>,
+    load_q_power: Option<f64>,
+    load_q_current: Option<f64>,
+    load_v_low: Option<f64>,
     max_samples: Option<usize>,
 }
 
@@ -216,10 +221,16 @@ pub fn handle(
         }
         "rms" => {
             let o: RmsOptions = options(opts)?;
+            let r = &study.rms;
             let settings = RmsSettings {
-                t_end: o.t_end.unwrap_or(study.rms.t_end),
-                dt: o.dt.unwrap_or(study.rms.dt),
-                events: o.events.unwrap_or_else(|| study.rms.events.clone()),
+                t_end: o.t_end.unwrap_or(r.t_end),
+                dt: o.dt.unwrap_or(r.dt),
+                events: o.events.unwrap_or_else(|| r.events.clone()),
+                load_p_power: o.load_p_power.unwrap_or(r.load_p_power),
+                load_p_current: o.load_p_current.unwrap_or(r.load_p_current),
+                load_q_power: o.load_q_power.unwrap_or(r.load_q_power),
+                load_q_current: o.load_q_current.unwrap_or(r.load_q_current),
+                load_v_low: o.load_v_low.unwrap_or(r.load_v_low),
             };
             to_json(&rms::run(
                 model,

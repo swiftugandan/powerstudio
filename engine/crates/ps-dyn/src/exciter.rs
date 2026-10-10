@@ -1,4 +1,4 @@
-//! Excitation systems: SEXS, IEEET1, EXDC2, ESDC2A, EXST1 and ESST3A, in the PSS/E model library's per-unit system
+//! Excitation systems: SEXS, IEEET1, EXDC2, ESDC2A, EXST1, ESST1A and ESST3A, in the PSS/E model library's per-unit system
 //! (field voltage and current on the machine's base, so `Xad·Ifd` = 1 at no-load rated voltage).
 //!
 //! Every model sums its voltage reference, the measured terminal voltage and the stabiliser's signal `Vs` at its
@@ -24,6 +24,8 @@ pub enum Exciter {
     Dc2(Dc2),
     /// EXST1.
     St1(St1),
+    /// ESST1A.
+    St1a(St1a),
     /// ESST3A.
     St3a(St3a),
 }
@@ -134,6 +136,30 @@ impl Exciter {
                 wf: layout.add(name, "WF_x", p(c, "TF")),
                 vref: 0.0,
             }),
+            ControllerKind::Esst1a => Self::St1a(St1a {
+                vimax: p(c, "VIMAX"),
+                vimin: p(c, "VIMIN"),
+                tc: p(c, "TC"),
+                tb: p(c, "TB"),
+                tc1: p(c, "TC1"),
+                tb1: p(c, "TB1"),
+                ka: nonzero(c, "KA")?,
+                vamax: p(c, "VAMAX"),
+                vamin: p(c, "VAMIN"),
+                vrmax: p(c, "VRMAX"),
+                vrmin: p(c, "VRMIN"),
+                kc: p(c, "KC"),
+                kf: p(c, "KF"),
+                tf: p(c, "TF"),
+                klr: p(c, "KLR"),
+                ilr: p(c, "ILR"),
+                lg: layout.add(name, "LG_y", p(c, "TR")),
+                ll: layout.add(name, "LL_x", p(c, "TB")),
+                ll1: layout.add(name, "LL1_x", p(c, "TB1")),
+                va: layout.add(name, "VA", p(c, "TA")),
+                wf: layout.add(name, "WF_x", p(c, "TF")),
+                vref: 0.0,
+            }),
             ControllerKind::Esst3a => {
                 let (kp, theta) = (p(c, "KP"), p(c, "THETAP").to_radians());
                 Self::St3a(St3a {
@@ -175,6 +201,7 @@ impl Exciter {
             Self::Ieeet1(e) => e.eval(x, f, lim, st, vs),
             Self::Dc2(e) => e.eval(x, f, lim, st, vs),
             Self::St1(e) => e.eval(x, f, st, vs),
+            Self::St1a(e) => e.eval(x, f, lim, st, vs),
             Self::St3a(e) => e.eval(x, f, lim, st, vs),
         }
     }
@@ -195,6 +222,7 @@ impl Exciter {
             Self::Ieeet1(e) => e.init(x, vf0, st, vs0, notes),
             Self::Dc2(e) => e.init(x, vf0, st, vs0, notes),
             Self::St1(e) => e.init(x, vf0, st, vs0, notes),
+            Self::St1a(e) => e.init(x, vf0, st, vs0, notes),
             Self::St3a(e) => e.init(x, vf0, st, vs0, notes),
         }
     }
@@ -414,6 +442,97 @@ impl St1 {
         x[self.wf] = vf0;
         x[self.lr] = vf0;
         x[self.ll] = vi;
+        self.vref = st.vt + vi - vs0;
+        Ok(())
+    }
+}
+
+/// ESST1A: transducer, input limits, two lead-lags, regulator with anti-windup limits, a field current limiter, output
+/// limits that scale with the terminal voltage and fall with the field current, and a rate feedback. Under- and
+/// over-excitation limiters are not modelled, so UEL and VOS change nothing: the stabiliser's signal enters at the
+/// input.
+#[derive(Debug, Clone)]
+pub struct St1a {
+    vimax: f64,
+    vimin: f64,
+    tc: f64,
+    tb: f64,
+    tc1: f64,
+    tb1: f64,
+    ka: f64,
+    vamax: f64,
+    vamin: f64,
+    vrmax: f64,
+    vrmin: f64,
+    kc: f64,
+    kf: f64,
+    tf: f64,
+    klr: f64,
+    ilr: f64,
+    lg: usize,
+    ll: usize,
+    ll1: usize,
+    va: usize,
+    wf: usize,
+    vref: f64,
+}
+
+impl St1a {
+    /// The field current limiter's output, KLR·(Ifd − ILR) above zero.
+    fn limiter<S: Scalar>(&self, xadifd: S) -> S {
+        ((xadifd - self.ilr) * self.klr).max(S::cst(0.0))
+    }
+
+    fn eval<S: Scalar>(&self, x: &[S], f: &mut [S], lim: &mut [Option<(f64, f64)>], st: &Stator<S>, vs: S) -> S {
+        f[self.lg] = st.vt - x[self.lg];
+        // The rate feedback reads the regulator's output before the output limits.
+        let vas = x[self.va] - self.limiter(st.xadifd);
+        let wf = washout(vas, x[self.wf], self.tf, self.kf);
+        f[self.wf] = vas - x[self.wf];
+        let vi = (-x[self.lg] - wf + self.vref + vs).clamp(self.vimin, self.vimax);
+        f[self.ll] = vi - x[self.ll];
+        let ll = lead_lag(vi, x[self.ll], self.tc, self.tb, 1.0);
+        f[self.ll1] = ll - x[self.ll1];
+        let ll1 = lead_lag(ll, x[self.ll1], self.tc1, self.tb1, 1.0);
+        f[self.va] = lag(ll1, x[self.va], self.ka);
+        lim[self.va] = Some((self.vamin, self.vamax));
+        let hi = st.vt * self.vrmax - st.xadifd * self.kc;
+        let lo = st.vt * self.vrmin;
+        if vas.v() > hi.v() {
+            hi
+        } else if vas.v() < lo.v() {
+            lo
+        } else {
+            vas
+        }
+    }
+
+    fn init(
+        &mut self,
+        x: &mut [f64],
+        vf0: f64,
+        st: &Stator<f64>,
+        vs0: f64,
+        notes: &mut Vec<String>,
+    ) -> Result<(), String> {
+        let va = vf0 + self.limiter(st.xadifd);
+        widen(
+            va,
+            &mut self.vamin,
+            &mut self.vamax,
+            "ESST1A regulator output VA",
+            notes,
+        );
+        let (mut lo, mut hi) = (st.vt * self.vrmin, st.vt * self.vrmax - self.kc * st.xadifd);
+        widen(vf0, &mut lo, &mut hi, "ESST1A field voltage", notes);
+        (self.vrmin, self.vrmax) = (lo / st.vt, (hi + self.kc * st.xadifd) / st.vt);
+        let vi = va / self.ka;
+        widen(vi, &mut self.vimin, &mut self.vimax, "ESST1A input", notes);
+        x[self.lg] = st.vt;
+        x[self.wf] = vf0;
+        x[self.ll] = vi;
+        x[self.ll1] = vi;
+        x[self.va] = va;
         self.vref = st.vt + vi - vs0;
         Ok(())
     }

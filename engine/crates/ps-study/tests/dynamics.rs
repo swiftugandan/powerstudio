@@ -70,6 +70,11 @@ fn model_of(case: &Value) -> ps_model::Model {
         let kind = ps_model::ControllerKind::from_name(r["model"].as_str().unwrap()).unwrap();
         let values: Vec<f64> = r["values"].as_array().unwrap().iter().map(f).collect();
         assert_eq!(values.len(), kind.params().len(), "{}", kind.name());
+        // A replacement that names its parameters names them in the engine's order.
+        if let Some(names) = r["params"].as_array() {
+            let names: Vec<&str> = names.iter().map(|n| n.as_str().unwrap()).collect();
+            assert_eq!(names, kind.params(), "{}", kind.name());
+        }
         let g = model
             .generators
             .iter_mut()
@@ -237,13 +242,19 @@ fn trajectories_agree_with_andes_on_its_published_cases() {
             ));
         }
 
+        let share = |kind: &str, k: usize| case["loads"][kind][k].as_f64().unwrap_or(0.0);
         let settings = RmsSettings {
+            load_p_power: share("p", 0),
+            load_p_current: share("p", 1),
+            load_q_power: share("q", 0),
+            load_q_current: share("q", 1),
             t_end: f(&case["tf"]),
             dt: std::env::var("PS_DYN_STEP")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(f(&case["step"])),
             events: events_of(case, &model),
+            ..Default::default()
         };
         let events: Vec<f64> = settings.events.iter().map(|e| e.t).collect();
         let dt = settings.dt;
@@ -305,7 +316,7 @@ fn published_cases_rest_in_equilibrium_without_events() {
         let settings = RmsSettings {
             t_end: 5.0,
             dt: 0.005,
-            events: Vec::new(),
+            ..Default::default()
         };
         let (_, traj) = rms::run_detailed(
             &model,
@@ -344,4 +355,63 @@ fn published_cases_rest_in_equilibrium_without_events() {
             );
         }
     }
+}
+
+/// Constant power loads near a fault turn into constant impedances below the study case's voltage, so a bolted fault
+/// at a loaded busbar stays solvable; with the threshold at zero the loads keep drawing their power until the
+/// iteration gives up. ANDES converts nothing during a simulation, so this is checked here rather than against it.
+#[test]
+fn constant_power_loads_turn_into_impedances_near_a_fault() {
+    let cases = json("tests/oracle/dyn-cases.json");
+    let case = cases["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "ieee14")
+        .unwrap();
+    let model = model_of(case);
+    let fault = |t: f64, kind: EventKind| SimEvent {
+        t,
+        kind,
+        target: "B9".into(),
+        value: None,
+        r: None,
+        x: None,
+    };
+    let settings = RmsSettings {
+        t_end: 2.0,
+        load_p_power: 100.0,
+        load_q_power: 100.0,
+        events: vec![fault(1.0, EventKind::Fault), fault(1.1, EventKind::Clear)],
+        ..Default::default()
+    };
+    let study = StudyCase::default();
+    let (rep, traj) = rms::run_detailed(
+        &model,
+        &study,
+        &settings,
+        usize::MAX,
+        rms::Options::default(),
+        &mut Silent,
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+    assert!(rep.stable, "{}", rep.message);
+    let b9 = traj.bus_ids.iter().position(|b| b == "B9").unwrap();
+    let during = traj.t.iter().position(|&t| t > 1.05).unwrap();
+    assert!(traj.voltages[b9][during] < 1e-3, "the bolted fault holds B9 near zero");
+    let without = RmsSettings {
+        load_v_low: 0.0,
+        ..settings.clone()
+    };
+    assert!(
+        rms::run_detailed(
+            &model,
+            &study,
+            &without,
+            usize::MAX,
+            rms::Options::default(),
+            &mut Silent
+        )
+        .is_err()
+    );
 }

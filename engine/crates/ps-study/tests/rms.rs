@@ -126,6 +126,7 @@ fn the_equal_area_critical_clearing_time_separates_stable_from_unstable() {
                 t_end: 2.0,
                 dt: 0.0005,
                 events: fault_at_g(clear),
+                ..Default::default()
             },
             4000,
             &mut Silent,
@@ -149,6 +150,7 @@ fn undisturbed_operation_stays_at_its_load_flow_equilibrium() {
             t_end: 1.0,
             dt: 0.002,
             events: Vec::new(),
+            ..Default::default()
         },
         4000,
         &mut Silent,
@@ -172,6 +174,7 @@ fn small_oscillations_follow_the_linearised_swing_frequency() {
             t_end: 3.0,
             dt: 0.001,
             events: fault_at_g(0.01),
+            ..Default::default()
         },
         4000,
         &mut Silent,

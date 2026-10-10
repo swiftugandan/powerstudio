@@ -353,6 +353,16 @@ pub struct RmsSettings {
     pub dt: f64,
     /// Events in time order.
     pub events: Vec<SimEvent>,
+    /// Share of each load's initial active power held as constant power, %.
+    pub load_p_power: f64,
+    /// Share held as constant current, %; the rest is constant impedance.
+    pub load_p_current: f64,
+    /// Share of each load's initial reactive power held as constant power, %.
+    pub load_q_power: f64,
+    /// Share held as constant current, %; the rest is constant impedance.
+    pub load_q_current: f64,
+    /// Below this voltage, p.u., a load's constant power and constant current shares turn into constant impedance.
+    pub load_v_low: f64,
 }
 
 impl Default for RmsSettings {
@@ -361,6 +371,11 @@ impl Default for RmsSettings {
             t_end: 3.0,
             dt: 0.005,
             events: Vec::new(),
+            load_p_power: 0.0,
+            load_p_current: 0.0,
+            load_q_power: 0.0,
+            load_q_current: 0.0,
+            load_v_low: 0.7,
         }
     }
 }

@@ -1,5 +1,5 @@
 {
- "about": "Stability cases compared with ANDES (GPL-3.0; its published cases at a pinned commit, downloaded by scripts/fetch-reference.mjs into .cache/reference and never copied into the repository). scripts/oracle/andes_dyn.py runs each case in ANDES and writes tests/oracle/golden/dyn-<name>.json. 'overrides' change a parameter in both programs (scripts/oracle/andes_dyn.py says why); 'replace' gives a machine another control, written as a DYR record for ANDES and set on the engine's model, for models no published DYR case uses. Events: 'fault' with its resistance rf and reactance xf in p.u. on the system base, 'clear', 'trip' and 'close' of a line. tstep is ANDES's fixed integration step, step the engine's, and sample the spacing of the recorded values, all in seconds. ANDES runs at a quarter of the engine's step because its anti-windup limits carry an error that shrinks with the step (docs/TESTING.md); ANDES adds a 0.1 ms step after each event, so the recorded times are its own, and the engine test interpolates its trajectory at them.",
+ "about": "Stability cases compared with ANDES (GPL-3.0; its published cases at a pinned commit, downloaded by scripts/fetch-reference.mjs into .cache/reference and never copied into the repository). scripts/oracle/andes_dyn.py runs each case in ANDES and writes tests/oracle/golden/dyn-<name>.json. 'overrides' change a parameter in both programs (scripts/oracle/andes_dyn.py says why); 'replace' gives a machine another control, written as a DYR record for ANDES and set on the engine's model, for models no published DYR case uses. 'loads' gives the loads' shares of constant power, current and impedance in %, for active and reactive power (ANDES's PQ.config p2p, p2i, p2z and q2q, q2i, q2z); without it loads are constant impedances. Events: 'fault' with its resistance rf and reactance xf in p.u. on the system base, 'clear', 'trip' and 'close' of a line. tstep is ANDES's fixed integration step, step the engine's, and sample the spacing of the recorded values, all in seconds. ANDES runs at a quarter of the engine's step because its anti-windup limits carry an error that shrinks with the step (docs/TESTING.md); ANDES adds a 0.1 ms step after each event, so the recorded times are its own, and the engine test interpolates its trajectory at them.",
  "archives": {
   "kundur-raw": {
    "file": "andes-kundur-kundur.raw",
@@ -353,6 +353,109 @@
     }
    ],
    "about": "The IEEE 14-bus system with a HYGOV governor at bus 8, as ANDES's ieee14_hygov case places it, with its parameters; line 2-5 switched out at 1 s."
+  },
+  {
+   "name": "ieee14-zip",
+   "raw": "andes-ieee14-ieee14.raw",
+   "dyr": "andes-ieee14-ieee14.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "step": 0.001,
+   "sample": 0.01,
+   "loads": {
+    "p": [
+     30.0,
+     30.0,
+     40.0
+    ],
+    "q": [
+     20.0,
+     30.0,
+     50.0
+    ]
+   },
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "trip",
+     "target": "L-2-5-1"
+    }
+   ],
+   "about": "The IEEE 14-bus system with voltage-dependent loads: 30 % constant power, 30 % constant current and 40 % constant impedance in active power, 20, 30 and 50 % in reactive power; line 2-5 switched out at 1 s."
+  },
+  {
+   "name": "ieee14-esst1a",
+   "raw": "andes-ieee14-ieee14.raw",
+   "dyr": "andes-ieee14-ieee14.dyr",
+   "tf": 5.0,
+   "tstep": 0.00025,
+   "step": 0.001,
+   "sample": 0.01,
+   "replace": [
+    {
+     "generator": "B8-G1",
+     "model": "ESST1A",
+     "params": [
+      "UEL",
+      "VOS",
+      "TR",
+      "VIMAX",
+      "VIMIN",
+      "TC",
+      "TB",
+      "TC1",
+      "TB1",
+      "KA",
+      "TA",
+      "VAMAX",
+      "VAMIN",
+      "VRMAX",
+      "VRMIN",
+      "KC",
+      "KF",
+      "TF",
+      "KLR",
+      "ILR"
+     ],
+     "values": [
+      1.0,
+      1.0,
+      0.01,
+      0.8,
+      -0.1,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      80.0,
+      0.04,
+      999.0,
+      -999.0,
+      7.3,
+      -7.3,
+      0.1,
+      0.1,
+      1.0,
+      1.0,
+      1.0
+     ]
+    }
+   ],
+   "events": [
+    {
+     "t": 1.0,
+     "kind": "fault",
+     "target": "B9",
+     "rf": 0.0,
+     "xf": 0.0001
+    },
+    {
+     "t": 1.1,
+     "kind": "clear",
+     "target": "B9"
+    }
+   ],
+   "about": "The IEEE 14-bus system with an ESST1A exciter at bus 8, as ANDES's ieee14_esst1a case places it, with ANDES's typical parameters; a fault at bus 9 cleared after 100 ms. The values are listed in PowerStudio's DYR order (OpenIPSL's) under their names, and written for ANDES in its own order."
   }
  ]
 }

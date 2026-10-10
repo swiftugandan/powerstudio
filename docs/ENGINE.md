@@ -312,13 +312,17 @@ controls, solved together with the network as one system of differential-algebra
 resistance in series) or a *round rotor* (PSS/E GENROU: transient and subtransient circuits on both axes, X″d = X″q,
 quadratic saturation of the air-gap flux), written on the system base in the machine's own d-q frame; the stator is
 algebraic and neglects the speed's effect on its voltages, and the swing equation is 2H·dω/dt = Tm − Te − D·(ω − 1)
-with dδ/dt = ωb·(ω − 1). A machine may carry an exciter (SEXS, IEEET1, EXDC2, ESDC2A, EXST1, ESST3A), a governor
+with dδ/dt = ωb·(ω − 1). A machine may carry an exciter (SEXS, IEEET1, EXDC2, ESDC2A, EXST1, ESST1A, ESST3A), a governor
 (TGOV1, IEEEG1, HYGOV) and a stabiliser (IEEEST, ST2CUT), each with the parameters of the PSS/E model library on the
 machine's base; `ps-model/src/dynamics.rs` lists them in DYR order with their typical values. Controls start in
 equilibrium: their voltage and load references are set from the load flow, and a limit the operating point lies
 beyond is widened to it, with a note in the report, as PSS/E and ANDES do. External grids are constant voltages behind
-their short-circuit impedance; loads become constant admittances at their load-flow voltage; static var compensators
-and converter stations hold the susceptance of their load-flow output.
+their short-circuit impedance; static var compensators and converter stations hold the susceptance of their
+load-flow output. Each load's power at its load-flow voltage splits, by the study case's shares, into constant power,
+constant current and constant impedance, for active and reactive power apart (all constant impedance by default, as
+in ANDES and PSS/E); below the study case's voltage (0.7 p.u. by default) the constant power and current shares turn
+into constant impedances, so a load at a faulted busbar draws a bounded current. ANDES converts nothing, so the
+comparison keeps voltages above the threshold.
 
 Where a published form leaves a choice open, the models follow ANDES, the reference they are tested against: EXDC2
 multiplies its output by the speed, a VRMAX of zero is no upper limit for ESDC2A and IEEET1, ESDC2A's regulator limits
@@ -327,6 +331,8 @@ cross-compound unit has no second machine, so it does not reach this one), and b
 input through. Three choices differ from ANDES because ANDES's own form departs from the PSS/E definition: ESST3A's
 compound source reads the stator current on the machine's base, IEEEG1's valve rate limits are on the machine's base,
 and ESDC2A's voltage transducer is in the loop. The ANDES comparison corrects or sets these aside (TESTING.md).
+ESST1A's DYR parameters follow OpenIPSL's order, which ANDES's DYR table does not; its under- and over-excitation
+limiter inputs (UEL, VOS) change nothing, as no limiter model exists.
 HYGOV's gate integrator has the time constant r·Tr of the PSS/E diagram. Stabiliser signals from a remote busbar,
 bus frequency (MODE 2) and the voltage's derivative (MODE 6) are not modelled; a stabiliser or governor that names one
 is refused with that reason.
@@ -366,9 +372,12 @@ WebAssembly engine, Apple M5 Pro).
   procedure and docs/TEST-REPORT.md the figures): Kundur's two-area system with classical machines, and with GENROU,
   EXDC2 and TGOV1, each with its published line trip and with a fault; the IEEE 14-bus system with GENROU, ESST3A,
   EXST1, TGOV1, IEEEG1, IEEEST and ST2CUT, with its published trip and reclosure and with a fault; the WECC 179-bus
-  system with a fault; and SEXS, IEEET1 and HYGOV placed in those cases. Every machine's angle, speed, powers, field
+  system with a fault; SEXS, IEEET1, ESST1A and HYGOV placed in those cases; and voltage-dependent loads (30 %
+constant power and 30 % constant current in active power) through a line trip. Every machine's angle, speed, powers, field
   voltage and mechanical power and the bus voltages agree to 2e-3 rad, 3e-6 p.u., 1e-3 p.u. (100 MVA), 2e-3 p.u. and
-  5e-5 p.u. The same test checks that every published case rests in equilibrium without events.
+  5e-5 p.u. The same test checks that every published case rests in equilibrium without events, and that with every
+  load at constant power a bolted fault at a loaded busbar is solved only because the shares turn into impedances
+  below the threshold.
 - `engine/crates/ps-dyn/src/unit.rs`: each model's dual-number Jacobian against central differences, and its initial
   state for equilibrium.
 - `engine/crates/ps-study/tests/rms.rs` and `tests/rms.test.mjs`: on a single machine against an infinite bus,

@@ -60,7 +60,7 @@ export function riverside() {
   E('shunt', 'S1', { name: 'Capacitor bank', bus: 'B2', q: 3, p: 0, vn: 20, pos: 0.42, side: 'above' });
 
   doc.study.shortcircuit.location = 'B5';
-  doc.study.rms = { tEnd: 2, dt: 0.005, events: [
+  doc.study.rms = { ...doc.study.rms, tEnd: 2, dt: 0.005, events: [
     { t: 0.1, kind: 'fault', target: 'B5' },
     { t: 0.25, kind: 'clear', target: 'B5' },
   ] };

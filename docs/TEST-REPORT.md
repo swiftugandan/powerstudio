@@ -26,6 +26,8 @@ events, compared everywhere but within 2 ms of an event:
 | Kundur with SEXS, fault at bus 8 | 2.7e-5 | 4.3e-8 | 2.1e-5 | 7.7e-5 | 1.5e-6 | 7.4e-6 | 2.3e-6 |
 | IEEE 14 with IEEET1 at bus 8, fault at bus 9 | 1.9e-5 | 6.2e-8 | 6.7e-6 | 1.2e-5 | 1.1e-3 | 6.3e-7 | 2.9e-6 |
 | IEEE 14 with HYGOV at bus 8, line trip | 1.5e-6 | 3.2e-9 | 7.1e-7 | 2.5e-7 | 4.2e-5 | 2.3e-8 | 5.1e-8 |
+| IEEE 14 with ESST1A at bus 8, fault at bus 9 | 2.5e-5 | 1.0e-7 | 7.0e-6 | 1.3e-5 | 1.1e-3 | 8.7e-7 | 4.1e-6 |
+| IEEE 14, loads 30/30/40 % P and 20/30/50 % Q, line trip | 9.6e-7 | 2.4e-9 | 7.2e-7 | 2.5e-7 | 4.1e-5 | 2.3e-8 | 5.5e-8 |
 | Tolerance | 2e-3 | 3e-6 | 1e-3 | 1e-3 | 2e-3 | 1e-3 | 5e-5 |
 
 With the engine's own way across events (the app's), compared from 0.3 s after each event, the worst are 1.0e-3 rad,
@@ -36,7 +38,8 @@ largest figures have measured causes (docs/TESTING.md): ANDES's anti-windup erro
 WECC's load flow difference at its slack machine, and IEEE 14's machine at bus 6, whose TGOV1 valve starts exactly at
 its lower limit, so whether the limit holds after the trip depends on rounding.
 
-Other checks: every model's dual-number Jacobian equals central differences to 1e-6 relative; every model and every
+A bolted fault at a busbar with every load at constant power solves with the low-voltage conversion and fails
+without it. Other checks: every model's dual-number Jacobian equals central differences to 1e-6 relative; every model and every
 published case starts and stays in equilibrium (5 s without events, drift under 1e-7); the classical model meets the
 equal-area critical clearing time within 2 % and the linearised swing frequency within 1 %; a RAW and DYR import,
 an exciter edit and a simulation pass in the browser at 1440 and 390 px.

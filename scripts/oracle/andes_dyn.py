@@ -43,6 +43,7 @@ from pathlib import Path
 
 import andes
 import numpy as np
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 CASES = ROOT / "tests" / "oracle" / "dyn-cases.json"
@@ -70,8 +71,19 @@ def without_events(dyr_text):
     return "/".join(r for r in records if "Toggle" not in r)
 
 
+def andes_order(model, names, values):
+    """Values given under `names` (PowerStudio's DYR order), in the order ANDES's DYR reader expects for `model`."""
+    table = yaml.safe_load((Path(andes.__file__).parent / "io" / "psse-dyr.yaml").read_text())
+    inputs = [n for n in table[model]["inputs"] if n not in ("BUS", "ID")]
+    by_name = dict(zip(names, values))
+    missing = [n for n in inputs if n not in by_name]
+    assert not missing, f"{model}: ANDES reads {missing}, which the case does not give"
+    return [by_name[n] for n in inputs]
+
+
 def replaced(dyr_text, replace):
-    """The DYR text with each replacement's record in place of the machine's record of the same slot."""
+    """The DYR text with each replacement's record in place of the machine's record of the same slot. A replacement
+    that names its parameters is written in ANDES's order for them."""
     records = [r for r in dyr_text.split("/") if r.strip()]
     for rep in replace:
         bus = int(rep["generator"].split("-")[0][1:])
@@ -82,7 +94,8 @@ def replaced(dyr_text, replace):
             return len(words) > 1 and int(words[0]) == bus and words[1].strip("'").strip() in SLOTS[slot]
 
         records = [r for r in records if not same(r)]
-        records.append(f"\n  {bus} '{rep['model']}' 1 " + " ".join(repr(float(v)) for v in rep["values"]) + " ")
+        values = andes_order(rep["model"], rep["params"], rep["values"]) if "params" in rep else rep["values"]
+        records.append(f"\n  {bus} '{rep['model']}' 1 " + " ".join(repr(float(v)) for v in values) + " ")
     return "/".join(records) + "/\n"
 
 
@@ -151,6 +164,12 @@ def run(case, tstep=None):
             elif e["kind"] in ("trip", "close"):
                 # A toggle switches a line out, and the next one back in.
                 ss.add("Toggle", {"model": "Line", "dev": line_idx(ss, e["target"]), "t": e["t"]})
+        # Loads' voltage dependence in the simulation (constant impedance unless the case says otherwise).
+        if "loads" in case:
+            # PQ.config.p2p, p2i, p2z for active power and q2q, q2i, q2z for reactive power.
+            for kind, shares in case["loads"].items():
+                for part, share in zip((kind, "i", "z"), shares):
+                    setattr(ss.PQ.config, f"{kind}2{part}", share / 100)
         ss.setup()
         override(ss, case)
         corrections = correct(ss)

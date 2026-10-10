@@ -97,6 +97,9 @@ pub enum ControllerKind {
     /// IEEE type ST1 excitation system (1981).
     #[serde(rename = "EXST1")]
     Exst1,
+    /// IEEE 421.5 type ST1A excitation system (2005).
+    #[serde(rename = "ESST1A")]
+    Esst1a,
     /// IEEE 421.5 type ST3A excitation system (2005).
     #[serde(rename = "ESST3A")]
     Esst3a,
@@ -119,12 +122,13 @@ pub enum ControllerKind {
 
 impl ControllerKind {
     /// Every model, exciters first, then governors and stabilisers.
-    pub const ALL: [ControllerKind; 11] = [
+    pub const ALL: [ControllerKind; 12] = [
         Self::Sexs,
         Self::Ieeet1,
         Self::Exdc2,
         Self::Esdc2a,
         Self::Exst1,
+        Self::Esst1a,
         Self::Esst3a,
         Self::Tgov1,
         Self::Ieeeg1,
@@ -141,6 +145,7 @@ impl ControllerKind {
             Self::Exdc2 => "EXDC2",
             Self::Esdc2a => "ESDC2A",
             Self::Exst1 => "EXST1",
+            Self::Esst1a => "ESST1A",
             Self::Esst3a => "ESST3A",
             Self::Tgov1 => "TGOV1",
             Self::Ieeeg1 => "IEEEG1",
@@ -159,7 +164,9 @@ impl ControllerKind {
     /// Which control the model is.
     pub fn slot(self) -> Slot {
         match self {
-            Self::Sexs | Self::Ieeet1 | Self::Exdc2 | Self::Esdc2a | Self::Exst1 | Self::Esst3a => Slot::Exciter,
+            Self::Sexs | Self::Ieeet1 | Self::Exdc2 | Self::Esdc2a | Self::Exst1 | Self::Esst1a | Self::Esst3a => {
+                Slot::Exciter
+            }
             Self::Tgov1 | Self::Ieeeg1 | Self::Hygov => Slot::Governor,
             Self::Ieeest | Self::St2cut => Slot::Stabiliser,
         }
@@ -178,6 +185,11 @@ impl ControllerKind {
             Self::Exdc2 | Self::Esdc2a => DC,
             Self::Exst1 => &[
                 "TR", "VIMAX", "VIMIN", "TC", "TB", "KA", "TA", "VRMAX", "VRMIN", "KC", "KF", "TF",
+            ],
+            // The order of OpenIPSL's ESST1A, which ANDES's DYR table does not follow (docs/research/sources.md).
+            Self::Esst1a => &[
+                "UEL", "VOS", "TR", "VIMAX", "VIMIN", "TC", "TB", "TC1", "TB1", "KA", "TA", "VAMAX", "VAMIN", "VRMAX",
+                "VRMIN", "KC", "KF", "TF", "KLR", "ILR",
             ],
             Self::Esst3a => &[
                 "TR", "VIMAX", "VIMIN", "KM", "TC", "TB", "KA", "TA", "VRMAX", "VRMIN", "KG", "KP", "KI", "VBMAX",
@@ -205,7 +217,7 @@ impl ControllerKind {
     /// Typical values, one per parameter, each set copied from a published case (docs/research/sources.md): EXDC2
     /// and TGOV1 from Kundur's two-area system, ESDC2A from the WECC 179-bus system, EXST1, ESST3A, IEEEG1, IEEEST
     /// and ST2CUT (the machine at bus 2) from the IEEE 14-bus system as ANDES publishes them, SEXS from ANDES's Kundur case with SEXS
-    /// exciters, IEEET1 and HYGOV from ANDES's IEEE 14-bus cases with those models.
+    /// exciters, IEEET1, ESST1A and HYGOV from ANDES's IEEE 14-bus cases with those models.
     pub fn defaults(self) -> &'static [f64] {
         match self {
             Self::Sexs => &[0.4, 5.0, 20.0, 0.83, 0.0, 5.0],
@@ -218,6 +230,10 @@ impl ControllerKind {
             ],
             Self::Exst1 => &[
                 0.02, 99.0, -99.0, 0.0, 0.02, 50.0, 0.02, 9999.0, -9999.0, 0.0, 0.01, 1.0,
+            ],
+            Self::Esst1a => &[
+                1.0, 1.0, 0.01, 0.8, -0.1, 1.0, 1.0, 1.0, 1.0, 80.0, 0.04, 999.0, -999.0, 7.3, -7.3, 0.1, 0.1, 1.0,
+                1.0, 1.0,
             ],
             Self::Esst3a => &[
                 0.02, 0.2, -0.2, 8.0, 1.0, 5.0, 20.0, 0.0, 99.0, -99.0, 1.0, 3.67, 0.435, 5.48, 0.01, 0.0098, 3.86,
@@ -242,7 +258,7 @@ impl ControllerKind {
     /// How many leading parameters are integers (PSS/E ICONs).
     pub fn integer_params(self) -> usize {
         match self {
-            Self::Ieeeg1 | Self::Ieeest => 2,
+            Self::Ieeeg1 | Self::Ieeest | Self::Esst1a => 2,
             Self::St2cut => 4,
             _ => 0,
         }

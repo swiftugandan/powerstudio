@@ -24,7 +24,8 @@ import { checkContingencies } from './contingencies.js';
  *   contingency: { lines: boolean, trafos: boolean, gens: boolean, busbars: boolean, maxLoading: number, acceptableS: number,
  *     screening: boolean, screeningMargin: number, screeningVoltage: number,
  *     list: import('./contingencies.js').Contingency[], remedial: import('./contingencies.js').RemedialAction[] },
- *   rms: { tEnd: number, dt: number, events: SimEvent[] },
+ *   rms: { tEnd: number, dt: number, events: SimEvent[], loadPPower: number, loadPCurrent: number, loadQPower: number, loadQCurrent: number,
+ *     loadVLow: number },
  * }} Study
  * @typedef {{ format: 'powerstudio', version: 1, name: string, description: string, baseMVA: number, frequency: 50 | 60,
  *   elements: Element[], study: Study }} PowerDocument
@@ -83,6 +84,13 @@ export const STUDY_FIELDS = {
     { key: 'tEnd', label: 'Simulation time', type: 'number', group: 'rms', default: 3, unit: 's', min: 0.01, max: 120 },
     { key: 'dt', label: 'Step size', type: 'number', group: 'rms', default: 0.005, unit: 's', min: 1e-5, max: 0.05,
       help: 'The integration step. The method is implicit, so 5 ms follows electromechanical swings and exciters closely; shorten it to resolve fast controls in more detail.' },
+    { key: 'loadPPower', label: 'Load P held as constant power', type: 'number', group: 'rms', default: 0, unit: '%', min: 0, max: 100,
+      help: 'How each load\u2019s active power follows the voltage during the simulation: this share stays constant, the constant current share falls with the voltage, and the rest is a constant impedance.' },
+    { key: 'loadPCurrent', label: 'Load P held as constant current', type: 'number', group: 'rms', default: 0, unit: '%', min: 0, max: 100 },
+    { key: 'loadQPower', label: 'Load Q held as constant power', type: 'number', group: 'rms', default: 0, unit: '%', min: 0, max: 100 },
+    { key: 'loadQCurrent', label: 'Load Q held as constant current', type: 'number', group: 'rms', default: 0, unit: '%', min: 0, max: 100 },
+    { key: 'loadVLow', label: 'Constant power and current below', type: 'number', group: 'rms', default: 0.7, unit: 'p.u.', min: 0, max: 1,
+      help: 'Below this voltage the constant power and constant current shares turn into constant impedance, so a load near a fault draws a bounded current.' },
   ],
 };
 
@@ -268,6 +276,12 @@ export function* normalizeSteps(input) {
 export function validateForCalculation(doc, kind) {
   const out = [];
   const byId = new Map(doc.elements.map(e => [e.id, e]));
+  if (kind === 'rms') {
+    const r = doc.study.rms;
+    if (r.loadPPower + r.loadPCurrent > 100 || r.loadQPower + r.loadQCurrent > 100) {
+      out.push('The loads\u2019 constant power and constant current shares add up to more than 100 %. Lower them in the study case\u2019s stability settings.');
+    }
+  }
   for (const el of doc.elements) {
     if (kind === 'rms' && el.inService !== false) {
       const issue = rotorIssue(el);

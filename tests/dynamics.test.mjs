@@ -63,7 +63,7 @@ test('a RAW file with its DYR file opens with every machine’s models, and simu
   // The editor's import gate takes the engine's document as it is.
   assert.deepEqual(normalizeDocument(JSON.parse(JSON.stringify(doc))).issues, []);
 
-  doc.study.rms = { tEnd: 3, dt: 0.005, events: [{ t: 1, kind: 'fault', target: 'B9', x: 0.05 }, { t: 1.1, kind: 'clear', target: 'B9' }] };
+  doc.study.rms = { ...doc.study.rms, tEnd: 3, dt: 0.005, events: [{ t: 1, kind: 'fault', target: 'B9', x: 0.05 }, { t: 1.1, kind: 'clear', target: 'B9' }] };
   const r = studies.rms(doc);
   assert.ok(r.stable, r.message);
   assert.equal(r.events.filter(e => e.applied).length, 2);

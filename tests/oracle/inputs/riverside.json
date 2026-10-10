@@ -599,6 +599,11 @@
   "rms": {
    "tEnd": 2,
    "dt": 0.005,
+   "loadPPower": 0,
+   "loadPCurrent": 0,
+   "loadQPower": 0,
+   "loadQCurrent": 0,
+   "loadVLow": 0.7,
    "events": [
     {
      "t": 0.1,

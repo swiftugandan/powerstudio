@@ -93,6 +93,17 @@ export const CONTROLLERS = [
     par('TC', 'Lead-lag lead TC', 0, S), par('TB', 'Lead-lag lag TB', 0.02, S), par('KA', 'Regulator gain KA', 50), par('TA', 'Regulator time constant TA', 0.02, S),
     par('VRMAX', 'Output maximum VRMAX', 9999, PU), par('VRMIN', 'Output minimum VRMIN', -9999, PU), par('KC', 'Rectifier loading factor KC', 0),
     par('KF', 'Rate feedback gain KF', 0.01), par('TF', 'Rate feedback time constant TF', 1, S)] },
+  { model: 'ESST1A', slot: 'exciter', label: 'IEEE 421.5 type ST1A', params: [
+    par('UEL', 'Under-excitation limiter input', 1, undefined, { integer: true, help: 'Where an under-excitation limiter would act; none is modelled, so it changes nothing.' }),
+    par('VOS', 'Stabiliser input point', 1, undefined, { integer: true, help: 'The stabiliser\u2019s signal enters at the input whatever its value.' }),
+    par('TR', 'Transducer time constant TR', 0.01, S), par('VIMAX', 'Input maximum VIMAX', 0.8, PU), par('VIMIN', 'Input minimum VIMIN', -0.1, PU),
+    par('TC', 'First lead TC', 1, S), par('TB', 'First lag TB', 1, S), par('TC1', 'Second lead TC1', 1, S), par('TB1', 'Second lag TB1', 1, S),
+    par('KA', 'Regulator gain KA', 80), par('TA', 'Regulator time constant TA', 0.04, S),
+    par('VAMAX', 'Regulator maximum VAMAX', 999, PU), par('VAMIN', 'Regulator minimum VAMIN', -999, PU),
+    par('VRMAX', 'Output maximum VRMAX', 7.3, PU, { help: 'Times the terminal voltage, less KC times the field current.' }),
+    par('VRMIN', 'Output minimum VRMIN', -7.3, PU, { help: 'Times the terminal voltage.' }), par('KC', 'Rectifier loading factor KC', 0.1),
+    par('KF', 'Rate feedback gain KF', 0.1), par('TF', 'Rate feedback time constant TF', 1, S),
+    par('KLR', 'Field current limiter gain KLR', 1), par('ILR', 'Field current limit ILR', 1, PU)] },
   { model: 'ESST3A', slot: 'exciter', label: 'IEEE 421.5 type ST3A', params: [
     par('TR', 'Transducer time constant TR', 0.02, S), par('VIMAX', 'Input maximum VIMAX', 0.2, PU), par('VIMIN', 'Input minimum VIMIN', -0.2, PU),
     par('KM', 'Inner regulator gain KM', 8), par('TC', 'Lead-lag lead TC', 1, S), par('TB', 'Lead-lag lag TB', 5, S), par('KA', 'Regulator gain KA', 20),

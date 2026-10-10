@@ -30,7 +30,7 @@ use crate::block::Layout;
 use crate::exciter::{Exciter, Rating};
 use crate::governor::Governor;
 use crate::machine::{Machine, RoundData};
-use crate::scalar::Dual;
+use crate::scalar::{Dual, Scalar};
 use crate::stabiliser::Stabiliser;
 use crate::unit::Unit;
 
@@ -208,6 +208,42 @@ struct YPart {
     owner: Owner,
 }
 
+/// The voltage-dependent part of a load: its constant power and constant current shares, drawn as currents at its
+/// bus. The constant impedance share sits in the admittance matrix.
+struct LoadCurrent {
+    bus: usize,
+    /// The load's index among switchable loads (its scale and switching state).
+    k: usize,
+    /// Constant power share at the initial voltage, p.u.
+    power: C64,
+    /// Constant current share at the initial voltage, p.u.
+    current: C64,
+    /// Initial voltage magnitude.
+    v0: f64,
+}
+
+impl LoadCurrent {
+    /// The current drawn at voltage `(vr, vi)`, as `(g − jb)·V` so it stays finite at zero voltage: below `v_low` both
+    /// shares are constant impedances.
+    fn current<S: Scalar>(&self, vr: S, vi: S, v_low: f64, scale: f64) -> [S; 2] {
+        let v2 = vr.sq() + vi.sq();
+        let v = v2.sqrt();
+        let (g, b) = if v.v() >= v_low && v.v() > 0.0 {
+            // P_power/|V|² and P_current·|V|/(v0·|V|²).
+            let gp = S::cst(self.power.re) / v2 + S::cst(self.current.re / self.v0) / v;
+            let bp = S::cst(self.power.im) / v2 + S::cst(self.current.im / self.v0) / v;
+            (gp, bp)
+        } else {
+            let at = (v_low * v_low).max(1e-12);
+            let g = (self.power.re + self.current.re * v_low / self.v0) / at;
+            let b = (self.power.im + self.current.im * v_low / self.v0) / at;
+            (S::cst(g), S::cst(b))
+        };
+        let (g, b) = (g * scale, b * scale);
+        [g * vr + b * vi, g * vi - b * vr]
+    }
+}
+
 /// The assembled system.
 struct System<'a> {
     model: &'a Model,
@@ -226,6 +262,10 @@ struct System<'a> {
     branch_ids: Vec<String>,
     load_ids: Vec<String>,
     load_scale: Vec<f64>,
+    load_currents: Vec<LoadCurrent>,
+    load_v_low: f64,
+    /// The admittance matrix's diagonal position of each bus.
+    diag: Vec<usize>,
     load_out: Vec<bool>,
     branch_out: Vec<bool>,
     fault_y: Vec<C64>,
@@ -304,6 +344,20 @@ impl<'a> System<'a> {
             e.inj[2 * g.bus] += i.re;
             e.inj[2 * g.bus + 1] += i.im;
         }
+        // Loads' constant power and current shares.
+        for l in &self.load_currents {
+            if self.load_out[l.k] {
+                continue;
+            }
+            let [ir, ii] = l.current(
+                z[self.nx + 2 * l.bus],
+                z[self.nx + 2 * l.bus + 1],
+                self.load_v_low,
+                self.load_scale[l.k],
+            );
+            e.inj[2 * l.bus] -= ir;
+            e.inj[2 * l.bus + 1] -= ii;
+        }
         // Network: I_units − Y·V.
         for (k, &(i, j)) in self.ypos.iter().enumerate() {
             let y = self.yval[k];
@@ -380,6 +434,24 @@ impl<'a> System<'a> {
             self.values[b] += y.im;
             self.values[c] -= y.im;
             self.values[d] -= y.re;
+        }
+        for l in &self.load_currents {
+            if self.load_out[l.k] {
+                continue;
+            }
+            let [a, b, c, d] = self.yh[self.diag[l.bus]];
+            let (vr, vi) = (z[self.nx + 2 * l.bus], z[self.nx + 2 * l.bus + 1]);
+            for (col, (ha, hb)) in [(0, (a, c)), (1, (b, d))] {
+                let [ir, ii] = l.current(
+                    Dual::var(vr, col == 0),
+                    Dual::var(vi, col == 1),
+                    self.load_v_low,
+                    self.load_scale[l.k],
+                );
+                // The rows are I_units − I_load − Y·V.
+                self.values[ha] -= ir.d;
+                self.values[hb] -= ii.d;
+            }
         }
         for (u, s) in self.units.iter().enumerate() {
             let m = s.unit.layout.len();
@@ -822,15 +894,41 @@ pub fn simulate_detailed(
     }
     // Loads become constant admittances at their initial voltage, y = (P − jQ)/|V|²; static var compensators and
     // converter stations the susceptance that gives their load-flow output.
+    // The study case's shares split each load into constant power, constant current and constant impedance at its
+    // initial operating point, as ANDES and PSS/E do.
+    let shares = [st.load_p_power, st.load_p_current, st.load_q_power, st.load_q_current];
+    if shares.iter().any(|s| !(0.0..=100.0).contains(s))
+        || st.load_p_power + st.load_p_current > 100.0
+        || st.load_q_power + st.load_q_current > 100.0
+    {
+        return Err("A load's constant power and constant current shares must each lie in 0 to 100 % and add up to at most 100 %.".into());
+    }
+    let (pp, pc, qp, qc) = (
+        st.load_p_power / 100.0,
+        st.load_p_current / 100.0,
+        st.load_q_power / 100.0,
+        st.load_q_current / 100.0,
+    );
     let mut load_ids = Vec::new();
+    let mut load_currents = Vec::new();
     for l in &net.loads {
         let v2 = v0[l.bus].norm_sqr();
         let (class, row) = calc.load_unit(l.id);
+        let k = load_ids.len();
         parts.push(YPart {
             pos: at(l.bus, l.bus, &mut ypos),
-            y: C64::new(l.p / v2, -l.q / v2),
-            owner: Owner::Load(load_ids.len()),
+            y: C64::new(l.p * (1.0 - pp - pc) / v2, -l.q * (1.0 - qp - qc) / v2),
+            owner: Owner::Load(k),
         });
+        if pp + pc + qp + qc > 0.0 {
+            load_currents.push(LoadCurrent {
+                bus: l.bus,
+                k,
+                power: C64::new(l.p * pp, l.q * qp),
+                current: C64::new(l.p * pc, l.q * qc),
+                v0: v2.sqrt(),
+            });
+        }
         load_ids.push(model.id_of(class, row).unwrap_or("").to_string());
     }
     for u in lf.machines.iter().filter(|u| calc.unit(u.id).0 != Class::Generator) {
@@ -850,9 +948,10 @@ pub fn simulate_detailed(
             owner: Owner::Grid(k),
         });
     }
-    for b in 0..nb {
+    let diag: Vec<usize> = (0..nb).map(|b| at(b, b, &mut ypos)).collect();
+    for (b, &pos) in diag.iter().enumerate() {
         parts.push(YPart {
-            pos: at(b, b, &mut ypos),
+            pos,
             y: C64::ZERO,
             owner: Owner::Fault(b),
         });
@@ -915,6 +1014,9 @@ pub fn simulate_detailed(
         branch_out: vec![false; branch_ids.len()],
         branch_ids,
         load_scale: vec![1.0; load_ids.len()],
+        load_currents,
+        load_v_low: st.load_v_low.max(0.0),
+        diag,
         load_out: vec![false; load_ids.len()],
         load_ids,
         fault_y: vec![C64::ZERO; nb],

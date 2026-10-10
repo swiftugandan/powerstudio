@@ -232,3 +232,11 @@ IEEEST and ST2CUT (bus 2) in `ieee14.dyr`, SEXS in `kundur/kundur_sexs.xlsx`, an
 `ieee14/ieee14_ieeet1.xlsx` and `ieee14_hygov.xlsx` (its defaults where the sheet is blank). The `replace` entries
 of `tests/oracle/dyn-cases.json` use the same values. The round rotor's typical data (`TYPICAL_ROUND_ROTOR`) are
 round values of the kind those records hold, chosen for this app.
+
+ESST1A's parameter order is OpenIPSL's (`OpenIPSL/Electrical/Controls/PSSE/ES/ESST1A.mo` at commit
+`4df416b27860e1ae8c68c8602f3fb4fbe4c398b6`, BSD-3), whose parameters are declared TR, VIMAX, VIMIN, TC, TB, TC1, TB1, KA,
+TA, VAMAX, VAMIN, VRMAX, VRMIN, KC, KF, TF, KLR, ILR, after ANDES's two integer parameters UEL and VOS. ANDES's DYR
+table (`andes/io/psse-dyr.yaml`) lists them in another order (TB before TC, KA after VAMIN, ILR before KLR); its ESST1A
+case is a spreadsheet, so that table is not exercised by its own cases. `scripts/oracle/andes_dyn.py` writes the
+record in ANDES's order, by name, for ANDES; ESST1A's typical values are ANDES's defaults as it loads
+`ieee14/ieee14_esst1a.xlsx`.
