@@ -1,6 +1,7 @@
 /** Browser tests run against the built single-file app (dist/PowerStudio.html) served over HTTP.
- * Two projects: "webgpu" launches full Chromium with WebGPU enabled; "canvas" launches the headless shell, which has
- * no WebGPU adapter, so the Canvas 2D fallback is what it exercises. */
+ * Four projects: "webgpu" launches full Chromium with WebGPU enabled; "canvas" launches the headless shell, which has
+ * no WebGPU adapter, so the Canvas 2D fallback is what it exercises; "firefox" and "webkit" run Playwright's builds of
+ * those engines. */
 import { defineConfig } from '@playwright/test';
 
 const port = 8771;
@@ -38,5 +39,8 @@ export default defineConfig({
       },
     },
     { name: 'canvas', use: { browserName: 'chromium' } },
+    // Firefox and WebKit (Safari's engine) draw with whatever their builds offer, WebGPU or Canvas 2D.
+    { name: 'firefox', use: { browserName: 'firefox' } },
+    { name: 'webkit', use: { browserName: 'webkit' } },
   ],
 });

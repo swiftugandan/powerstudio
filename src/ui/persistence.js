@@ -58,9 +58,9 @@ export class DocumentLibrary {
     this.memoryParts = new Map();
     /** @type {Map<string, RunRecord & { key: string, project: string }>} */
     this.memoryRuns = new Map();
-    /** @type {Map<string, { key: string, project: string, kind: string, report: Blob }>} */
+    /** @type {Map<string, { key: string, project: string, kind: string, report: ArrayBuffer | Blob }>} */
     this.memoryResults = new Map();
-    /** @type {Map<string, Array<{ name: string, data: Blob }>>} */
+    /** @type {Map<string, Array<{ name: string, data: ArrayBuffer | Blob }>>} */
     this.memorySource = new Map();
     this.persistent = false;
   }
@@ -90,7 +90,7 @@ export class DocumentLibrary {
           }
         };
         req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
+        req.onerror = () => reject(req.error ?? new Error('The document database could not be opened.'));
         req.onblocked = () => reject(new Error('The document database is blocked by another tab.'));
       });
       this.persistent = true;
@@ -109,7 +109,7 @@ export class DocumentLibrary {
       const tx = /** @type {IDBDatabase} */ (this.db).transaction([STORE, META, PARTS, RUNS, RESULTS], mode);
       const req = fn(tx.objectStore(STORE), tx.objectStore(META), tx.objectStore(PARTS), tx.objectStore(RUNS), tx.objectStore(RESULTS));
       tx.oncomplete = () => resolve(req.result);
-      tx.onerror = () => reject(tx.error);
+      tx.onerror = () => reject(tx.error ?? new Error('A storage request failed.'));
       tx.onabort = () => reject(tx.error ?? new Error('Storage transaction aborted.'));
     });
   }
@@ -176,18 +176,20 @@ export class DocumentLibrary {
     });
   }
 
-  /** Keeps the files a project was imported from (each gzip-compressed), so its operating point can be exported back
-   * into them. @param {string} id @param {Array<{ name: string, data: Blob }>} files */
+  /** Keeps the files a project was imported from (each gzip-compressed bytes), so its operating point can be exported
+   * back into them. Bytes rather than Blobs: WebKit refuses Blobs in IndexedDB in private browsing.
+   * @param {string} id @param {Array<{ name: string, data: ArrayBuffer }>} files */
   async putSource(id, files) {
     const row = { key: `${id}/source`, project: id, files };
     if (!this.db) { this.memorySource.set(id, files); return; }
     await this.request('readwrite', (_, __, parts) => parts.put(row));
   }
 
-  /** The files a project was imported from, or undefined. @param {string} id @returns {Promise<Array<{ name: string, data: Blob }> | undefined>} */
+  /** The files a project was imported from, or undefined: gzip-compressed bytes, or a Blob of them as earlier versions
+   * stored. @param {string} id @returns {Promise<Array<{ name: string, data: ArrayBuffer | Blob }> | undefined>} */
   async getSource(id) {
     if (!this.db) return this.memorySource.get(id);
-    const row = /** @type {{ files?: Array<{ name: string, data: Blob }> } | undefined} */ (await this.request('readonly', (_, __, parts) => parts.get(`${id}/source`)));
+    const row = /** @type {{ files?: Array<{ name: string, data: ArrayBuffer | Blob }> } | undefined} */ (await this.request('readonly', (_, __, parts) => parts.get(`${id}/source`)));
     return row?.files;
   }
 
@@ -198,19 +200,21 @@ export class DocumentLibrary {
     await this.request('readwrite', (_, __, ___, runs) => runs.put(row));
   }
 
-  /** Stores a run's report (the engine's JSON, gzip-compressed). @param {string} id @param {string} run @param {string} kind
-   * @param {Blob} report */
+  /** Stores a run's report (the engine's JSON, gzip-compressed bytes; bytes rather than a Blob, which WebKit refuses
+   * in IndexedDB in private browsing). @param {string} id @param {string} run @param {string} kind
+   * @param {ArrayBuffer} report */
   async putResult(id, run, kind, report) {
     const row = { key: `${id}/${run}`, project: id, kind, report };
     if (!this.db) { this.memoryResults.set(row.key, row); return; }
     await this.request('readwrite', (_, __, ___, ____, results) => results.put(row));
   }
 
-  /** A run's stored report, or undefined. @param {string} id @param {string} run @returns {Promise<Blob | undefined>} */
+  /** A run's stored report, or undefined: gzip-compressed bytes, or a Blob of them as earlier versions stored.
+   * @param {string} id @param {string} run @returns {Promise<ArrayBuffer | Blob | undefined>} */
   async getResult(id, run) {
     const key = `${id}/${run}`;
     const row = this.db
-      ? /** @type {{ report: Blob } | undefined} */ (await this.request('readonly', (_, __, ___, ____, results) => results.get(key)))
+      ? /** @type {{ report: ArrayBuffer | Blob } | undefined} */ (await this.request('readonly', (_, __, ___, ____, results) => results.get(key)))
       : this.memoryResults.get(key);
     return row?.report;
   }

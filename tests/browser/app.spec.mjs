@@ -407,12 +407,19 @@ test('defines a two-line contingency and a remedial action, and the analysis rep
   await expect(dlg.locator('.cont-empty')).toHaveText(['No contingencies of your own yet.', 'No remedial actions yet.']);
 });
 
-test('edits loads in the data sheet: several rows at once, a pasted block, a refused paste, and undo', async ({ page }) => {
+/** The data sheet's load table, with its P and Q cells. @param {import('@playwright/test').Page} page */
+async function loadSheet(page) {
   await open(page);
   await page.locator('.dock-tab[data-tab="data"]').click();
   await page.locator('.sheet-toolbar select').selectOption('load');
-  const p = page.locator('table.sheet tbody tr[data-id] td[data-key="p"]');
-  const q = page.locator('table.sheet tbody tr[data-id] td[data-key="q"]');
+  return {
+    p: page.locator('table.sheet tbody tr[data-id] td[data-key="p"]'),
+    q: page.locator('table.sheet tbody tr[data-id] td[data-key="q"]'),
+  };
+}
+
+test('edits loads in the data sheet: several rows at once, and undo', async ({ page }) => {
+  const { p } = await loadSheet(page);
   const before = await p.allTextContents();
   // Three rows selected with Shift and arrows, then typing edits all three.
   await p.nth(0).click();
@@ -422,6 +429,17 @@ test('edits loads in the data sheet: several rows at once, a pasted block, a ref
   await page.keyboard.press('Enter');
   await expect(p.nth(2)).toHaveText('4');
   expect((await p.allTextContents()).slice(0, 4)).toEqual(['4', '4', '4', before[3]]);
+  // The edit is one undo step.
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect(p.nth(0)).toHaveText(before[0]);
+});
+
+test('pastes a block into the data sheet, refuses a block with text, and undoes the paste', async ({ page, browserName }) => {
+  // Firefox removes the data from a paste event a page makes itself, as a security rule; a paste by the user carries
+  // it. The test can only make its own events, so it runs where those carry data.
+  test.skip(browserName === 'firefox', 'Firefox drops clipboardData from synthetic paste events');
+  const { p, q } = await loadSheet(page);
+  const before = await p.allTextContents();
   // A block pasted from a spreadsheet fills from the active cell.
   await p.nth(1).click();
   const paste = (/** @type {string} */ text) => page.evaluate(t => {
@@ -436,11 +454,9 @@ test('edits loads in the data sheet: several rows at once, a pasted block, a ref
   await paste('5\nabc\n');
   await expect(page.locator('.toast').filter({ hasText: 'Nothing was pasted' })).toBeVisible();
   expect(await p.nth(1).textContent()).toBe('7');
-  // Each edit is one undo step.
+  // The paste is one undo step.
   await page.keyboard.press('ControlOrMeta+Z');
-  await expect(p.nth(1)).toHaveText('4');
-  await page.keyboard.press('ControlOrMeta+Z');
-  await expect(p.nth(0)).toHaveText(before[0]);
+  await expect(p.nth(1)).toHaveText(before[1]);
 });
 
 test('imports a MATPOWER case and solves it to the MATPOWER solution', async ({ page }) => {

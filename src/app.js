@@ -437,7 +437,7 @@ export class App {
       this.start = summary.fidelity.start.busIds.length ? summary.fidelity.start : null;
       await this.save();
       if (summary.format === 'cgmes') {
-        await this.library.putSource(id, await Promise.all(files.map(async f => ({ name: f.name, data: await new Response(f.stream().pipeThrough(new CompressionStream('gzip'))).blob() }))));
+        await this.library.putSource(id, await Promise.all(files.map(async f => ({ name: f.name, data: await new Response(f.stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer() }))));
       }
       const z = summary.size;
       this.log('ok', `Imported “${label}” as “${doc.name}”: ${z.nodes} nodes and ${z.branches} branches as ${doc.elements.length} elements.`);
@@ -482,7 +482,7 @@ export class App {
     if (!stored) { toast('info', 'The CGMES files this project came from are not stored with it. Import them again to export SSH and SV.', { title: 'No CGMES source' }); return; }
     this.setStatusMessage('Writing SSH and SV…');
     try {
-      const files = await Promise.all(stored.map(async f => ({ name: f.name, bytes: new Uint8Array(await new Response(f.data.stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()) })));
+      const files = await Promise.all(stored.map(async f => ({ name: f.name, bytes: new Uint8Array(await new Response(new Blob([f.data]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()) })));
       const doc = new TextEncoder().encode(await serialise(this.store.doc, () => true, yieldToBrowser) ?? '');
       const payload = new Uint8Array(files.reduce((n, f) => n + f.bytes.length, 0) + doc.length);
       let at = 0;
@@ -862,7 +862,7 @@ export class App {
       };
       const id = this.docId;
       await this.library.addRun(id, rec);
-      const report = await new Response(new Blob([/** @type {Uint8Array<ArrayBuffer>} */ (bytes)]).stream().pipeThrough(new CompressionStream('gzip'))).blob();
+      const report = await new Response(new Blob([/** @type {Uint8Array<ArrayBuffer>} */ (bytes)]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
       await this.library.putResult(id, rec.run, kind, report);
       this.dock.runsChanged();
     } catch (error) {
@@ -873,9 +873,9 @@ export class App {
   /** A recorded run's results, read back from its stored report, or null when none is stored.
    * @param {string} run @param {CalcKind} kind */
   async runResult(run, kind) {
-    const blob = await this.library.getResult(this.docId, run);
-    if (!blob) return null;
-    const text = await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    const stored = await this.library.getResult(this.docId, run);
+    if (!stored) return null;
+    const text = await new Response(new Blob([stored]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
     return adapt(kind, JSON.parse(text));
   }
 
