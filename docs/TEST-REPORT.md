@@ -6,8 +6,8 @@ been pushed, so CI has not run them). The sections after it record release v0.1.
 
 ## Dynamics, phase 5 wave D1 (2026-10-10, local)
 
-Same environment as phases 1 to 4. Local runs only. The suite figures are those of phase 4 plus the dynamics tests:
-engine tests 89, Node tests 90, browser tests 50 passed (16 screenshot captures skipped), lints clean.
+Same environment as phases 1 to 4. Local runs only. Engine tests 90, Node tests 91, browser tests 50 passed (16
+screenshot captures skipped), lints clean.
 
 Agreement with ANDES 2.0.0 (`engine/crates/ps-study/tests/dynamics.rs`, ANDES at 0.25 ms, the engine at 1 ms). Worst
 difference per quantity over every machine, bus and sample: rotor angle δ (rad), speed ω, active and reactive power

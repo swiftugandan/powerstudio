@@ -123,8 +123,9 @@ gives the timings), but the diagram editor has been used only with networks of u
 Remedial actions fire once per contingency and do not chain, and there is no optimal redispatch: lost generation
 goes to the reference machines, or is shared as the load flow's balance setting says.
 
-**Stability.** The model library is the first wave of the design: no salient-pole machines (GENSAL), no PSS2A, no
-renewable, HVDC or SVC dynamics, no motor loads; faults are three-phase faults at busbars; stabilisers read their own machine only (no remote busbar, bus frequency or voltage derivative). DYR records
+**Stability.** The model library is the design's first wave: no salient-pole machines (GENSAL), no PSS2A, no
+renewable, HVDC or SVC dynamics and no motor loads (renewables are the next wave); faults are three-phase faults at
+busbars; stabilisers read their own machine only (no remote busbar, bus frequency or voltage derivative). DYR records
 of other models are reported, and their machines keep the classical model. No electromagnetic transients.
 
 **Not part of PowerStudio at all.** Protection coordination, harmonics, optimal power flow, state estimation,
