@@ -158,6 +158,97 @@ pub struct Contingency {
     pub elements: Vec<String>,
 }
 
+/// A condition of a remedial action, on the post-contingency solution.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Condition {
+    /// A branch's loading is above a value, %.
+    #[serde(rename_all = "camelCase")]
+    Loading {
+        /// Branch identifier.
+        element: String,
+        /// Threshold, %.
+        above: f64,
+    },
+    /// A node's voltage is below a value, p.u.
+    #[serde(rename_all = "camelCase")]
+    VoltageBelow {
+        /// Node identifier.
+        node: String,
+        /// Threshold, p.u.
+        below: f64,
+    },
+    /// A node's voltage is above a value, p.u.
+    #[serde(rename_all = "camelCase")]
+    VoltageAbove {
+        /// Node identifier.
+        node: String,
+        /// Threshold, p.u.
+        above: f64,
+    },
+    /// The contingency takes out this element.
+    #[serde(rename_all = "camelCase")]
+    Outage {
+        /// Element identifier.
+        element: String,
+    },
+}
+
+/// An action of a remedial action.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Action {
+    /// Switches an element in or out of service (a switch: closes or opens it).
+    #[serde(rename_all = "camelCase")]
+    Switch {
+        /// Element identifier.
+        element: String,
+        /// In service (closed) after the action.
+        in_service: bool,
+    },
+    /// Sets a generator's active power, MW.
+    #[serde(rename_all = "camelCase")]
+    Generation {
+        /// Generator identifier.
+        element: String,
+        /// Active power after the action, MW.
+        p: f64,
+    },
+    /// Sets a transformer's tap position (its first tap changer, ratio or phase).
+    #[serde(rename_all = "camelCase")]
+    Tap {
+        /// Transformer identifier.
+        element: String,
+        /// Position after the action.
+        position: i32,
+    },
+    /// Reduces a load by a share of its active and reactive power, %.
+    #[serde(rename_all = "camelCase")]
+    LoadShed {
+        /// Load identifier.
+        element: String,
+        /// Share shed, %.
+        percent: f64,
+    },
+}
+
+/// A remedial action: when every condition holds on a contingency's solution, its actions apply and the contingency
+/// is solved again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct RemedialAction {
+    /// Identifier, unique within the study case.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// The contingencies it is considered for; empty for every one.
+    pub contingencies: Vec<String>,
+    /// Conditions, all of which must hold.
+    pub conditions: Vec<Condition>,
+    /// Actions, applied together.
+    pub actions: Vec<Action>,
+}
+
 /// Contingency analysis settings.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -187,6 +278,8 @@ pub struct ContingencySettings {
     /// Voltage margin of screening, p.u.: an outage whose estimate brings a voltage within this of its band's edge
     /// is solved in full.
     pub screening_voltage: f64,
+    /// Remedial actions, considered in order on each contingency's solution.
+    pub remedial: Vec<RemedialAction>,
 }
 
 impl Default for ContingencySettings {
@@ -202,6 +295,7 @@ impl Default for ContingencySettings {
             screening: false,
             screening_margin: 5.0,
             screening_voltage: 0.01,
+            remedial: Vec::new(),
         }
     }
 }

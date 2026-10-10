@@ -35,7 +35,7 @@
  * @typedef {{ kind: 'loading' | 'undervoltage' | 'overvoltage', id: string, value: number, limit: number, inBase: boolean }} Violation
  * @typedef {{ id: string, cls: string, elements: string[], converged: boolean, message: string, maxLoading: number,
  *   maxLoadingId: string, minV: number, minVBus: string, maxV: number, maxVBus: string, lostBuses: string[],
- *   violations: Violation[], screened: boolean }} ContingencyCase
+ *   violations: Violation[], screened: boolean, remedial: string[], violationsBefore: number }} ContingencyCase
  * @typedef {{ base: ContingencyCase, cases: ContingencyCase[], worstLoading: Record<string, { value: number, outage: string }>,
  *   worstVoltage: Record<string, { min: number, minOutage: string, max: number, maxOutage: string }>, limit: number,
  *   effort: { reused: number, rebuilt: number, screened: number }, timing: { totalMs: number } }} ContingencyResult

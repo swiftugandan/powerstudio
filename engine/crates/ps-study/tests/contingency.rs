@@ -179,3 +179,41 @@ fn screening_never_misses_what_full_ac_flags() {
         misses.join("\n")
     );
 }
+
+/// A remedial action fires on the contingency it names when its condition holds, and the case reports the state after
+/// it: losing Line 1-2 overloads Line 1-5; shedding load relieves it.
+#[test]
+fn a_remedial_action_relieves_the_overload_it_is_for() {
+    use ps_model::study::{Action, Condition, RemedialAction};
+    let mut imp = input("ieee14");
+    let without = contingency::run(&imp.model, &imp.study, &mut Silent).unwrap();
+    let before = without.cases.iter().find(|c| c.id == "L1").unwrap().clone();
+    let shed = |id: &str| Action::LoadShed {
+        element: id.into(),
+        percent: 60.0,
+    };
+    imp.study.contingency.remedial = vec![RemedialAction {
+        id: "shed-east".into(),
+        name: "Shed load east of bus 2".into(),
+        contingencies: vec!["L1".into()],
+        conditions: vec![Condition::Loading {
+            element: "L2".into(),
+            above: 100.0,
+        }],
+        actions: vec![shed("D3"), shed("D4"), shed("D2")],
+    }];
+    let with = contingency::run(&imp.model, &imp.study, &mut Silent).unwrap();
+    let after = with.cases.iter().find(|c| c.id == "L1").unwrap();
+    assert_eq!(after.remedial, ["shed-east"]);
+    assert!(after.violations_before > 0);
+    assert!(
+        after.max_loading.unwrap() < before.max_loading.unwrap() - 20.0,
+        "{after:?}"
+    );
+    // The rule names one contingency: the others are as before.
+    for c in with.cases.iter().filter(|c| c.id != "L1") {
+        assert!(c.remedial.is_empty());
+        let w = without.cases.iter().find(|x| x.id == c.id).unwrap();
+        assert_eq!(c.max_loading, w.max_loading, "{}", c.id);
+    }
+}

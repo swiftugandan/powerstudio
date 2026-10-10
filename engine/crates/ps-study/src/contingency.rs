@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use ps_lf::{Cache, PuNetwork, Solution};
-use ps_model::study::{Contingency, StudyCase};
+use ps_model::study::{Action, Condition, Contingency, RemedialAction, StudyCase};
 use ps_model::{Class, Model};
 use ps_net::Calc;
 use ps_num::C64;
@@ -76,6 +76,10 @@ pub struct Case {
     pub violations: Vec<Violation>,
     /// Whether screening judged the outage safe without a full load flow (its loading is then the estimate's).
     pub screened: bool,
+    /// Remedial actions that fired; the case's results are those after them.
+    pub remedial: Vec<String>,
+    /// Violations the outage caused before the remedial actions.
+    pub violations_before: usize,
 }
 
 /// Worst loading of a branch over all cases.
@@ -208,6 +212,8 @@ struct Monitor {
     branches: Vec<(String, [Option<f64>; 2], Option<f64>)>,
     /// Per bus: identifier and voltage band.
     buses: Vec<(String, f64, f64)>,
+    /// Bus of every node identifier.
+    node_bus: HashMap<String, usize>,
 }
 
 impl Monitor {
@@ -241,7 +247,18 @@ impl Monitor {
                 (calc.bus_id(model, b), lo, hi)
             })
             .collect();
-        Self { branches, buses }
+        let node_bus = calc
+            .topo
+            .buses
+            .iter()
+            .enumerate()
+            .flat_map(|(b, bus)| bus.nodes.iter().map(move |&n| (model.nodes[n as usize].id.clone(), b)))
+            .collect();
+        Self {
+            branches,
+            buses,
+            node_bus,
+        }
     }
 }
 
@@ -430,7 +447,7 @@ impl Screen {
     /// The estimate of losing branch `k`: `Some(highest loading)` when every branch stays below the threshold and
     /// every voltage inside its band by the margin; `None` when the outage needs a full load flow (or the estimate
     /// does not converge).
-    fn estimate(&mut self, base: &Base, k: usize) -> Option<f64> {
+    fn estimate(&mut self, base: &Base, k: usize) -> Option<Outcome> {
         let net = &base.net;
         let n = net.buses.len();
         let sb = net.base_mva;
@@ -497,7 +514,7 @@ impl Screen {
                 return None;
             }
         }
-        let mut worst = 0.0_f64;
+        let mut loadings = Vec::new();
         for (l, b) in net.branches.iter().enumerate() {
             if l == k {
                 continue;
@@ -514,14 +531,15 @@ impl Screen {
             let Some(load) = limits::loading(*lim, *rated, i, s) else {
                 continue;
             };
-            worst = worst.max(load);
+            loadings.push((l, load));
             // A loading inside the margin counts when the outage raises it.
             let raised = self.base_loading[l].is_none_or(|b| load > b + SCREEN_DRIFT_LOADING);
             if load > self.threshold && raised && !self.branch_in_base.contains(&l) {
                 return None;
             }
         }
-        Some(worst)
+        let voltages = (0..n).filter(|&b| base.real_bus[b]).map(|b| (b, vm[b])).collect();
+        Some(Outcome { loadings, voltages })
     }
 }
 
@@ -632,6 +650,113 @@ fn resolve<'a>(index: &ps_model::IdIndex, c: &'a Contingency) -> (Vec<(Class, us
     (found, cls, missing)
 }
 
+/// The remedial actions whose conditions hold on a contingency's solution, in order.
+fn fired<'a>(rules: &'a [RemedialAction], c: &Contingency, out: &Outcome, mon: &Monitor) -> Vec<&'a RemedialAction> {
+    let loading = |id: &str| {
+        out.loadings
+            .iter()
+            .filter(|(b, _)| mon.branches[*b].0 == id)
+            .map(|x| x.1)
+            .fold(None, |m: Option<f64>, x| Some(m.map_or(x, |m| m.max(x))))
+    };
+    let voltage = |node: &str| {
+        let bus = *mon.node_bus.get(node)?;
+        out.voltages.iter().find(|(b, _)| *b == bus).map(|x| x.1)
+    };
+    rules
+        .iter()
+        .filter(|r| r.contingencies.is_empty() || r.contingencies.contains(&c.id))
+        .filter(|r| {
+            r.conditions.iter().all(|cond| match cond {
+                Condition::Loading { element, above } => loading(element).is_some_and(|l| l > *above),
+                Condition::VoltageBelow { node, below } => voltage(node).is_some_and(|v| v < *below),
+                Condition::VoltageAbove { node, above } => voltage(node).is_some_and(|v| v > *above),
+                Condition::Outage { element } => c.elements.contains(element),
+            })
+        })
+        .collect()
+}
+
+/// The model with remedial actions applied. Returns what could not be applied, in plain words.
+fn apply(model: &Model, rules: &[&RemedialAction]) -> (Model, Vec<String>) {
+    let mut m = model.clone();
+    let index = m.index();
+    let mut problems = Vec::new();
+    let find = |id: &str| Class::ALL.iter().find_map(|&k| index.get(k, id).map(|row| (k, row)));
+    for r in rules {
+        for a in &r.actions {
+            let ok = match a {
+                Action::Switch { element, in_service } => match find(element) {
+                    Some((Class::Line, row)) => {
+                        m.lines[row].in_service = *in_service;
+                        true
+                    }
+                    Some((Class::Transformer2, row)) => {
+                        m.transformers2[row].in_service = *in_service;
+                        true
+                    }
+                    Some((Class::Transformer3, row)) => {
+                        m.transformers3[row].in_service = *in_service;
+                        true
+                    }
+                    Some((Class::Generator, row)) => {
+                        m.generators[row].in_service = *in_service;
+                        true
+                    }
+                    Some((Class::Load, row)) => {
+                        m.loads[row].in_service = *in_service;
+                        true
+                    }
+                    Some((Class::Shunt, row)) => {
+                        m.shunts[row].in_service = *in_service;
+                        true
+                    }
+                    Some((Class::Switch, row)) => {
+                        m.switches[row].open = !*in_service;
+                        true
+                    }
+                    _ => false,
+                },
+                Action::Generation { element, p } => match find(element) {
+                    Some((Class::Generator, row)) => {
+                        m.generators[row].p = *p;
+                        true
+                    }
+                    _ => false,
+                },
+                Action::Tap { element, position } => match find(element) {
+                    Some((Class::Transformer2, row)) => {
+                        let t = &mut m.transformers2[row];
+                        match (t.ratio_taps.first_mut(), t.phase_tap.as_mut()) {
+                            (Some(r), _) => r.position = *position,
+                            (None, Some(p)) => p.position = *position,
+                            _ => {}
+                        }
+                        true
+                    }
+                    _ => false,
+                },
+                Action::LoadShed { element, percent } => match find(element) {
+                    Some((Class::Load, row)) => {
+                        let keep = 1.0 - percent.clamp(0.0, 100.0) / 100.0;
+                        m.loads[row].p *= keep;
+                        m.loads[row].q *= keep;
+                        true
+                    }
+                    _ => false,
+                },
+            };
+            if !ok {
+                problems.push(format!(
+                    "Remedial action {}: its element is missing or of the wrong kind.",
+                    r.id
+                ));
+            }
+        }
+    }
+    (m, problems)
+}
+
 /// Runs contingencies `range` of [`definitions`] (the base case is solved in every chunk).
 pub fn run_chunk(
     model: &Model,
@@ -672,6 +797,8 @@ pub fn run_chunk(
                 .position(|x| x.class == *k && x.row as usize == *row && x.winding == 0)
                 .filter(|b| !base.bridges.contains(b))
             && let Some(est) = scr.estimate(&base, b)
+            // A remedial action that would fire on the estimate needs the full solution.
+            && fired(&study.contingency.remedial, c, &est, &base.monitor).is_empty()
         {
             effort.screened += 1;
             let mut case = judge(
@@ -692,7 +819,11 @@ pub fn run_chunk(
                 Vec::new(),
             );
             case.screened = true;
-            case.max_loading = Some(est);
+            case.max_loading = est
+                .loadings
+                .iter()
+                .map(|x| x.1)
+                .fold(None, |m: Option<f64>, x| Some(m.map_or(x, |m| m.max(x))));
             cases.push(case);
             progress.report((done + 1) as f64, total as f64);
             continue;
@@ -708,6 +839,7 @@ pub fn run_chunk(
                 &base_dead,
                 post_duration,
                 &mut effort,
+                true,
             )
         } else {
             Solved {
@@ -720,19 +852,62 @@ pub fn run_chunk(
                 lost: Vec::new(),
             }
         };
-        let out = solved.outcome(&base);
-        let monitor = solved.monitor(&base);
-        let case = judge(
+        let mut out = solved.outcome(&base);
+        let mut case = judge(
             &c.id,
             cls,
             c.elements.clone(),
             &solved.status,
             out.as_ref(),
-            monitor,
+            solved.monitor(&base),
             limit,
             Some(&base_case),
             solved.lost.clone(),
         );
+        // Remedial actions: those whose conditions hold apply, and the contingency is solved again with them.
+        let rules = out
+            .as_ref()
+            .map(|o| fired(&study.contingency.remedial, c, o, solved.monitor(&base)))
+            .unwrap_or_default();
+        let mut after: Option<Solved> = None;
+        if !rules.is_empty() {
+            let (acted, problems) = apply(model, &rules);
+            let again = solve_case(
+                &acted,
+                study,
+                &base,
+                &mut cache,
+                &found,
+                &start,
+                &base_dead,
+                post_duration,
+                &mut effort,
+                // The actions changed the model, so the base network no longer applies.
+                false,
+            );
+            let before = case.violations.iter().filter(|v| !v.in_base).count();
+            out = again.outcome(&base);
+            case = judge(
+                &c.id,
+                cls,
+                c.elements.clone(),
+                &again.status,
+                out.as_ref(),
+                again.monitor(&base),
+                limit,
+                Some(&base_case),
+                again.lost.clone(),
+            );
+            case.remedial = rules.iter().map(|r| r.id.clone()).collect();
+            case.violations_before = before;
+            if !problems.is_empty() {
+                case.message = format!("{} {}", case.message, problems.join(" "));
+            }
+            after = Some(again);
+        }
+        let monitor = after
+            .as_ref()
+            .map_or_else(|| solved.monitor(&base), |a| a.monitor(&base));
         if let Some(out) = &out {
             for &(b, value) in &out.loadings {
                 let id = &monitor.branches[b].0;
@@ -845,8 +1020,10 @@ fn solve_case(
     base_dead: &HashSet<&str>,
     post_duration: Option<f64>,
     effort: &mut Effort,
+    fast: bool,
 ) -> Solved {
     let branch = match found {
+        _ if !fast => None,
         [(k @ (Class::Line | Class::Transformer2), row)] => base
             .calc
             .branches
@@ -948,6 +1125,7 @@ pub fn detailed(model: &Model, study: &StudyCase, list: &[Contingency]) -> Resul
             &base_dead,
             p.post_duration,
             &mut effort,
+            true,
         );
         let mon = solved.monitor(&p.base);
         let mut flows = HashMap::new();
@@ -1079,6 +1257,8 @@ fn judge(
         lost_buses,
         violations: Vec::new(),
         screened: false,
+        remedial: Vec::new(),
+        violations_before: 0,
     };
     let Some(out) = out else { return c };
     let in_base =
