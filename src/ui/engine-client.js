@@ -26,7 +26,8 @@ import { yieldToBrowser } from './dom.js';
 /** @typedef {{ engine: string, model?: string, study?: string, results: string }} Hashes A run record's hashes from the engine */
 /** @typedef {{ bytes: Uint8Array, ms: number, summary?: import('../engine/reports.js').ImportSummary, record?: Hashes, header?: Record<string, any> }} Reply */
 /** @typedef {{ id: number, resolve: (v: Reply) => void, reject: (e: Error) => void, onProgress?: OnProgress }} Pending */
-/** @typedef {{ worker: Worker, pending: Pending | null, key: string }} Slot A worker, its call in progress and the document state its copy holds */
+/** @typedef {{ worker: Worker, pending: Pending | null, key: string, memory: number }} Slot A worker, its call in progress, the
+ * document state its engine holds and the engine's memory in bytes (as of its last reply) */
 
 /** Outages below which contingency analysis stays on one worker. */
 const PARALLEL_FROM = 16;
@@ -75,9 +76,35 @@ export class EngineClient {
     this.lastChunks = [];
     /** The last parallel analysis's phases, ms: planning, the chunks, and merging. */
     this.lastPhases = { plan: 0, chunks: 0, merge: 0 };
+    /** Called when the engines' memory changes (an engine grew, started or ended). @type {(() => void) | null} */
+    this.onMemory = null;
+    /** Workers the last contingency analysis lost to a lack of memory and finished without. */
+    this.shrunk = 0;
   }
 
   get busy() { return this.active > 0; }
+
+  /** The running engines and their memory in bytes (an engine's WebAssembly memory is the most it has needed). */
+  memoryUse() {
+    const live = /** @type {Slot[]} */ (this.slots.filter(Boolean));
+    const bytes = live.reduce((n, s) => n + s.memory, 0) + (this.host?.memoryBytes ?? 0);
+    return { engines: live.length + (this.host ? 1 : 0), bytes };
+  }
+
+  memoryChanged() { this.onMemory?.(); }
+
+  /**
+   * Workers for a contingency analysis of `count` outages: one per spare core up to eight, as many as half the
+   * device's memory holds at the first engine's size (where the browser says how much memory the device has).
+   * @param {number} count
+   */
+  poolFor(count) {
+    let parts = this.inThread || count < PARALLEL_FROM ? 1 : Math.min(this.poolSize, Math.ceil(count / MIN_CHUNK));
+    const device = typeof navigator !== 'undefined' ? /** @type {{ deviceMemory?: number }} */ (navigator).deviceMemory : undefined;
+    const each = this.slots[0]?.memory ?? 0;
+    if (device && each > 0) parts = Math.max(1, Math.min(parts, Math.floor((device * 2 ** 30 / 2) / each)));
+    return parts;
+  }
 
   /** The document state the workers' copies should hold. */
   get key() { return `${this.opened}:${this.edits}`; }
@@ -130,12 +157,13 @@ export class EngineClient {
     let worker;
     try { worker = this.factory(); } catch { this.inThread = true; return null; }
     /** @type {Slot} */
-    const s = { worker, pending: null, key: '' };
+    const s = { worker, pending: null, key: '', memory: 0 };
     worker.onmessage = e => {
       const msg = e.data, p = s.pending;
       if (!p || msg.id !== p.id) return;
       if (msg.type === 'progress') { p.onProgress?.(msg.done, msg.total); return; }
       s.pending = null;
+      if (typeof msg.memory === 'number' && msg.memory !== s.memory) { s.memory = msg.memory; this.memoryChanged(); }
       if (msg.type === 'result') p.resolve({ bytes: msg.bytes, ms: msg.ms, summary: msg.summary, record: msg.record, header: msg.header });
       else p.reject(msg.stale ? new StaleDocument(msg.message) : new Error(msg.message));
     };
@@ -145,6 +173,7 @@ export class EngineClient {
       s.pending = null;
       worker.terminate();
       this.slots[k] = null;
+      this.memoryChanged();
       p?.reject(new Error(e.message || 'The calculation worker failed.'));
     };
     worker.postMessage({ type: 'init', module });
@@ -168,6 +197,7 @@ export class EngineClient {
         const t0 = performance.now();
         try {
           const reply = study(host, kind, doc, options, onProgress, { record });
+          this.memoryChanged();
           resolve({ bytes: reply.payload, record: reply.header.record, ms: performance.now() - t0 });
         } catch (e) { reject(e instanceof Error ? e : new Error(String(e))); }
       }, 0));
@@ -281,13 +311,14 @@ export class EngineClient {
   /**
    * Any other engine operation (such as `export_cgmes`), on the first worker or on this thread when there are none.
    * The payload's buffer is transferred to the worker.
-   * @param {Record<string, unknown>} header @param {Uint8Array} payload
+   * @param {Record<string, unknown>} header @param {Uint8Array} payload @param {WebAssembly.Module} [compiled] the
+   * engine's module, when the caller has it
    * @returns {Promise<{ header: Record<string, any>, payload: Uint8Array }>}
    */
-  async call(header, payload) {
+  async call(header, payload, compiled) {
     this.active++;
     try {
-      const module = await engineModule();
+      const module = compiled ?? await engineModule();
       const s = this.slot(0, module);
       if (!s) {
         this.host ??= await EngineHost.create(module);
@@ -325,7 +356,8 @@ export class EngineClient {
     const plan = jsonPayload(planned.bytes);
     this.check(token);
     const count = /** @type {number} */ (plan.count);
-    const parts = this.inThread || count < PARALLEL_FROM ? 1 : Math.min(this.poolSize, Math.ceil(count / MIN_CHUNK));
+    const parts = this.poolFor(count);
+    this.shrunk = 0;
     if (parts <= 1) return this.exec(0, module, 'contingency', doc, {}, onProgress, record);
     const pieces = Math.min(parts * CHUNKS_PER_WORKER, Math.ceil(count / MIN_CHUNK));
     const size = Math.ceil(count / pieces);
@@ -333,14 +365,27 @@ export class EngineClient {
     /** @type {Reply[]} */
     const chunks = new Array(pieces);
     const busy = new Array(parts).fill(0);
-    let next = 0;
+    /** Chunks not yet done, in order; a chunk a worker could not finish goes back for another. */
+    const queue = Array.from({ length: pieces }, (_, p) => p);
+    let alive = parts;
     try {
-      // Each worker takes the next chunk when it finishes one; the engine merges them in chunk order.
+      // Each worker takes the next chunk when it finishes one; the engine merges them in chunk order. A worker that
+      // runs out of memory ends, and the others finish its chunk: fewer workers, the same result.
       await Promise.all(Array.from({ length: parts }, async (_, k) => {
-        while (next < pieces) {
-          const p = next++;
-          chunks[p] = await this.exec(k, module, 'contingency_chunk', doc, { from: p * size, to: (p + 1) * size },
-            d => { done[p] = d; onProgress?.(done.reduce((a, b) => a + b, 0), count); });
+        while (queue.length) {
+          const p = /** @type {number} */ (queue.shift());
+          try {
+            chunks[p] = await this.exec(k, module, 'contingency_chunk', doc, { from: p * size, to: (p + 1) * size },
+              d => { done[p] = d; onProgress?.(done.reduce((a, b) => a + b, 0), count); });
+          } catch (error) {
+            if (error instanceof CancelledError || !outOfMemory(error) || alive <= 1 || k === 0) throw error;
+            alive--;
+            this.shrunk++;
+            this.end(k);
+            done[p] = 0;
+            queue.unshift(p);
+            return;
+          }
           busy[k] += chunks[p].ms;
           this.check(token);
         }
@@ -352,7 +397,7 @@ export class EngineClient {
       const payload = new Uint8Array(chunks.reduce((n, c) => n + c.bytes.length, 0));
       let at = 0;
       for (const c of chunks) { payload.set(c.bytes, at); at += c.bytes.length; }
-      const reply = await this.call({ op: 'study', kind: 'contingency_merge', options: null, chunks: chunks.map(c => c.bytes.length), record }, payload);
+      const reply = await this.call({ op: 'study', kind: 'contingency_merge', options: null, chunks: chunks.map(c => c.bytes.length), record }, payload, module);
       const merged = { bytes: reply.payload, ms: 0, record: reply.header.record };
       this.lastPhases = { plan: Math.round(t1 - t0), chunks: Math.round(t2 - t1), merge: Math.round(performance.now() - t2) };
       return { ...merged, record: merged.record && planned.record ? { ...planned.record, results: merged.record.results } : undefined };
@@ -365,12 +410,14 @@ export class EngineClient {
    * network's document and model, and WebAssembly memory never shrinks, so only one stays resident between runs; the
    * next analysis starts the others again and sends them the document. */
   releasePool() {
-    for (let k = 1; k < this.slots.length; k++) {
-      const s = this.slots[k];
-      if (!s || s.pending) continue;
-      s.worker.terminate();
-      this.slots[k] = null;
-    }
+    for (let k = 1; k < this.slots.length; k++) if (this.slots[k] && !this.slots[k]?.pending) this.end(k);
+  }
+
+  /** Ends worker `k`. @param {number} k */
+  end(k) {
+    this.slots[k]?.worker.terminate();
+    this.slots[k] = null;
+    this.memoryChanged();
   }
 
   /** Stops the running calculation by restarting the busy workers. A run on the main thread cannot be interrupted;
@@ -383,6 +430,13 @@ export class EngineClient {
       this.slots[k] = null;
       s.pending.reject(new CancelledError());
     }
+    this.memoryChanged();
   }
 }
 
+/** Whether an engine failed for want of memory: an allocation the WebAssembly memory could not grow for, or the trap
+ * an allocation failure becomes. @param {unknown} error */
+function outOfMemory(error) {
+  const text = error instanceof Error ? `${error.name} ${error.message}` : String(error);
+  return /memory|allocat|unreachable/i.test(text);
+}

@@ -81,7 +81,7 @@ export class App {
     this.clipboard = null;
     this.saveTimer = 0;
     this.autoTimer = 0;
-    /** @type {Record<'tool' | 'pointer' | 'selection' | 'message' | 'progress' | 'backend', HTMLElement> | null} */
+    /** @type {Record<'tool' | 'pointer' | 'selection' | 'message' | 'progress' | 'engines' | 'backend', HTMLElement> | null} */
     this.status = null;
     this.palette = readPalette();
     this.engine = new EngineClient(opt.workerFactory);
@@ -160,8 +160,10 @@ export class App {
       h('a', { class: 'icon-btn desktop-only', href: REPO_URL, target: '_blank', rel: 'noopener', title: 'Source code on GitHub', 'aria-label': 'Source code on GitHub', html: icon('github', 18) }));
     this.status = {
       tool: h('span', { class: 'cell' }), pointer: h('span', { class: 'cell mono hide-narrow', text: '—' }), selection: h('span', { class: 'cell hide-narrow' }),
-      message: h('span', { class: 'cell grow' }), progress: h('span', { class: 'cell', hidden: true }), backend: h('span', { class: 'cell', title: '' }),
+      message: h('span', { class: 'cell grow' }), progress: h('span', { class: 'cell', hidden: true }),
+      engines: h('span', { class: 'cell mono hide-narrow', hidden: true }), backend: h('span', { class: 'cell', title: '' }),
     };
+    this.engine.onMemory = () => this.updateEngines();
     byId('statusbar').append(...Object.values(this.status));
     this.setupSplitters();
   }
@@ -793,6 +795,9 @@ export class App {
         ms += cold.ms;
       }
       if (hashes) void this.recordRun(kind, result, ms, hashes, start, bytes);
+      if (kind === 'contingency' && this.engine.shrunk) {
+        this.log('warn', `Memory ran short: ${this.engine.shrunk} calculation worker${this.engine.shrunk === 1 ? '' : 's'} ended and the others finished the analysis. The result is the same; it took longer.`);
+      }
       if (kind === 'loadflow' && result.converged) this.start = startOf(result);
       this.results[kind] = { result, ms, revision };
       // The calculation is over once its result is stored: other commands work while the result is shown.
@@ -1062,6 +1067,18 @@ export class App {
     this.status.tool.innerHTML = `${icon(this.tool === 'select' ? 'select' : this.tool === 'pan' ? 'pan' : this.tool, 13)}<span>${toolNames[this.tool]}</span>`;
     const n = this.selection.size;
     this.status.selection.textContent = n ? `${n} selected` : `${this.store.doc.elements.length} elements`;
+  }
+
+  /** Shows the calculation engines' memory in the status bar. */
+  updateEngines() {
+    if (!this.status) return;
+    const { engines, bytes } = this.engine.memoryUse(), cell = this.status.engines;
+    cell.hidden = engines === 0;
+    if (!engines) return;
+    const size = bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : `${Math.round(bytes / 2 ** 20)} MB`;
+    cell.textContent = engines === 1 ? `Engine ${size}` : `${engines} engines · ${size}`;
+    cell.title = `Memory of the calculation engines: ${engines} running, ${size} in all. One holds the open network; a contingency analysis starts more, `
+      + 'as many as half this device\u2019s memory holds, and ends them when it finishes. An engine keeps the most memory it has needed.';
   }
 
   /** @param {number} done @param {number} total */

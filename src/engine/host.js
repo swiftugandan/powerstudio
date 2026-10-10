@@ -18,6 +18,9 @@ export class EngineHost {
     this.hooks = hooks;
   }
 
+  /** The engine's WebAssembly memory, in bytes: the most it has needed, since such memory never shrinks. */
+  get memoryBytes() { return this.exports.memory.buffer.byteLength; }
+
   /** Instantiates the engine from a compiled module or its bytes. @param {WebAssembly.Module | BufferSource} source */
   static async create(source) {
     const now = typeof performance !== 'undefined' ? () => performance.now() : () => Date.now();

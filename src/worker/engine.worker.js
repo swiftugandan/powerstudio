@@ -4,10 +4,11 @@
  * `{ type: 'ops', ops, key }` (the store's edits); `{ id, kind, key, options, record }` for a study on the open document
  * (or `{ id, kind, doc, options, record }` on a document sent with it); `{ id, type: 'import', files }` to open other
  * tools' files; `{ id, type: 'layout', json }` to lay a document out; `{ id, type: 'call', header, payload }` for any
- * other engine operation. Messages out: `{ id, type: 'progress', done,
- * total }`, then `{ id, type: 'result', bytes, record, ms }` (the JSON report, transferred, and with `record` the run
- * record's hashes; an import adds its `summary` and sends the laid-out document as `bytes`) or `{ id, type: 'error',
- * message, stale }`, where `stale` says the engine does not hold the document state the study named. */
+ * other engine operation. Messages out: `{ id, type: 'progress', done, total }`, then `{ id, type: 'result', bytes,
+ * record, ms, memory }` (the JSON report, transferred; with `record`, the run record's hashes; `memory`, the engine's
+ * WebAssembly memory in bytes; an import adds its `summary` and sends the laid-out document as `bytes`) or
+ * `{ id, type: 'error', message, stale }`, where `stale` says the engine does not hold the document state the study
+ * named. */
 
 import { EngineHost } from '../engine/host.js';
 import { study, openDocument, editDocument } from '../engine/studies.js';
@@ -52,12 +53,12 @@ self.onmessage = async (/** @type {MessageEvent} */ event) => {
       // Any other engine operation: the header and payload as given, the reply's header and payload back.
       const reply = host.call(msg.header, msg.payload);
       const bytes = reply.payload;
-      postMessage({ id, type: 'result', bytes, header: reply.header, ms: performance.now() - t0 }, [bytes.buffer]);
+      postMessage({ id, type: 'result', bytes, header: reply.header, ms: performance.now() - t0, memory: host.memoryBytes }, [bytes.buffer]);
       return;
     }
     if (msg.type === 'layout') {
       const bytes = new TextEncoder().encode(JSON.stringify(drawingOf(laidOut(msg.json))));
-      postMessage({ id, type: 'result', bytes, ms: performance.now() - t0 }, [bytes.buffer]);
+      postMessage({ id, type: 'result', bytes, ms: performance.now() - t0, memory: host.memoryBytes }, [bytes.buffer]);
       return;
     }
     if (msg.type === 'import') {
@@ -65,7 +66,7 @@ self.onmessage = async (/** @type {MessageEvent} */ event) => {
       // Laid out here, so a large network does not hold up the page.
       autoLayout(imported);
       const bytes = new TextEncoder().encode(JSON.stringify(imported));
-      postMessage({ id, type: 'result', bytes, summary, ms: performance.now() - t0 }, [bytes.buffer]);
+      postMessage({ id, type: 'result', bytes, summary, ms: performance.now() - t0, memory: host.memoryBytes }, [bytes.buffer]);
       return;
     }
     const progress = (/** @type {number} */ done, /** @type {number} */ total) => postMessage({ id, type: 'progress', done, total });
@@ -77,7 +78,7 @@ self.onmessage = async (/** @type {MessageEvent} */ event) => {
       ? study(host, kind, null, options, progress, { resident: true, record: !!msg.record })
       : study(host, kind, msg.doc, options, progress, { record: !!msg.record });
     const bytes = reply.payload;
-    postMessage({ id, type: 'result', bytes, record: reply.header.record, ms: performance.now() - t0 }, [bytes.buffer]);
+    postMessage({ id, type: 'result', bytes, record: reply.header.record, ms: performance.now() - t0, memory: host.memoryBytes }, [bytes.buffer]);
   } catch (error) {
     postMessage({ id, type: 'error', message: error instanceof Error ? error.message : String(error) });
   }

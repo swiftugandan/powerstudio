@@ -193,7 +193,11 @@ copy it eight times, and the engine does not read the document's text again afte
 Memory sets the pool's lifetime. At 70,000 buses an engine that reads the document whole peaks at 478 MB, and one
 holding it open at 618 MB, because the open document is a JSON tree (324 MB) beside its model; WebAssembly memory
 never shrinks. So the pool's other workers end after each contingency analysis and only the first stays resident;
-the next analysis starts them again and sends them the document (about 0.4 s each, in parallel). Holding each element
+the next analysis starts them again and sends them the document (about 0.4 s each, in parallel). Each engine reports
+its memory with every reply, and the status bar shows the engines running and their total. A contingency analysis
+starts no more workers than half the device's memory holds at the first engine's size (where the browser reports the
+device's memory), and a worker that runs out of memory ends while the others finish its chunks: fewer workers, the
+same result, and a note in the Output panel (`tests/pool.test.mjs` checks both with stand-in workers). Holding each element
 as its text and parsing it only while converting would cut both figures; it is the next step if memory becomes the
 limit.
 
