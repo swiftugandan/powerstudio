@@ -8,7 +8,7 @@
 //! | `version` | | | `engine` version |
 //! | `study` | `kind`, `options` | PowerStudio document (JSON text); none for `contingency_merge` | the report as JSON text |
 //! | `load_matpower` | | MATPOWER case text | model size and conversion issues |
-//! | `solve_model` | `tolerance` (MVA), `warm_start`, `dc_start`, `q_limits` | | load flow summary |
+//! | `solve_model` | `tolerance` (MVA), `warm_start`, `dc_start`, `q_limits`, `bump` (change the largest load by this factor first), `keep` (store the solution as the next warm start) | | load flow summary |
 //! | `import` | `files`: `[{ name, size }]` | the files' bytes, one after another | format, import report, validation, conversion notes, fidelity and size; the editor's document as payload |
 //!
 //! Reports travel as a payload, not in the header, so the header stays small and the host can parse them separately.
@@ -146,7 +146,7 @@ impl Engine {
                 Ok(ok(header, Vec::new()))
             }
             "solve_model" => {
-                let model = self.model.as_ref().ok_or("no model is loaded")?;
+                let model = self.model.as_mut().ok_or("no model is loaded")?;
                 let h = &req.header;
                 let settings = ps_model::study::LoadFlowSettings {
                     tolerance: h.get("tolerance").and_then(Value::as_f64).unwrap_or(1e-6),
@@ -154,6 +154,13 @@ impl Engine {
                     dc_start: h.get("dc_start").and_then(Value::as_bool).unwrap_or(true),
                     ..Default::default()
                 };
+                // An edit: the largest load changes by a factor.
+                if let Some(f) = h.get("bump").and_then(Value::as_f64)
+                    && let Some(load) = model.loads.iter_mut().max_by(|a, b| a.p.total_cmp(&b.p))
+                {
+                    load.p *= f;
+                    load.q *= f;
+                }
                 let warm = h.get("warm_start").and_then(Value::as_bool).unwrap_or(false);
                 let start = warm.then(|| {
                     model
@@ -162,7 +169,7 @@ impl Engine {
                         .map(|n| (n.v0 > 0.0).then(|| (n.v0, n.angle0.to_radians())))
                         .collect()
                 });
-                let r = ps_study::loadflow::run(
+                let (calc, sol, r) = ps_study::loadflow::solve(
                     model,
                     &LoadFlowRun {
                         settings,
@@ -170,6 +177,16 @@ impl Engine {
                         ..Default::default()
                     },
                 );
+                // An editing session re-solves from its last solution: keep it as the model's warm start.
+                if h.get("keep").and_then(Value::as_bool).unwrap_or(false) && r.converged {
+                    for (b, bus) in calc.topo.buses.iter().enumerate() {
+                        for &n in &bus.nodes {
+                            let node = &mut model.nodes[n as usize];
+                            node.v0 = sol.vm[b];
+                            node.angle0 = sol.va[b].to_degrees();
+                        }
+                    }
+                }
                 Ok(ok(
                     json!({
                         "converged": r.converged, "message": r.message, "iterations": r.iterations, "mismatch": r.mismatch,

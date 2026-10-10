@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /** Times the engine's load flow inside a Web Worker in Chromium, the environment the design's scale bar names.
  * Files are served from the repository through Playwright's request routing, so no server is needed.
- * Usage: node scripts/browser-bench.mjs <case.m relative to the repository>... [--warm] [--repeat n] */
+ * Usage: node scripts/browser-bench.mjs <case.m relative to the repository>... [--warm | --resolve] [--repeat n]
+ * --warm starts from the case's stored voltages; --resolve times re-solves after the largest load changes by 1 %,
+ * each from the previous solution, as an editing session runs them. */
 import { chromium } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +12,7 @@ import { dirname, join, extname } from 'node:path';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const warm = args.includes('--warm');
+const again = args.includes('--resolve');
 const ri = args.indexOf('--repeat');
 const repeat = ri >= 0 ? Number(args[ri + 1]) : 3;
 const cases = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--repeat');
@@ -23,14 +26,14 @@ await page.route('http://bench.local/**', async route => {
   await route.fulfill({ body, contentType: types[/** @type {keyof typeof types} */ (extname(path) || '.html')] ?? 'text/plain' });
 });
 await page.goto('http://bench.local/');
-console.log(JSON.stringify({ browser: browser.version(), warm, repeat }));
-const results = await page.evaluate(({ cases, repeat, warm }) => new Promise((resolve, reject) => {
+console.log(JSON.stringify({ browser: browser.version(), warm, resolve: again, repeat }));
+const results = await page.evaluate(({ cases, repeat, warm, again }) => new Promise((resolve, reject) => {
   const worker = new Worker('/scripts/bench/worker.mjs', { type: 'module' });
   /** @type {unknown[]} */
   const out = [];
   worker.onmessage = e => { if (e.data.done) resolve(out); else if (e.data.error) reject(new Error(e.data.error)); else out.push(e.data); };
   worker.onerror = e => reject(new Error(e.message));
-  worker.postMessage({ cases, repeat, warm });
-}), { cases, repeat, warm });
+  worker.postMessage({ cases, repeat, warm, again });
+}), { cases, repeat, warm, again });
 for (const r of /** @type {unknown[]} */ (results)) console.log(JSON.stringify(r));
 await browser.close();
