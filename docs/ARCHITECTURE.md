@@ -73,8 +73,15 @@ them (typed arrays for traces, NaN where JSON carries null).
 
 **Rendering (`src/render/`).** `geometry.js` defines the single-line diagram: busbar bars, orthogonal branch routes
 with an adjustable middle segment, and the stubs of single-port elements. `scene.js` turns the document, the result
-annotations and the editor state into a `DisplayList`: segments, circles, rounded rectangles, triangles and text in
-world coordinates, in four layers. Three backends draw the same list:
+annotations and the editor state into display lists: segments, circles, rounded rectangles, triangles and text in
+world coordinates, held in growable Float32 buffers. The diagram (`buildScene`, four layers) depends on neither the
+zoom nor the selection: result boxes and halos carry the smallest zoom at which they show, and every backend filters
+by it as it draws, so panning and zooming never rebuild it. The overlay (`buildOverlay`) holds what changes with the
+editor's state, the highlights of the selection and the hovered element under the diagram and the handles and the
+tool's preview over it, and is cheap to rebuild on every pointer move. The viewport invalidates the diagram, the
+overlay or only the view, and rebuilds a diagram in steps (`sceneSteps`, then the backend's `packSteps`) of a few
+milliseconds per frame, keeping the previous one on screen until the new one is ready; at 70,000 busbars a rebuild
+spreads over a few dozen frames. Three backends draw the same lists:
 
 - `webgpu.js` renders shapes as instanced quads whose edges come from signed distance functions in WGSL, triangles
   as plain geometry, and text from a signed-distance-field glyph atlas (`glyphs.js`) built on demand from the
@@ -84,7 +91,10 @@ world coordinates, in four layers. Three backends draw the same list:
   The backend badge reports the renderer that was actually created.
 - `svg.js` exports the list as vector graphics. PNG export draws it with Canvas 2D off screen.
 
-Hit testing (`hittest.js`) works on the geometry in world coordinates, so it does not depend on the backend.
+Hit testing (`hittest.js`) works on the geometry in world coordinates, so it does not depend on the backend. A
+`HitIndex`, built once per document revision, keeps the diagram's orthogonal segments (busbars, branch routes and
+stubs) sorted by position, so the pointer looks at the band of segments around it rather than at every element; a
+test checks that it finds exactly what a full scan finds.
 
 **UI (`src/ui/`, `src/app.js`).** `App` owns the store, the selection, the active tool, calculation results and
 preferences, and defines every command. Ribbon buttons, palette entries, context menus and keyboard shortcuts all run
@@ -95,9 +105,17 @@ The model tree (`tree.js`, above 2,000 rows) and the result tables (`table.js`, 
 keep every row's description, sort with one shared collator, and put only the rows in view into the page, so a
 70,000-busbar network opens in about a second and its tables scroll freely. Code that takes the extent of large
 arrays uses `core/extent.js`, because spreading them into `Math.min` overflows the call stack. Dialogs that edit
-the study case (`study.js`, `contingency-editor.js`) work on a draft and write it back in one transaction on Apply;
-the contingency editor's element pickers fill their suggestion lists only when first focused, since a large network
-has tens of thousands of candidates.
+the study case (`study.js`, `contingency-editor.js`) work on a draft and write it back in one transaction on Apply.
+Fields that choose an element (busbar fields above 200 busbars, the fault location, simulation event targets, the
+contingency editor) are text boxes whose suggestion lists fill only when first focused, since a large network has
+tens of thousands of candidates.
+
+Nothing a user does on a national network may hold the page for more than a frame or two, and the work that would is
+cut into steps: opening a document runs the import gate (`normalizeSteps`) in slices between frames; a calculation's
+result reaches the colours, the results table and the panels in separate tasks; the output log renders once per
+frame however many lines arrive. Autosave (`persistence.js`) serialises the document to JSON a few thousand elements
+at a time and starts again if the document changes meanwhile, so it only ever stores one consistent state; IndexedDB
+keeps the documents' JSON in one store and their names, sizes and dates in another, which is all a listing reads.
 
 **Workers (`src/worker/`, `src/ui/engine-client.js`).** Each worker holds one engine instance, created from the
 compiled module the page sends it, so the module is compiled once however many workers start. The engine client
