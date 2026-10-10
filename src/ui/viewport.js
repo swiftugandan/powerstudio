@@ -4,9 +4,9 @@
 import { Camera } from '../render/camera.js';
 import { createRenderer } from '../render/renderer.js';
 import { Canvas2DRenderer } from '../render/canvas2d.js';
-import { buildScene } from '../render/scene.js';
+import { buildScene, buildOverlay, sceneSteps } from '../render/scene.js';
 import { toSVG } from '../render/svg.js';
-import { hitTest, inRect } from '../render/hittest.js';
+import { hitTest, inRect, HitIndex } from '../render/hittest.js';
 import { bar, bounds, positionOn, route, branchKeys, bendHandle } from '../render/geometry.js';
 import { snap } from '../core/layout.js';
 import { h } from './dom.js';
@@ -34,6 +34,9 @@ const HINTS = /** @type {Record<Tool, string>} */ ({
   load: 'Click a busbar to connect a load', shunt: 'Click a busbar to connect a shunt',
 });
 
+/** Milliseconds a frame may spend building the diagram, leaving the rest of the frame for input and drawing. */
+const BUILD_BUDGET_MS = 8;
+
 export class Viewport {
   /** @param {import('../app.js').App} app @param {HTMLElement} host */
   constructor(app, host) {
@@ -44,7 +47,12 @@ export class Viewport {
     this.renderer = null;
     this.fallbackReason = '';
     this.dpr = window.devicePixelRatio || 1;
+    /** The diagram must be rebuilt (its content, results, labels or palette changed). */
     this.sceneDirty = true;
+    /** The overlay must be rebuilt (selection, hover or a tool's preview changed). */
+    this.overlayDirty = true;
+    /** The diagram being built over several frames, if a build is under way. @type {Generator<void, void, void> | null} */
+    this.job = null;
     this.frame = 0;
     /** @type {Drag | null} */
     this.drag = null;
@@ -59,7 +67,9 @@ export class Viewport {
     this.pinch = /** @type {{ d: number, zoom: number, mid: { x: number, y: number } } | null} */ (null);
     this.dragSeq = 0;
     this.frames = 0;
-    this.lod = NaN;
+    /** @type {HitIndex | null} */
+    this.hitIndex = null;
+    this.hitRevision = -1;
 
     this.badge = h('div', { class: 'vp-badge', role: 'status', 'aria-live': 'polite' });
     this.legend = h('div', { class: 'vp-legend', 'aria-label': 'Legend' });
@@ -123,12 +133,17 @@ export class Viewport {
     this.camera.height = Math.max(1, rect.height);
     this.dpr = window.devicePixelRatio || 1;
     this.renderer?.resize(this.camera.width, this.camera.height, this.dpr);
-    this.invalidate(false);
+    this.invalidate('view');
   }
 
-  /** Schedules a frame. @param {boolean} [scene] rebuild the display list too */
-  invalidate(scene = true) {
-    if (scene) this.sceneDirty = true;
+  /**
+   * Schedules a frame. 'scene' rebuilds the diagram and the overlay, 'overlay' only what changes with the selection,
+   * the hover and a tool's preview, 'view' nothing (the camera moved).
+   * @param {'scene' | 'overlay' | 'view'} [what]
+   */
+  invalidate(what = 'scene') {
+    if (what === 'scene') this.sceneDirty = true;
+    if (what !== 'view') this.overlayDirty = true;
     if (!this.frame) this.frame = requestAnimationFrame(() => this.render());
   }
 
@@ -136,11 +151,20 @@ export class Viewport {
     this.frame = 0;
     const r = this.renderer;
     if (!r) return;
-    const lod = Math.round(Math.log2(this.camera.zoom) * 4);
-    if (lod !== this.lod) { this.lod = lod; this.sceneDirty = true; }
     if (this.sceneDirty) {
       this.sceneDirty = false;
-      r.setScene(this.buildList());
+      this.job = this.sceneJob(r);
+    }
+    // The build runs for a few milliseconds a frame; until it ends, the previous diagram stays on screen.
+    if (this.job) {
+      const t0 = performance.now();
+      let step = this.job.next();
+      while (!step.done && performance.now() - t0 < BUILD_BUDGET_MS) step = this.job.next();
+      if (step.done) this.job = null; else this.invalidate('view');
+    }
+    if (this.overlayDirty) {
+      this.overlayDirty = false;
+      r.setOverlay(buildOverlay(this.sceneInput()));
     }
     r.draw(this.camera, this.app.palette, this.dpr);
     this.frames++;
@@ -148,14 +172,31 @@ export class Viewport {
     this.zoomLabel.textContent = `${Math.round(this.camera.zoom * 100)} %`;
   }
 
-  /** @param {number} [zoom] level of detail; exports use 1 for every annotation */
-  buildList(zoom = this.camera.zoom) {
+  /** The diagram's display list, without the selection and previews (exports draw it as it is). */
+  buildList() { return buildScene(this.sceneInput()); }
+
+  /** Builds the diagram and hands it to the renderer, in steps. @param {import('../render/renderer.js').Renderer} r
+   * @returns {Generator<void, void, void>} */
+  *sceneJob(r) {
+    const list = yield* sceneSteps(this.sceneInput());
+    if (r instanceof Canvas2DRenderer) r.commit('base', yield* r.packSteps(list));
+    else r.commit('base', yield* r.packSteps(list));
+  }
+
+  /** Finishes a diagram build under way at once (before a snapshot). */
+  flush() {
+    if (this.sceneDirty || this.overlayDirty) this.render();
+    while (this.job && !this.job.next().done);
+    this.job = null;
+  }
+
+  /** @returns {import('../render/scene.js').SceneInput} */
+  sceneInput() {
     const app = this.app;
-    return buildScene({
+    return {
       elements: app.store.doc.elements, palette: app.palette, selection: app.selection, hover: app.hover,
       overlay: app.overlay, preview: this.preview(), labels: { names: app.prefs.names, branchNames: app.prefs.branchNames, boxes: app.prefs.boxes },
-      zoom,
-    });
+    };
   }
 
   /** The preview for the current tool and pointer. @returns {import('../render/scene.js').Preview | null} */
@@ -186,20 +227,20 @@ export class Viewport {
     this.hint.innerHTML = text ? `${text}${tool === 'pan' ? '' : ` · ${kbd('Escape')} to finish`}` : '';
     this.host.dataset.tool = tool === 'select' ? 'select' : tool === 'pan' ? 'pan' : 'place';
     this.pending = null;
-    this.invalidate();
+    this.invalidate('overlay');
   }
 
   // ----- Camera -----
 
   fit() {
     this.camera.fit(bounds(this.app.store.doc.elements));
-    this.invalidate(false);
+    this.invalidate('view');
   }
 
   /** @param {number} f */
   zoomBy(f) {
     this.camera.zoomAt(f, this.camera.width / 2, this.camera.height / 2);
-    this.invalidate(false);
+    this.invalidate('view');
   }
 
   /** Brings elements into view, zooming out if needed. @param {string[]} ids */
@@ -225,7 +266,7 @@ export class Viewport {
     const zoom = c.zoom;
     c.fit({ x0: box.x0 - 120, y0: box.y0 - 120, x1: box.x1 + 120, y1: box.y1 + 120 });
     c.zoom = Math.min(zoom, c.zoom);
-    this.invalidate(false);
+    this.invalidate('view');
   }
 
   /** The frame as the active renderer produced it (WebGPU: read back from the GPU), as a PNG data URL.
@@ -233,7 +274,7 @@ export class Viewport {
   async snapshotPNG() {
     const r = this.renderer;
     if (!r) return '';
-    if (this.sceneDirty) this.render();
+    this.flush();
     let frame;
     try {
       frame = await r.snapshot(this.camera, this.app.palette, this.dpr);
@@ -255,7 +296,7 @@ export class Viewport {
     const box = bounds(this.app.store.doc.elements);
     const pad = 40;
     const b = { x0: box.x0 - pad - 160, y0: box.y0 - pad, x1: box.x1 + pad + 160, y1: box.y1 + pad };
-    return toSVG(this.buildList(1), b, this.app.palette.bg, this.app.store.doc.name);
+    return toSVG(this.buildList(), b, this.app.palette.bg, this.app.store.doc.name);
   }
 
   /** Renders the whole diagram off screen with Canvas 2D at twice the resolution. @returns {Promise<Blob>} */
@@ -268,7 +309,7 @@ export class Viewport {
     const cam = new Camera();
     cam.width = w; cam.height = hgt; cam.zoom = 1; cam.cx = (box.x0 + box.x1) / 2; cam.cy = (box.y0 + box.y1) / 2;
     r.resize(w, hgt, scale);
-    r.setScene(this.buildList(1));
+    r.setScene(this.buildList());
     r.draw(cam, { ...this.app.palette, grid: [0, 0, 0, 0] }, scale);
     return new Promise((resolve, reject) => canvas.toBlob(b => (b ? resolve(b) : reject(new Error('PNG encoding failed.'))), 'image/png'));
   }
@@ -281,7 +322,7 @@ export class Viewport {
     canvas.addEventListener('pointermove', e => this.onMove(e));
     canvas.addEventListener('pointerup', e => this.onUp(e));
     canvas.addEventListener('pointercancel', e => this.onUp(e));
-    canvas.addEventListener('pointerleave', () => { this.pointerInside = false; if (this.app.hover) this.app.setHover(''); this.app.statusPointer(null); this.invalidate(); });
+    canvas.addEventListener('pointerleave', () => { this.pointerInside = false; if (this.app.hover) this.app.setHover(''); this.app.statusPointer(null); this.invalidate('overlay'); });
     canvas.addEventListener('pointerenter', () => { this.pointerInside = true; });
     canvas.addEventListener('wheel', e => this.onWheel(e), { passive: false });
     canvas.addEventListener('dblclick', e => this.onDouble(e));
@@ -321,7 +362,7 @@ export class Viewport {
       return;
     }
     if (tool !== 'select') { this.place(p); return; }
-    const hit = hitTest(app.store.doc.elements, p, this.camera.zoom, app.selection);
+    const hit = hitTest(app.store.doc.elements, p, this.camera.zoom, app.selection, this.index());
     const key = `drag-${++this.dragSeq}`;
     if (!hit) {
       if (e.pointerType === 'touch') { this.drag = { kind: 'pan', sx, sy, cx: this.camera.cx, cy: this.camera.cy }; if (!e.shiftKey) app.setSelection([]); return; }
@@ -383,28 +424,28 @@ export class Viewport {
         this.camera.cx -= (mid.x - this.pinch.mid.x) / this.camera.zoom;
         this.camera.cy -= (mid.y - this.pinch.mid.y) / this.camera.zoom;
         this.pinch.mid = mid;
-        this.invalidate(false);
+        this.invalidate('view');
         return;
       }
     }
     const d = this.drag, app = this.app;
     if (!d) {
       if (app.tool === 'select') {
-        const hit = hitTest(app.store.doc.elements, p, this.camera.zoom, app.selection);
+        const hit = hitTest(app.store.doc.elements, p, this.camera.zoom, app.selection, this.index());
         this.host.dataset.hover = !hit ? '' : hit.part === 'body' ? 'element' : 'handle';
         if ((hit?.id ?? '') !== app.hover) app.setHover(hit?.id ?? '');
       } else {
-        this.invalidate();
+        this.invalidate('overlay');
       }
       return;
     }
     if (d.kind === 'pan') {
       this.camera.cx = d.cx - (sx - d.sx) / this.camera.zoom;
       this.camera.cy = d.cy - (sy - d.sy) / this.camera.zoom;
-      this.invalidate(false);
+      this.invalidate('view');
       return;
     }
-    if (d.kind === 'marquee') { d.x1 = p.x; d.y1 = p.y; this.invalidate(); return; }
+    if (d.kind === 'marquee') { d.x1 = p.x; d.y1 = p.y; this.invalidate('overlay'); return; }
     const store = app.store;
     try {
       if (d.kind === 'move') {
@@ -451,7 +492,7 @@ export class Viewport {
     if (d.kind === 'marquee') {
       const ids = inRect(app.store.doc.elements, d);
       if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) * this.camera.zoom > 3) app.setSelection(d.additive ? [...app.selection, ...ids] : ids);
-      this.invalidate();
+      this.invalidate('overlay');
     } else if (d.kind === 'branch-end') {
       const { p } = { p: this.pointer };
       const el = app.store.get(d.id);
@@ -467,10 +508,20 @@ export class Viewport {
     }
   }
 
+  /** The hit index of the document as it is now, built again after an edit. */
+  index() {
+    const store = this.app.store;
+    if (!this.hitIndex || this.hitRevision !== store.revision) {
+      this.hitIndex = new HitIndex(store.doc.elements);
+      this.hitRevision = store.revision;
+    }
+    return this.hitIndex;
+  }
+
   /** Busbar under a point, if any. @param {{ x: number, y: number }} p */
   busAt(p) {
     const tol = 10 / this.camera.zoom;
-    for (const el of this.app.store.doc.elements) {
+    for (const el of this.index().near(p, tol + 8)) {
       if (el.cls !== 'bus') continue;
       const g = bar(el);
       const inside = g.horizontal
@@ -500,12 +551,12 @@ export class Viewport {
     const bus = this.busAt(p);
     if (!bus) { if (tool !== 'line' && tool !== 'trafo') app.toast('info', 'Click on a busbar to connect to it.'); return; }
     if (tool === 'line' || tool === 'trafo') {
-      if (!this.pending) { this.pending = { cls: tool, from: bus.id, pos: this.snapPos(bus, p) }; this.invalidate(); return; }
+      if (!this.pending) { this.pending = { cls: tool, from: bus.id, pos: this.snapPos(bus, p) }; this.invalidate('overlay'); return; }
       if (this.pending.from === bus.id) { app.toast('info', 'Pick a different busbar for the other end.'); return; }
       const from = this.pending;
       this.pending = null;
       app.addBranch(tool, from.from, from.pos, bus.id, this.snapPos(bus, p));
-      this.invalidate();
+      this.invalidate('overlay');
       return;
     }
     app.addPort(/** @type {'gen' | 'extgrid' | 'load' | 'shunt'} */ (tool), bus.id, this.snapPos(bus, p), this.sideOf(bus, p));
@@ -514,7 +565,7 @@ export class Viewport {
   cancelPending() {
     if (!this.pending) return false;
     this.pending = null;
-    this.invalidate();
+    this.invalidate('overlay');
     return true;
   }
 
@@ -530,13 +581,13 @@ export class Viewport {
       this.camera.cx += e.deltaX / this.camera.zoom;
       this.camera.cy += e.deltaY / this.camera.zoom;
     }
-    this.invalidate(false);
+    this.invalidate('view');
   }
 
   /** @param {MouseEvent} e */
   onDouble(e) {
     const { sx, sy } = this.local(/** @type {any} */ (e));
-    const hit = hitTest(this.app.store.doc.elements, this.camera.toWorld(sx, sy), this.camera.zoom, new Set());
+    const hit = hitTest(this.app.store.doc.elements, this.camera.toWorld(sx, sy), this.camera.zoom, new Set(), this.index());
     if (hit) { this.app.setSelection([hit.id]); this.app.focusInspector(); }
   }
 
@@ -545,7 +596,7 @@ export class Viewport {
     e.preventDefault();
     const { sx, sy } = this.local(/** @type {any} */ (e));
     const p = this.camera.toWorld(sx, sy);
-    const hit = hitTest(this.app.store.doc.elements, p, this.camera.zoom, new Set());
+    const hit = hitTest(this.app.store.doc.elements, p, this.camera.zoom, new Set(), this.index());
     if (hit && !this.app.selection.has(hit.id)) this.app.setSelection([hit.id]);
     this.app.contextMenu(e.clientX, e.clientY, hit?.id ?? '', p);
   }

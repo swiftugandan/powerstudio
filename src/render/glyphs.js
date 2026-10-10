@@ -22,8 +22,8 @@ export class GlyphAtlas {
   constructor() {
     this.size = SIZE;
     this.data = new Uint8Array(SIZE * SIZE);
-    /** @type {Map<string, Glyph>} */
-    this.glyphs = new Map();
+    /** Glyphs by character, one map per face (mono 600, mono 400, sans 600, sans 400). @type {Array<Map<string, Glyph> | undefined>} */
+    this.faces = [];
     this.shelfX = 0;
     this.shelfY = 0;
     this.shelfH = 0;
@@ -40,11 +40,14 @@ export class GlyphAtlas {
 
   /** @param {'sans' | 'mono'} font @param {number} weight @param {string} ch @returns {Glyph} */
   glyph(font, weight, ch) {
-    const key = `${font}${weight}${ch}`;
-    let g = this.glyphs.get(key);
+    // One map per font and weight, so a lookup builds no key string (a national diagram looks up millions).
+    const face = font === 'mono' ? (weight === 600 ? 0 : 1) : (weight === 600 ? 2 : 3);
+    let set = this.faces[face];
+    if (!set) set = this.faces[face] = new Map();
+    let g = set.get(ch);
     if (!g) {
       g = this.rasterise(font, weight, ch);
-      this.glyphs.set(key, g);
+      set.set(ch, g);
     }
     return g;
   }
@@ -74,7 +77,7 @@ export class GlyphAtlas {
 
   /** Starts over when the atlas is full; glyphs in use are rasterised again on the next layout. */
   reset() {
-    this.glyphs.clear();
+    this.faces = [];
     this.data.fill(0);
     this.shelfX = this.shelfY = this.shelfH = 0;
     this.dirty = { y0: 0, y1: SIZE };

@@ -15,11 +15,10 @@ import { bar, route, longestSegment, stub, bendHandle, branchKeys, BAR_WIDTH, SY
  *   | { kind: 'ghost-bus', x: number, y: number, len: number }
  *   | { kind: 'ghost-port', cls: string, bus: string, pos: number, side: 'above' | 'below' }} Preview
  * @typedef {{ elements: Element[], palette: Palette, selection: Set<string>, hover: string, overlay: Overlay | null,
- *   preview: Preview | null, labels: { names: boolean, branchNames: boolean, boxes: boolean }, zoom?: number }} SceneInput
+ *   preview: Preview | null, labels: { names: boolean, branchNames: boolean, boxes: boolean } }} SceneInput
  */
 
 const BRANCH_W = 2.2, STUB_W = 2;
-let zoomLevel = 1;
 const MONO = 11;
 
 /** Colour for a nominal voltage. @param {Palette} p @param {number} kv */
@@ -27,12 +26,31 @@ export function kvColor(p, kv) {
   return kv >= 200 ? p.kv.ehv : kv >= 60 ? p.kv.hv : kv >= 1 ? p.kv.mv : p.kv.lv;
 }
 
-/** @param {SceneInput} input @returns {DisplayList} */
+/**
+ * The diagram itself: elements, result colours, labels and result boxes. It does not depend on the zoom (result boxes
+ * and halos carry the zoom at which they show) or on the selection, so panning, zooming and selecting never rebuild
+ * it; `buildOverlay` draws what does change with them.
+ * @param {SceneInput} input @returns {DisplayList}
+ */
 export function buildScene(input) {
-  const { elements, palette: P, selection, hover, overlay, preview, labels } = input;
+  const steps = sceneSteps(input);
+  let r = steps.next();
+  while (!r.done) r = steps.next();
+  return r.value;
+}
+
+/** Elements built between two pauses of `sceneSteps`. */
+const STEP = 2048;
+
+/**
+ * `buildScene` in steps: it pauses after every few thousand elements, so the viewport can spread the build of a
+ * national diagram over several frames instead of holding the page.
+ * @param {SceneInput} input @returns {Generator<void, DisplayList, void>}
+ */
+export function* sceneSteps(input) {
+  const { elements, palette: P, overlay, labels } = input;
+  let done = 0;
   const list = new DisplayList(4);
-  // Result boxes and halos are left out when their text would be too small to read at this zoom.
-  zoomLevel = input.zoom ?? 1;
   const buses = new Map(elements.filter(e => e.cls === 'bus').map(b => [b.id, b]));
   const ann = overlay?.elements ?? new Map();
   const dead = overlay?.deenergized ?? new Set();
@@ -45,25 +63,10 @@ export function buildScene(input) {
   };
   const dash = (/** @type {Element} */ el) => (el.inService === false ? 6 : 0);
 
-  // Highlights under everything else.
-  list.layer(0);
-  for (const el of elements) {
-    const sel = selection.has(el.id), hov = hover === el.id;
-    if (!sel && !hov) continue;
-    const c = sel ? withAlpha(P.select, 0.32) : withAlpha(P.hover, 0.22), w = sel ? 14 : 11;
-    if (el.cls === 'bus') { const g = bar(el); list.segment(g.x0, g.y0, g.x1, g.y1, BAR_WIDTH + w, c); }
-    else if (el.cls === 'line' || el.cls === 'trafo') {
-      const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
-      if (a && b) list.polyline(route(el, a, b), BRANCH_W + w, c);
-    } else {
-      const b = buses.get(/** @type {string} */ (el.bus));
-      if (b) { const s = stub(el, b); list.segment(s.from.x, s.from.y, s.to.x, s.to.y, STUB_W + w, c); list.circle(s.centre.x, s.centre.y, SYMBOL + w / 2, c, c, 0); }
-    }
-  }
-
   // Branches.
   list.layer(1);
   for (const el of elements) {
+    if (++done % STEP === 0) yield;
     if (el.cls !== 'line' && el.cls !== 'trafo') continue;
     const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
     if (!a || !b) continue;
@@ -112,6 +115,7 @@ export function buildScene(input) {
 
   // Single-port elements.
   for (const el of elements) {
+    if (++done % STEP === 0) yield;
     if (el.cls === 'bus' || el.cls === 'line' || el.cls === 'trafo') continue;
     const b = buses.get(/** @type {string} */ (el.bus));
     if (!b) continue;
@@ -133,6 +137,7 @@ export function buildScene(input) {
   // Busbars on top of the connections that end on them.
   list.layer(2);
   for (const el of elements) {
+    if (++done % STEP === 0) yield;
     if (el.cls !== 'bus') continue;
     const g = bar(el);
     const c = dead.has(el.id) ? P.muted : colorOf(el, kvColor(P, /** @type {number} */ (el.vn)));
@@ -153,11 +158,41 @@ export function buildScene(input) {
     if (overlay?.faultAt === el.id) bolt(list, g.horizontal ? (g.x0 + g.x1) / 2 : g.x0 + 18, g.horizontal ? g.y0 - 20 : (g.y0 + g.y1) / 2, P.fault);
   }
 
-  // Handles and previews.
-  list.layer(3);
-  for (const id of selection) {
-    const el = elements.find(e => e.id === id);
-    if (!el || selection.size > 1) continue;
+  return list;
+}
+
+/**
+ * What changes with the editor's state: highlights of the selection and the hovered element (drawn under the
+ * diagram, layer 0) and the selection's handles and the tool's preview (drawn over it, layer 1).
+ * @param {SceneInput} input @returns {DisplayList}
+ */
+export function buildOverlay(input) {
+  const { elements, palette: P, selection, hover, preview } = input;
+  const list = new DisplayList(2);
+  const marked = selection.size + (hover ? 1 : 0);
+  // Only the elements involved are looked at, so a large selection on a large network stays cheap.
+  const involved = marked ? elements.filter(e => selection.has(e.id) || e.id === hover) : [];
+  /** @type {Set<unknown>} the busbars the highlights and the preview need */
+  const needs = new Set(involved.flatMap(e => (e.cls === 'line' || e.cls === 'trafo' ? [e[branchKeys(e).a], e[branchKeys(e).b]] : [e.bus])));
+  if (preview?.kind === 'ghost-port') needs.add(preview.bus);
+  const buses = new Map(needs.size ? elements.filter(e => e.cls === 'bus' && needs.has(e.id)).map(b => [b.id, b]) : []);
+  list.layer(0);
+  for (const el of involved) {
+    const sel = selection.has(el.id), hov = hover === el.id;
+    if (!sel && !hov) continue;
+    const c = sel ? withAlpha(P.select, 0.32) : withAlpha(P.hover, 0.22), w = sel ? 14 : 11;
+    if (el.cls === 'bus') { const g = bar(el); list.segment(g.x0, g.y0, g.x1, g.y1, BAR_WIDTH + w, c); }
+    else if (el.cls === 'line' || el.cls === 'trafo') {
+      const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
+      if (a && b) list.polyline(route(el, a, b), BRANCH_W + w, c);
+    } else {
+      const b = buses.get(/** @type {string} */ (el.bus));
+      if (b) { const s = stub(el, b); list.segment(s.from.x, s.from.y, s.to.x, s.to.y, STUB_W + w, c); list.circle(s.centre.x, s.centre.y, SYMBOL + w / 2, c, c, 0); }
+    }
+  }
+
+  list.layer(1);
+  for (const el of selection.size === 1 ? involved.filter(e => selection.has(e.id)) : []) {
     if (el.cls === 'bus') {
       const g = bar(el);
       for (const [x, y] of [[g.x0, g.y0], [g.x1, g.y1]]) list.rect(x - 4.5, y - 4.5, 9, 9, P.bg, P.select, 1.6, 1.5);
@@ -178,9 +213,11 @@ export function buildScene(input) {
  * @param {DisplayList} list @param {Palette} P @param {number} x @param {number} y @param {string} text @param {number} size @param {number} align
  */
 function halo(list, P, x, y, text, size, align) {
-  if (size * zoomLevel < 4) return;
+  // It shows once its text is 4 px on screen, as the text itself does.
   const w = text.length * size * 0.56 + 6, h = size * 1.3;
+  list.minZoom = 4 / size;
   list.rect(x - align * w - 3, y - h / 2, w, h, withAlpha(P.bg, 0.86), withAlpha(P.bg, 0), 0, 3);
+  list.minZoom = 0;
   list.text(x - align * (w - 6), y, text, size, P.label, { align, weight: 600, minPx: 4 });
 }
 
@@ -190,11 +227,13 @@ function halo(list, P, x, y, text, size, align) {
  * @param {number} align @param {RGBA | undefined} accent @param {number} [size]
  */
 function box(list, P, x, y, lines, align, accent, size = MONO) {
-  if (size * zoomLevel < 6.5) return;
+  // It shows once its text is 6.5 px on screen, readable.
   const lh = size * 1.24, w = Math.max(...lines.map(l => l.length)) * size * 0.6 + 8, h = lines.length * lh + 4;
   const x0 = x - align * w, y0 = y - h / 2;
+  list.minZoom = 6.5 / size;
   list.rect(x0, y0, w, h, P.boxBg, accent ? withAlpha(accent, 0.9) : P.boxBorder, accent ? 1.2 : 0.8, 3);
-  lines.forEach((t, i) => list.text(x0 + 4, y0 + 2 + lh * (i + 0.5), t, size, P.boxText, { font: 'mono', minPx: 0 }));
+  list.minZoom = 0;
+  lines.forEach((t, i) => list.text(x0 + 4, y0 + 2 + lh * (i + 0.5), t, size, P.boxText, { font: 'mono', minPx: 6.5 }));
 }
 
 /**

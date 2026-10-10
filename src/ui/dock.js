@@ -27,6 +27,8 @@ export class Dock {
     this.app = app;
     /** @type {LogEntry[]} */
     this.log = [];
+    /** Pending animation frame of a log render. */
+    this.logFrame = 0;
     /** @type {DockTab} */
     this.tab = /** @type {DockTab} */ (app.prefs.dockTab) in { output: 1, loadflow: 1, shortcircuit: 1, contingency: 1, rms: 1 } ? /** @type {DockTab} */ (app.prefs.dockTab) : 'output';
     /** @type {Record<string, { key: string, dir: 1 | -1 }>} */
@@ -53,11 +55,16 @@ export class Dock {
     this.plot = null;
   }
 
-  /** @param {LogEntry['level']} level @param {string} text @param {string} [detail] */
+  /** Adds a line to the output log. Many lines in a row (a calculation's warnings) render once, on the next frame.
+   * @param {LogEntry['level']} level @param {string} text @param {string} [detail] */
   write(level, text, detail) {
     this.log.push({ time: Date.now(), level, text, detail });
     if (this.log.length > 500) this.log.shift();
-    if (this.tab === 'output') this.render(); else this.renderTabs();
+    if (this.logFrame) return;
+    this.logFrame = requestAnimationFrame(() => {
+      this.logFrame = 0;
+      if (this.tab === 'output') this.render(); else this.renderTabs();
+    });
   }
 
   /** @param {DockTab} tab */
@@ -183,11 +190,24 @@ export class Dock {
     const views = /** @type {Array<[string, string]>} */ ([['buses', `Busbars ${r.buses.length}`], ['branches', `Branches ${r.branches.length}`], ['units', `Machines and loads ${r.gens.length + r.grids.length + r.loads.length + r.shunts.length}`]]);
     if (regulated) views.push(['controls', `Controls ${regulated}`]);
     if (r.areas.length) views.push(['areas', `Areas ${r.areas.length}`]);
-    const view = (this.lfView === 'controls' && !regulated) || (this.lfView === 'areas' && !r.areas.length) ? 'buses' : this.lfView;
+    const warnings = r.warnings.length + r.deenergized.length;
+    const listed = warnings > 3 || r.warnings.some(w => w.length > 200) || r.deenergized.length > 20;
+    if (listed) views.push(['warnings', `Warnings ${warnings}`]);
+    const view = (this.lfView === 'controls' && !regulated) || (this.lfView === 'areas' && !r.areas.length) || (this.lfView === 'warnings' && !listed) ? 'buses' : this.lfView;
     const seg = this.segmented(views, view, v => { this.lfView = v; });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), seg);
     let table;
-    if (view === 'areas') {
+    if (view === 'warnings') {
+      /** @typedef {{ id: string, kind: string, text: string }} WarningRow */
+      const rows = /** @type {WarningRow[]} */ ([
+        ...r.warnings.map((w, i) => ({ id: `w${i}`, kind: 'Warning', text: w })),
+        ...r.deenergized.map(id => ({ id, kind: 'De-energised busbar', text: this.nameOf(id) })),
+      ]);
+      table = this.table([
+        { key: 'kind', label: 'Kind', value: (/** @type {WarningRow} */ w) => w.kind },
+        { key: 'text', label: 'Detail', value: (/** @type {WarningRow} */ w) => w.text, title: (/** @type {WarningRow} */ w) => w.text },
+      ], rows, 'load-flow-warnings', 'lf-warnings', 'kind');
+    } else if (view === 'areas') {
       const lf = app.store.doc.study.loadflow;
       const set = (/** @type {import('../engine/reports.js').AreaResult} */ a) => a.controlled || a.target !== 0 || a.tolerance !== 0;
       const status = (/** @type {import('../engine/reports.js').AreaResult} */ a) => {
@@ -257,8 +277,10 @@ export class Dock {
         { key: 'limit', label: 'Note', value: (/** @type {any} */ u) => (u.atLimit === 'max' ? 'At upper Q limit' : u.atLimit === 'min' ? 'At lower Q limit' : ''), cls: (/** @type {any} */ u) => (u.atLimit ? 'warn' : '') },
       ], rows, 'load-flow-units', 'lf-units', 'kind');
     }
+    // A few short notes show as pills; more go to the Warnings view.
     const notes = [...r.warnings, ...(r.deenergized.length ? [`De-energised: ${r.deenergized.map(id => this.nameOf(id)).join(', ')}`] : [])];
-    this.mount([bar, notes.length ? h('div', { class: 'dock-toolbar', html: notes.map(n => `<span class="pill warn">${icon('warning', 13)}${esc(n)}</span>`).join('') }) : null], table);
+    const pills = notes.length > 0 && notes.length <= 3 && notes.every(n => n.length <= 200);
+    this.mount([bar, pills ? h('div', { class: 'dock-toolbar', html: notes.map(n => `<span class="pill warn">${icon('warning', 13)}${esc(n)}</span>`).join('') }) : null], table);
   }
 
   renderShortCircuit() {

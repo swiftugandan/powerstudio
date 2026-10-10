@@ -2,7 +2,7 @@
  * come from signed distance functions in WGSL; filled polygons are plain triangles; text is drawn from a signed
  * distance field glyph atlas. Everything renders into a 4× multisampled target. */
 
-import { SHAPE_STRIDE } from './displaylist.js';
+import { SHAPE_STRIDE, Floats } from './displaylist.js';
 import { GlyphAtlas } from './glyphs.js';
 
 /** @typedef {import('./displaylist.js').DisplayList} DisplayList @typedef {import('./camera.js').Camera} Camera
@@ -73,6 +73,8 @@ struct ShapeOut {
   }
   var o: ShapeOut;
   o.pos = toClip(world);
+  // A shape below its minimum zoom (result boxes and halos when zoomed out) is moved outside the clip volume.
+  if (i.ex.z > 0.0 && u.scale / u.dpr < i.ex.z) { o.pos = vec4f(2.0, 2.0, 2.0, 1.0); }
   o.world = world;
   o.g0 = i.g0; o.g1 = i.g1; o.fill = i.fill; o.stroke = i.stroke; o.ex = i.ex;
   return o;
@@ -166,6 +168,22 @@ async function selfTest(device) {
   }
 }
 
+/** @typedef {{ buffers: Record<'shapes' | 'tris' | 'texts', GPUBuffer | null>,
+ *   ranges: Array<{ shapes: [number, number], tris: [number, number], texts: [number, number] }> }} Packed */
+
+/** @typedef {{ shapes: Float32Array, tris: Float32Array, texts: Float32Array,
+ *   ranges: Array<{ shapes: [number, number], tris: [number, number], texts: [number, number] }> }} Prepared */
+
+/** @returns {Packed} */
+const emptyPacked = () => ({ buffers: { shapes: null, tris: null, texts: null }, ranges: [] });
+
+/** Runs a generator to its end. @template T @param {Generator<void, T, void>} steps @returns {T} */
+function drain(steps) {
+  let r = steps.next();
+  while (!r.done) r = steps.next();
+  return r.value;
+}
+
 export class WebGPURenderer {
   /** @param {HTMLCanvasElement} canvas @returns {Promise<WebGPURenderer>} Rejects with a reason when WebGPU is unavailable. */
   static async create(canvas) {
@@ -231,10 +249,9 @@ export class WebGPURenderer {
     this.shapePipeline = pipeline('vsShape', 'fsShape', [{ arrayStride: SHAPE_STRIDE * 4, stepMode: 'instance', attributes: vec4s(5) }], true);
     this.triPipeline = pipeline('vsTri', 'fsTri', [{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }, { shaderLocation: 1, offset: 8, format: 'float32x4' }] }], true);
     this.textPipeline = pipeline('vsText', 'fsText', [{ arrayStride: 64, stepMode: 'instance', attributes: vec4s(4) }], true);
-    /** @type {Record<'shapes' | 'tris' | 'texts', GPUBuffer | null>} */
-    this.buffers = { shapes: null, tris: null, texts: null };
-    /** @type {Array<{ shapes: [number, number], tris: [number, number], texts: [number, number] }>} */
-    this.ranges = [];
+    /** The diagram (uploaded when it changes) and the overlay of selection, hover and previews (small, uploaded on
+     * every change of the editor's state). @type {{ base: Packed, overlay: Packed }} */
+    this.sets = { base: emptyPacked(), overlay: emptyPacked() };
     /** @type {GPUTexture | null} */
     this.msaa = null;
   }
@@ -249,56 +266,89 @@ export class WebGPURenderer {
   }
 
   /** Uploads a display list. @param {DisplayList} list */
-  setScene(list) {
-    /** @type {number[]} */
-    const shapes = [];
-    /** @type {number[]} */
-    const tris = [];
-    /** @type {number[]} */
-    const texts = [];
-    this.ranges = list.layers.map(layer => {
-      const s0 = shapes.length / SHAPE_STRIDE, t0 = tris.length / 6, x0 = texts.length / 16;
-      for (const v of layer.shapes) shapes.push(v);
-      for (const v of layer.tris) tris.push(v);
-      for (const t of layer.texts) this.layoutText(t, texts);
-      return { shapes: [s0, shapes.length / SHAPE_STRIDE - s0], tris: [t0, tris.length / 6 - t0], texts: [x0, texts.length / 16 - x0] };
-    });
-    this.buffers.shapes = this.upload(this.buffers.shapes, shapes);
-    this.buffers.tris = this.upload(this.buffers.tris, tris);
-    this.buffers.texts = this.upload(this.buffers.texts, texts);
+  /** The diagram. @param {DisplayList} list */
+  setScene(list) { this.commit('base', drain(this.packSteps(list))); }
+
+  /** The overlay: layer 0 draws under the diagram, layer 1 over it. @param {DisplayList} list */
+  setOverlay(list) { this.commit('overlay', drain(this.packSteps(list))); }
+
+  /**
+   * Lays a display list out as vertex data, pausing after every few thousand labels so a national diagram can be
+   * prepared over several frames. @param {DisplayList} list @returns {Generator<void, Prepared, void>}
+   */
+  *packSteps(list) {
+    let shapeCount = 0, triCount = 0;
+    for (const layer of list.layers) { shapeCount += layer.shapes.length; triCount += layer.tris.length; }
+    const shapes = new Float32Array(shapeCount), tris = new Float32Array(triCount), texts = new Floats(4096);
+    let so = 0, to = 0, laid = 0;
+    /** @type {Prepared['ranges']} */
+    const ranges = [];
+    for (const layer of list.layers) {
+      const s0 = so / SHAPE_STRIDE, t0 = to / 6, x0 = texts.n / 16;
+      shapes.set(layer.shapes, so); so += layer.shapes.length;
+      tris.set(layer.tris, to); to += layer.tris.length;
+      for (const t of layer.texts) {
+        this.layoutText(t, texts);
+        if (++laid % 4096 === 0) yield;
+      }
+      ranges.push({ shapes: [s0, so / SHAPE_STRIDE - s0], tris: [t0, to / 6 - t0], texts: [x0, texts.n / 16 - x0] });
+    }
+    return { shapes, tris, texts: texts.view(), ranges };
+  }
+
+  /** Uploads prepared vertex data as the diagram or the overlay, re-using buffers that are large enough.
+   * @param {'base' | 'overlay'} which @param {Prepared} data */
+  commit(which, data) {
+    const previous = this.sets[which];
+    const out = {
+      buffers: {
+        shapes: this.upload(previous.buffers.shapes, data.shapes),
+        tris: this.upload(previous.buffers.tris, data.tris),
+        texts: this.upload(previous.buffers.texts, data.texts),
+      },
+      ranges: data.ranges,
+    };
     const { y0, y1 } = this.atlas.dirty;
     if (y1 > y0) {
       const size = this.atlas.size;
       this.device.queue.writeTexture({ texture: this.atlasTexture, origin: [0, y0] }, this.atlas.data.subarray(y0 * size, y1 * size), { bytesPerRow: size }, [size, y1 - y0]);
       this.atlas.dirty = { y0: size, y1: 0 };
     }
+    this.sets[which] = out;
   }
 
   /** Lays a string out as one glyph instance per character: quad, atlas coordinates, colour, size and minimum px.
-   * @param {import('./displaylist.js').TextItem} t @param {number[]} out */
+   * @param {import('./displaylist.js').TextItem} t @param {Floats} out */
   layoutText(t, out) {
     const m = GlyphAtlas.metrics, weight = t.weight;
     const width = this.atlas.measure(t.font, weight, t.text) * t.size;
     let pen = t.x - t.align * width;
     const top = t.y - (m.line / 2 + m.pad) * t.size;
+    const [r, g, b, a] = t.color;
     for (const ch of t.text) {
-      const g = this.atlas.glyph(t.font, weight, ch);
+      const gl = this.atlas.glyph(t.font, weight, ch);
       if (ch !== ' ') {
         const x0 = pen - m.pad * t.size;
-        out.push(x0, top, x0 + g.w * t.size, top + g.h * t.size, g.u0, g.v0, g.u1, g.v1, ...t.color, t.size, t.minPx, 0, 0);
+        out.reserve(16);
+        const d = out.a, i = out.n;
+        d[i] = x0; d[i + 1] = top; d[i + 2] = x0 + gl.w * t.size; d[i + 3] = top + gl.h * t.size;
+        d[i + 4] = gl.u0; d[i + 5] = gl.v0; d[i + 6] = gl.u1; d[i + 7] = gl.v1;
+        d[i + 8] = r; d[i + 9] = g; d[i + 10] = b; d[i + 11] = a;
+        d[i + 12] = t.size; d[i + 13] = t.minPx; d[i + 14] = 0; d[i + 15] = 0;
+        out.n += 16;
       }
-      pen += g.advance * t.size;
+      pen += gl.advance * t.size;
     }
   }
 
-  /** @param {GPUBuffer | null} buffer @param {number[]} data */
+  /** @param {GPUBuffer | null} buffer @param {Float32Array} data */
   upload(buffer, data) {
     const bytes = Math.max(256, data.length * 4);
     if (!buffer || buffer.size < bytes) {
       buffer?.destroy();
       buffer = this.device.createBuffer({ size: Math.max(bytes, (buffer?.size ?? 0) * 2), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
     }
-    if (data.length) this.device.queue.writeBuffer(buffer, 0, new Float32Array(data));
+    if (data.length) this.device.queue.writeBuffer(buffer, 0, data);
     return buffer;
   }
 
@@ -348,11 +398,17 @@ export class WebGPURenderer {
     pass.setBindGroup(0, this.bindGroup);
     pass.setPipeline(this.gridPipeline);
     pass.draw(3);
-    for (const r of this.ranges) {
-      if (r.shapes[1]) { pass.setPipeline(this.shapePipeline); pass.setVertexBuffer(0, this.buffers.shapes); pass.draw(6, r.shapes[1], 0, r.shapes[0]); }
-      if (r.tris[1]) { pass.setPipeline(this.triPipeline); pass.setVertexBuffer(0, this.buffers.tris); pass.draw(r.tris[1], 1, r.tris[0], 0); }
-      if (r.texts[1]) { pass.setPipeline(this.textPipeline); pass.setVertexBuffer(0, this.buffers.texts); pass.draw(6, r.texts[1], 0, r.texts[0]); }
-    }
+    /** @param {Packed} set @param {number} from @param {number} to */
+    const layers = (set, from, to) => {
+      for (const r of set.ranges.slice(from, to)) {
+        if (r.shapes[1]) { pass.setPipeline(this.shapePipeline); pass.setVertexBuffer(0, set.buffers.shapes); pass.draw(6, r.shapes[1], 0, r.shapes[0]); }
+        if (r.tris[1]) { pass.setPipeline(this.triPipeline); pass.setVertexBuffer(0, set.buffers.tris); pass.draw(r.tris[1], 1, r.tris[0], 0); }
+        if (r.texts[1]) { pass.setPipeline(this.textPipeline); pass.setVertexBuffer(0, set.buffers.texts); pass.draw(6, r.texts[1], 0, r.texts[0]); }
+      }
+    };
+    layers(this.sets.overlay, 0, 1);
+    layers(this.sets.base, 0, Infinity);
+    layers(this.sets.overlay, 1, Infinity);
     pass.end();
     this.device.queue.submit([encoder.finish()]);
   }
@@ -360,7 +416,7 @@ export class WebGPURenderer {
   destroy() {
     this.onLost = null;
     this.msaa?.destroy();
-    for (const b of Object.values(this.buffers)) b?.destroy();
+    for (const set of Object.values(this.sets)) for (const b of Object.values(set.buffers)) b?.destroy();
     this.atlasTexture.destroy();
     this.device.destroy();
   }

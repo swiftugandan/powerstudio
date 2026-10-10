@@ -377,7 +377,7 @@ export class App {
   onSelection() {
     this.tree.render();
     this.inspector.schedule();
-    this.viewport.invalidate();
+    this.viewport.invalidate('overlay');
     if (this.dock.tab !== 'output' && this.dock.tab !== 'rms') this.dock.render();
     this.updateStatus();
     this.commands.changed();
@@ -385,7 +385,7 @@ export class App {
   }
 
   /** @param {string} id */
-  setHover(id) { this.hover = id; this.viewport.invalidate(); }
+  setHover(id) { this.hover = id; this.viewport.invalidate('overlay'); }
 
   /** @param {Tool} tool */
   setTool(tool) {
@@ -605,14 +605,17 @@ export class App {
         const text = `Load flow converged in ${lf.iterations} iteration${lf.iterations === 1 ? '' : 's'} (${duration(ms)}). Losses ${fixed(lf.totals.losses, 3)} MW${worst.id ? `, highest loading ${fixed(worst.loading, 1)} % on ${name(worst.id)}` : ''}.`;
         if (!auto) this.log('ok', text); else this.setStatusMessage(text);
       } else this.log('error', `Load flow did not converge: ${lf.message}`);
-      if (!auto) for (const w of lf.warnings) this.log('warn', w);
-      if (!auto && lf.deenergized.length) this.log('warn', `De-energised busbars: ${lf.deenergized.map(name).join(', ')}.`);
+      if (!auto) this.logWarnings(lf.warnings, 'the load flow results list them all');
+      if (!auto && lf.deenergized.length) {
+        const shown = lf.deenergized.slice(0, 20).map(name).join(', ');
+        this.log('warn', `De-energised busbars: ${shown}${lf.deenergized.length > 20 ? `, and ${lf.deenergized.length - 20} more (listed under the load flow's warnings)` : ''}.`);
+      }
     } else if (kind === 'shortcircuit') {
       /** @type {import('./engine/reports.js').ShortCircuitResult} */
       const sc = r;
       const top = sc.buses.reduce((m, b) => (b.ikss > m.ikss ? b : m), { ikss: -Infinity, id: '' });
       this.log('ok', `Short circuit (${enumLabel('fault', sc.fault).toLowerCase()}, ${sc.mode === 'max' ? 'maximum' : 'minimum'}) at ${sc.location ? name(sc.location) : `${sc.buses.length} busbars`} in ${duration(ms)}.${top.id ? ` Highest Ik″ ${fixed(top.ikss, 2)} kA at ${name(top.id)}.` : ''}`);
-      for (const w of sc.warnings) this.log('warn', w);
+      this.logWarnings(sc.warnings, 'the short-circuit results list them all');
     } else if (kind === 'contingency') {
       /** @type {import('./engine/reports.js').ContingencyResult} */
       const n1 = r;
@@ -751,6 +754,12 @@ export class App {
   log(level, text, detail) {
     this.dock.write(level, text, detail);
     this.setStatusMessage(text);
+  }
+
+  /** Logs a calculation's warnings: the first twenty, and how many more there are. @param {string[]} warnings @param {string} where */
+  logWarnings(warnings, where) {
+    for (const w of warnings.slice(0, 20)) this.log('warn', w);
+    if (warnings.length > 20) this.log('warn', `And ${warnings.length - 20} more warnings; ${where}.`);
   }
 
   /** @param {string} text */

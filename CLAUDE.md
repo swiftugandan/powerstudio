@@ -40,8 +40,9 @@ docs/ARCHITECTURE.md for the structure and docs/ENGINE.md for what every calcula
   importer in JavaScript.
 - Every document edit goes through `store.transact` so undo, redo, autosave and staleness work.
 - Buttons get behaviour from `data-cmd` and a registered command; never attach click handlers to command buttons.
-- The bundler supports only single-line `import { … } from '…'` and `export function|class|const|let`. Keep the one
-  `new Worker(new URL('./worker/engine.worker.js', import.meta.url), { type: 'module' })` in `main.js` as written.
+- The bundler supports only single-line `import { … } from '…'` and `export function|function*|class|const|let`.
+  Keep the one `new Worker(new URL('./worker/engine.worker.js', import.meta.url), { type: 'module' })` in `main.js`
+  as written.
 - Both renderers draw the same `DisplayList`; add a primitive to both (and to `svg.js`) or to neither.
 - Shortcuts: never bind keys the browser owns (F5, F11, Ctrl+N, Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+1…9).
 - UI copy: British English, plain verbs, sentence case.

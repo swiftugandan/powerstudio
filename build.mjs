@@ -46,7 +46,7 @@ export async function loadModules() {
   for (const file of await collect(join(root, 'src'))) {
     const id = '/' + relative(root, file).replaceAll('\\', '/');
     let source = await readFile(file, 'utf8');
-    const exported = [...source.matchAll(/^export\s+(?:async\s+)?(?:function|class|const|let)\s+(\w+)/gm)].map(m => m[1]);
+    const exported = [...source.matchAll(/^export\s+(?:async\s+)?(?:function\*?|class|const|let)\s+(\w+)/gm)].map(m => m[1]);
     /** @type {string[]} */
     const deps = [];
     if (source.includes(WORKER)) workerSites++;
@@ -55,7 +55,7 @@ export async function loadModules() {
         deps.push(resolveId(spec, id));
         return `const {${names.replace(/\s+as\s+/g, ': ')}} = require(${JSON.stringify(spec)});`;
       })
-      .replace(/^export\s+(?=(?:async\s+)?(?:function|class|const|let)\s)/gm, '')
+      .replace(/^export\s+(?=(?:async\s+)?(?:function\*?|class|const|let)\s)/gm, '')
       .replace(WORKER, 'new Worker(globalThis.__POWERSTUDIO_WORKER_URL__)');
     // Check code only: JSDoc type imports such as import('./types.js').Shape are fine.
     const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

@@ -2,9 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildScene } from '../src/render/scene.js';
 import { SHAPE_STRIDE } from '../src/render/displaylist.js';
-import { hitTest, inRect } from '../src/render/hittest.js';
+import { hitTest, inRect, HitIndex } from '../src/render/hittest.js';
 import { route, bar } from '../src/render/geometry.js';
 import { ieee14 } from '../src/samples/ieee14.js';
+import { riverside } from '../src/samples/riverside.js';
 
 /** @type {any} */
 const rgba = [0.5, 0.5, 0.5, 1];
@@ -38,4 +39,26 @@ test('hit testing finds busbars, symbols and branches, and the marquee selects w
   assert.equal(hitTest(doc.elements, { x: -10000, y: 0 }, 1, new Set()), null);
   const ids = inRect(doc.elements, { x0: -1000, y0: -1000, x1: 1000, y1: 1000 });
   assert.equal(ids.length, doc.elements.length);
+});
+
+test('the hit index finds exactly what a full scan finds, at every zoom and with a selection', () => {
+  for (const doc of [ieee14(), riverside()]) {
+    const index = new HitIndex(doc.elements);
+    const xs = doc.elements.filter(e => e.cls === 'bus').flatMap(b => [Number(b.x), Number(b.x) + Number(b.len) / 2]);
+    const ys = doc.elements.filter(e => e.cls === 'bus').map(b => Number(b.y));
+    const [x0, x1, y0, y1] = [Math.min(...xs) - 200, Math.max(...xs) + 200, Math.min(...ys) - 200, Math.max(...ys) + 200];
+    let checked = 0, found = 0;
+    for (let i = 0; i < 4000; i++) {
+      // A deterministic scatter over the diagram.
+      const p = { x: x0 + ((i * 7919) % 1000) / 1000 * (x1 - x0), y: y0 + ((i * 104729) % 997) / 997 * (y1 - y0) };
+      for (const zoom of [0.2, 1, 3]) {
+        const selection = new Set(i % 3 ? [] : [doc.elements[i % doc.elements.length].id]);
+        const full = hitTest(doc.elements, p, zoom, selection), indexed = hitTest(doc.elements, p, zoom, selection, index);
+        assert.deepEqual(indexed, full, `${doc.name} at ${p.x}, ${p.y} zoom ${zoom}`);
+        checked++;
+        if (full) found++;
+      }
+    }
+    assert.ok(found > checked / 20, `${doc.name}: ${found} of ${checked} points hit something`);
+  }
 });

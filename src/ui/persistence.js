@@ -61,8 +61,9 @@ export class DocumentLibrary {
   /** @param {string} id @param {import('../core/document.js').PowerDocument} doc */
   async put(id, doc) {
     /** @type {StoredDoc} */
-    const rec = { id, name: doc.name, updated: Date.now(), elements: doc.elements.length, doc: structuredClone(doc) };
-    if (!this.db) { this.memory.set(id, rec); return; }
+    // IndexedDB copies the document as it stores it; only the in-memory fallback needs its own copy.
+    const rec = { id, name: doc.name, updated: Date.now(), elements: doc.elements.length, doc };
+    if (!this.db) { this.memory.set(id, { ...rec, doc: structuredClone(doc) }); return; }
     await this.request('readwrite', s => s.put(rec));
   }
 

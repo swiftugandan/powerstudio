@@ -2,7 +2,7 @@
 
 import { h } from './dom.js';
 import { icon } from './icons.js';
-import { fieldRow } from './fields.js';
+import { fieldRow, elementPicker, MANY_BUSES } from './fields.js';
 import { modal } from './feedback.js';
 import { STUDY_FIELDS, EVENT_KINDS } from '../core/document.js';
 import { parseNumber } from './format.js';
@@ -22,11 +22,21 @@ export async function openStudyDialog(app, focusSection) {
     const props = h('div', { class: 'props' });
     for (const f of fields) {
       if (section === 'shortcircuit' && f.key === 'location') {
-        const sel = h('select', { class: 'input', id: 'study-location', 'data-key': 'location' }, h('option', { value: '', text: 'Every busbar' }),
-          ...doc.elements.filter(e => e.cls === 'bus').map(b => h('option', { value: b.id, text: b.name || b.id })));
-        sel.value = String(draft.shortcircuit.location);
-        sel.addEventListener('change', () => { draft.shortcircuit.location = sel.value; });
-        props.append(h('label', { for: 'study-location', text: f.label, title: f.help }), h('div', { class: 'field' }, sel));
+        const buses = doc.elements.filter(e => e.cls === 'bus').map(b => ({ id: b.id, name: /** @type {string} */ (b.name) }));
+        let control;
+        if (buses.length > MANY_BUSES) {
+          const error = h('div', { class: 'field-error', role: 'alert', hidden: true });
+          const picker = elementPicker(buses, String(draft.shortcircuit.location), 'study-location', v => { draft.shortcircuit.location = v; return ''; }, 'Every busbar');
+          picker.input.addEventListener('change', () => { const msg = picker.apply(); error.textContent = msg; error.hidden = !msg; picker.input.classList.toggle('invalid', !!msg); });
+          control = [h('div', { class: 'field' }, picker.input), error];
+        } else {
+          const sel = h('select', { class: 'input', id: 'study-location', 'data-key': 'location' }, h('option', { value: '', text: 'Every busbar' }),
+            ...buses.map(b => h('option', { value: b.id, text: b.name || b.id })));
+          sel.value = String(draft.shortcircuit.location);
+          sel.addEventListener('change', () => { draft.shortcircuit.location = sel.value; });
+          control = [h('div', { class: 'field' }, sel)];
+        }
+        props.append(h('label', { for: 'study-location', text: f.label, title: f.help }), ...control);
         continue;
       }
       props.append(...fieldRow(f, draft[section][f.key], v => {
@@ -99,7 +109,18 @@ function areaEditor(app, lf) {
 function eventEditor(app, rms) {
   const doc = app.store.doc;
   const table = h('table', { class: 'events' });
-  const targets = (/** @type {string} */ kind) => doc.elements.filter(e => (kind === 'fault' || kind === 'clear' ? e.cls === 'bus' : kind === 'loadstep' ? e.cls === 'load' : e.cls !== 'bus'));
+  /** The elements each kind of event can act on, listed once for the dialog. @type {Map<string, Array<{ id: string, name: string }>>} */
+  const lists = new Map();
+  const targets = (/** @type {string} */ kind) => {
+    const group = kind === 'fault' || kind === 'clear' ? 'bus' : kind === 'loadstep' ? 'load' : 'other';
+    let list = lists.get(group);
+    if (!list) {
+      list = doc.elements.filter(e => (group === 'bus' ? e.cls === 'bus' : group === 'load' ? e.cls === 'load' : e.cls !== 'bus'))
+        .map(e => ({ id: e.id, name: /** @type {string} */ (e.name) }));
+      lists.set(group, list);
+    }
+    return list;
+  };
   const render = () => {
     table.replaceChildren(h('thead', {}, h('tr', {}, h('th', { text: 'Time (s)' }), h('th', { text: 'Event' }), h('th', { text: 'Element' }), h('th', { text: 'Value' }), h('th'))));
     const body = h('tbody');
@@ -109,9 +130,20 @@ function eventEditor(app, rms) {
       const kind = h('select', { class: 'input', 'aria-label': 'Event type' }, ...EVENT_KINDS.map(k => h('option', { value: k, text: EVENT_LABEL[k] })));
       kind.value = ev.kind;
       kind.addEventListener('change', () => { ev.kind = /** @type {any} */ (kind.value); if (!targets(ev.kind).some(e => e.id === ev.target)) ev.target = targets(ev.kind)[0]?.id ?? ''; render(); });
-      const target = h('select', { class: 'input', 'aria-label': 'Event element' }, ...targets(ev.kind).map(e => h('option', { value: e.id, text: e.name || e.id })));
-      target.value = ev.target;
-      target.addEventListener('change', () => { ev.target = target.value; });
+      const choices = targets(ev.kind);
+      /** @type {HTMLElement} */
+      let target;
+      if (choices.length > MANY_BUSES) {
+        const picker = elementPicker(choices, ev.target, `event-${i}`, v => { ev.target = v; return ''; }, undefined, ev.kind === 'fault' || ev.kind === 'clear' ? 'busbar' : 'element');
+        picker.input.setAttribute('aria-label', 'Event element');
+        picker.input.addEventListener('change', () => { const msg = picker.apply(); picker.input.classList.toggle('invalid', !!msg); picker.input.title = msg; });
+        target = picker.input;
+      } else {
+        const select = h('select', { class: 'input', 'aria-label': 'Event element' }, ...choices.map(e => h('option', { value: e.id, text: e.name || e.id })));
+        select.value = ev.target;
+        select.addEventListener('change', () => { ev.target = select.value; });
+        target = select;
+      }
       const value = h('input', { class: 'input', 'aria-label': 'Event value', style: 'width:72px;text-align:right', value: ev.kind === 'loadstep' ? String(ev.value ?? 100) : '', disabled: ev.kind !== 'loadstep' });
       value.addEventListener('change', () => { ev.value = parseNumber(value.value); });
       const del = h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Remove event', html: icon('delete', 15), onclick: () => { rms.events.splice(i, 1); render(); } });
