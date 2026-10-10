@@ -22,6 +22,7 @@ import { buildOverlay } from './ui/overlay.js';
 import { openPalette } from './ui/palette.js';
 import { openBackstage, closeBackstage } from './ui/backstage.js';
 import { openStudyDialog } from './ui/study.js';
+import { printReport } from './ui/report.js';
 import { openContingencyDialog } from './ui/contingency-editor.js';
 import { importDialog } from './ui/import-dialog.js';
 import { IMPORT_TYPES } from './engine/exchange.js';
@@ -38,7 +39,7 @@ import { REPO_URL } from './core/version.js';
  * @typedef {import('./core/document.js').PowerDocument} PowerDocument
  * @typedef {import('./ui/viewport.js').Tool} Tool
  * @typedef {'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} CalcKind
- * @typedef {{ result: any, ms: number, revision: number }} StoredResult
+ * @typedef {{ result: any, ms: number, revision: number, run?: string }} StoredResult `run`: its record in the run log
  */
 
 const CALC_LABEL = /** @type {Record<CalcKind, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'N-1 contingency analysis', rms: 'Stability simulation' });
@@ -794,12 +795,13 @@ export class App {
         ({ result, record: hashes, bytes } = cold);
         ms += cold.ms;
       }
-      if (hashes) void this.recordRun(kind, result, ms, hashes, start, bytes);
+      const run = hashes ? `${new Date().toISOString()}-${Math.random().toString(16).slice(2, 6)}` : '';
+      if (hashes) void this.recordRun(run, kind, result, ms, hashes, start, bytes);
       if (kind === 'contingency' && this.engine.shrunk) {
         this.log('warn', `Memory ran short: ${this.engine.shrunk} calculation worker${this.engine.shrunk === 1 ? '' : 's'} ended and the others finished the analysis. The result is the same; it took longer.`);
       }
       if (kind === 'loadflow' && result.converged) this.start = startOf(result);
-      this.results[kind] = { result, ms, revision };
+      this.results[kind] = { result, ms, revision, ...(run ? { run } : {}) };
       // The calculation is over once its result is stored: other commands work while the result is shown.
       this.finishCalc();
       this.report(kind, result, ms, !!opt.auto);
@@ -838,12 +840,12 @@ export class App {
    * Appends a calculation to the project's run log (docs/design/NATIONAL-GRADE.md, section 9.2): what ran, on which
    * engine, the hashes of its inputs and its report, and its outcome. A load flow solved from a previous solution
    * names that start's hash too, since the result depends on it to within the tolerance.
-   * @param {CalcKind} kind @param {any} r @param {number} ms @param {import('./ui/engine-client.js').Hashes} hashes
+   * @param {string} run its identifier @param {CalcKind} kind @param {any} r @param {number} ms @param {import('./ui/engine-client.js').Hashes} hashes
    * @param {import('./engine/reports.js').StartVoltages | null} start @param {Uint8Array} bytes the report, kept compressed
    * so the run can be compared with others
    */
-  async recordRun(kind, r, ms, hashes, start, bytes) {
-    const p = this.project, c = activeCase(p), now = new Date();
+  async recordRun(run, kind, r, ms, hashes, start, bytes) {
+    const p = this.project, c = activeCase(p), time = run.slice(0, 24);
     try {
       const outcome = kind === 'loadflow' ? { converged: r.converged, iterations: r.iterations, lossesMw: r.totals.losses, warnings: r.warnings.length }
         : kind === 'shortcircuit' ? { buses: r.buses.length, maxIkssKa: Math.max(0, ...r.buses.map((/** @type {any} */ b) => b.ikss)) }
@@ -851,7 +853,7 @@ export class App {
             : { stable: r.stable, steps: r.steps };
       /** @type {import('./ui/persistence.js').RunRecord} */
       const rec = {
-        run: `${now.toISOString()}-${Math.random().toString(16).slice(2, 6)}`, time: now.toISOString(), kind,
+        run, time, kind,
         studyCase: c.name, scenario: p.scenarios.find(x => x.id === c.scenario)?.name ?? '',
         variants: p.variants.filter(v => c.variants.includes(v.id)).map(v => v.name),
         engine: { version: hashes.engine, wasmSha256: await engineDigest() },
@@ -1146,6 +1148,8 @@ export class App {
     c.add({ id: 'file.save', label: 'Save now', icon: 'save', keys: ['Mod+S'], global: true, group: 'File', hint: 'Networks save automatically; this saves immediately', run: async () => { await this.save(); toast('ok', this.library.persistent ? 'Saved in this browser.' : 'Kept for this session. Export to keep a copy.'); } });
     c.add({ id: 'file.import', label: 'Import file', icon: 'import', keys: ['Mod+Shift+O'], global: true, group: 'File', hint: 'Import a PowerStudio file, a CGMES model, a PSS/E RAW file or a MATPOWER case', run: () => this.importFile(`.json,${IMPORT_TYPES}`) });
     c.add({ id: 'file.exportCgmes', label: 'Export CGMES SSH and SV', keywords: 'steady state hypothesis state variables operating point', icon: 'export', group: 'File', hint: 'The operating point of the active study case, in the CGMES files the project came from', enabled: () => this.project.source?.format === 'cgmes', run: () => { void this.exportCgmes(); } });
+    c.add({ id: 'file.report', label: 'Print study report', keywords: 'pdf print report results summary', icon: 'results', group: 'File', hint: 'The study case\u2019s results and run records, for print or saving as PDF',
+      run: () => { void printReport(this).catch(e => this.log('error', `The report could not be built: ${e instanceof Error ? e.message : e}`)); } });
     c.add({ id: 'file.exportProject', label: 'Export project', keywords: 'backup archive variants scenarios runs', icon: 'layers', group: 'File', hint: 'The whole project with its run log, as one file', run: () => { void this.exportProject(); } });
     c.add({ id: 'file.export', label: 'Export PowerStudio file', icon: 'export', keys: ['Mod+Shift+S'], global: true, group: 'File', run: () => this.exportJSON() });
     c.add({ id: 'file.exportSvg', label: 'Export diagram as SVG', icon: 'image', group: 'File', run: () => { download(new Blob([this.viewport.exportSVG()], { type: 'image/svg+xml' }), fileName(this.store.doc.name, '.svg')); this.log('ok', 'Exported the diagram as SVG.'); } });

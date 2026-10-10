@@ -70,6 +70,7 @@ async function render(app, page, close) {
   if (page === 'export') {
     return [h('h1', { text: 'Export' }), h('p', { class: 'lead', text: 'Save copies outside the browser.' }),
       h('div', { class: 'cards' },
+        card('Study report', 'The active study case\u2019s results, settings and run records, laid out for print or saving as PDF.', 'results', () => app.commands.run('file.report')),
         card('Project', 'Every study case, scenario and variant with the run log, in one file. Imports back as a new project.', 'layers', () => app.commands.run('file.exportProject')),
         card('PowerStudio file', 'The network as the active study case composes it, with its settings, as JSON. Opens in PowerStudio on any machine.', 'save', () => app.commands.run('file.export')),
         ...(app.project.source?.format === 'cgmes' ? [card('CGMES SSH and SV', 'The active study case\u2019s operating point in the CGMES files the project came from: their SSH with the values you changed, and the SV of its load flow, in a ZIP.', 'export', () => app.commands.run('file.exportCgmes'))] : []),

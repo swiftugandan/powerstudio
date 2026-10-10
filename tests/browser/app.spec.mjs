@@ -489,6 +489,20 @@ test('imports a CGMES model, edits its operating point and exports it as SSH and
   await expect(page.locator('.log')).toContainText('1 changed value in SSH');
 });
 
+test('prints a study report with the run records and each result', async ({ page }) => {
+  await open(page);
+  await loadFlow(page);
+  await page.keyboard.press('Alt+N');
+  await expect(page.locator('.dock-tab[data-tab="contingency"]')).toHaveAttribute('aria-selected', 'true');
+  await page.evaluate(() => { /** @type {any} */ (window).print = () => { /** @type {any} */ (window).printed = document.getElementById('print-root')?.textContent; }; });
+  await palette(page, 'Print study report');
+  await page.waitForFunction(() => typeof (/** @type {any} */ (window).printed) === 'string');
+  const text = await page.evaluate(() => /** @type {any} */ (window).printed);
+  for (const part of ['Study report', 'Run records', 'Load flow', 'Contingency analysis', 'Settings', 'Diagram']) expect(text).toContain(part);
+  expect(text).toContain('Converged in 2');
+  await expect(page.locator('#print-root .report-table td.num').first()).toBeAttached();
+});
+
 test('exports a PowerStudio file that imports again unchanged', async ({ page }) => {
   await open(page, 'sample=riverside');
   const download = page.waitForEvent('download');

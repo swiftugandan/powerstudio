@@ -319,10 +319,14 @@ export class Viewport {
   // ----- Export -----
 
   exportSVG() {
+    return toSVG(this.buildList(), this.extent(), this.app.palette.bg, this.app.store.doc.name);
+  }
+
+  /** The whole diagram's extent with room for labels and result boxes, in world units. */
+  extent() {
     const box = bounds(this.app.store.doc.elements);
     const pad = 40;
-    const b = { x0: box.x0 - pad - 160, y0: box.y0 - pad, x1: box.x1 + pad + 160, y1: box.y1 + pad };
-    return toSVG(this.buildList(), b, this.app.palette.bg, this.app.store.doc.name);
+    return { x0: box.x0 - pad - 160, y0: box.y0 - pad, x1: box.x1 + pad + 160, y1: box.y1 + pad };
   }
 
   /** Renders the whole diagram off screen with Canvas 2D at twice the resolution. @returns {Promise<Blob>} */

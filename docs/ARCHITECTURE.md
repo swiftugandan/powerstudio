@@ -173,6 +173,12 @@ filter to the rows that changed. The result tables also filter to rows near or b
 contingency results list each branch's and busbar's worst post-contingency state with the outage behind it, so "every
 branch above 90 % in any contingency" is one click. The Project page's run log deletes a run with its report.
 
+The study report (`ui/report.js`) lays the active study case out for print or saving as PDF: a cover with the
+network, the study case, its scenario and variants and the run record of each result (results calculated on edit say
+they were not recorded), then each calculation's key figures, the rows that matter (violations first, at most forty),
+its settings, and the diagram with the results on it, in the light palette, for networks of up to 4,000 elements. It
+is built into `#print-root`, which print shows alone (`@media print` in `style.css`), and cleared after printing.
+
 **Workers (`src/worker/`, `src/ui/engine-client.js`).** Each worker holds one engine instance, created from the
 compiled module the page sends it, so the module is compiled once however many workers start. The engine client
 runs ordinary studies on the first worker and spreads contingency analysis across a pool (one worker per spare CPU
