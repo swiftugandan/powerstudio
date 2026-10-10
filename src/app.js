@@ -343,6 +343,8 @@ export class App {
 
   /** @param {import('./core/store.js').Change} change */
   onChange(change) {
+    // The calculation workers keep their own copies of the document.
+    if (change.source === 'load') this.engine.setDocument(this.store.doc); else this.engine.applyOps(change.ops);
     if (change.network || change.study) this.networkRevision++;
     for (const id of [...this.selection]) if (!this.store.get(id)) this.selection.delete(id);
     const name = /** @type {HTMLInputElement} */ (byId('doc-name'));

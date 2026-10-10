@@ -18,7 +18,7 @@ import { STUDY_FIELDS, busesOf } from './document.js';
  *   | { type: 'study', section: string, key: string, before: unknown, after: unknown }} Op
  * @typedef {{ label: string, ops: Op[], coalesce: string, time: number }} Transaction
  * @typedef {{ label: string, ids: Set<string>, structural: boolean, network: boolean, study: boolean, meta: boolean,
- *   source: 'edit' | 'undo' | 'redo' | 'load' }} Change
+ *   source: 'edit' | 'undo' | 'redo' | 'load', ops: Op[] }} Change A change, with the operations as they were applied
  */
 
 const HISTORY = 200;
@@ -54,7 +54,7 @@ export class DocumentStore {
     this.doc = doc;
     this.past = []; this.future = [];
     this.reindex();
-    this.emit({ label: 'Open', ids: new Set(), structural: true, network: true, study: true, meta: true, source: 'load' });
+    this.emit({ label: 'Open', ids: new Set(), structural: true, network: true, study: true, meta: true, source: 'load', ops: [] });
   }
 
   /**
@@ -86,9 +86,10 @@ export class DocumentStore {
   undo() {
     const t = this.past.pop();
     if (!t) return;
-    for (let i = t.ops.length - 1; i >= 0; i--) this.apply(invert(t.ops[i]));
+    const applied = [];
+    for (let i = t.ops.length - 1; i >= 0; i--) { const op = invert(t.ops[i]); this.apply(op); applied.push(op); }
     this.future.push(t);
-    this.emit(describe(t.label, t.ops, 'undo'));
+    this.emit(describe(t.label, applied, 'undo'));
   }
 
   redo() {
@@ -101,21 +102,7 @@ export class DocumentStore {
   }
 
   /** @param {Op} op */
-  apply(op) {
-    const doc = this.doc;
-    switch (op.type) {
-      case 'set': { const el = this.index.get(op.id); if (el) el[op.key] = op.after; break; }
-      case 'add': doc.elements.splice(op.index, 0, op.el); this.index.set(op.el.id, op.el); break;
-      case 'remove': {
-        const i = doc.elements.findIndex(e => e.id === op.el.id);
-        if (i >= 0) doc.elements.splice(i, 1);
-        this.index.delete(op.el.id);
-        break;
-      }
-      case 'doc': /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (doc))[op.key] = op.after; break;
-      case 'study': /** @type {Record<string, any>} */ (doc.study)[op.section][op.key] = op.after; break;
-    }
-  }
+  apply(op) { applyOp(this.doc, this.index, op); }
 
   /** @param {Change} change */
   emit(change) {
@@ -252,5 +239,24 @@ function describe(label, ops, source) {
     else if (op.type === 'study') study = true;
     else { meta = true; if (op.key === 'baseMVA' || op.key === 'frequency') network = true; }
   }
-  return { label, ids, structural, network, study, meta, source };
+  return { label, ids, structural, network, study, meta, source, ops };
+}
+
+/**
+ * Applies one operation to a document and its id index: the store's edits, and the same edits on the copies the
+ * calculation workers keep. @param {PowerDocument} doc @param {Map<string, Element>} index @param {Op} op
+ */
+export function applyOp(doc, index, op) {
+  switch (op.type) {
+    case 'set': { const el = index.get(op.id); if (el) el[op.key] = op.after; break; }
+    case 'add': doc.elements.splice(op.index, 0, op.el); index.set(op.el.id, op.el); break;
+    case 'remove': {
+      const i = doc.elements.findIndex(e => e.id === op.el.id);
+      if (i >= 0) doc.elements.splice(i, 1);
+      index.delete(op.el.id);
+      break;
+    }
+    case 'doc': /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (doc))[op.key] = op.after; break;
+    case 'study': /** @type {Record<string, any>} */ (doc.study)[op.section][op.key] = op.after; break;
+  }
 }

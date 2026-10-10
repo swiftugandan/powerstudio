@@ -3,7 +3,12 @@
  * Ordinary studies run on the first worker. Contingency analysis splits its outages into contiguous chunks across a
  * pool of workers, and the engine merges the chunks in outage order, so the result is the same as a sequential run
  * whatever the pool size. When a worker cannot be started (some file:// contexts), one engine runs on the main
- * thread instead. */
+ * thread instead.
+ *
+ * Each worker keeps its own copy of the document. It receives the document as JSON once per document (serialised in
+ * slices, so a national network does not hold the page), and after that only the store's operations, which it applies
+ * to its copy; a calculation names the document state it expects. So the page never copies the whole document for a
+ * calculation, and a contingency analysis across eight workers does not copy it eight times. */
 
 import { engineModule } from '../engine/module.js';
 import { EngineHost, jsonPayload } from '../engine/host.js';
@@ -11,11 +16,14 @@ import { request } from '../engine/studies.js';
 import { importFiles } from '../engine/exchange.js';
 import { autoLayout } from '../core/layout.js';
 import { adapt } from '../engine/reports.js';
+import { serialise } from './persistence.js';
+import { yieldToBrowser } from './dom.js';
 
 /** @typedef {import('../engine/reports.js').CalcKind} CalcKind */
 /** @typedef {(done: number, total: number) => void} OnProgress */
 /** @typedef {{ bytes: Uint8Array, ms: number, summary?: import('../engine/reports.js').ImportSummary }} Reply */
 /** @typedef {{ id: number, resolve: (v: Reply) => void, reject: (e: Error) => void, onProgress?: OnProgress }} Pending */
+/** @typedef {{ worker: Worker, pending: Pending | null, key: string }} Slot A worker, its call in progress and the document state its copy holds */
 
 /** Outages below which contingency analysis stays on one worker. */
 const PARALLEL_FROM = 16;
@@ -32,8 +40,15 @@ export class EngineClient {
     this.factory = factory;
     const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
     this.poolSize = opt.poolSize ?? Math.min(8, Math.max(1, cores - 1));
-    /** @type {Array<{ worker: Worker, pending: Pending | null } | null>} */
+    /** @type {Array<Slot | null>} */
     this.slots = [];
+    /** The document the workers' copies follow, and how many times one was opened and edited since. */
+    /** @type {import('../core/document.js').PowerDocument | null} */
+    this.doc = null;
+    this.opened = 0;
+    this.edits = 0;
+    /** The document's JSON for a state, built when a worker first needs it. @type {{ key: string, text: Promise<string> } | null} */
+    this.json = null;
     /** @type {EngineHost | null} */
     this.host = null;
     this.inThread = false;
@@ -45,6 +60,44 @@ export class EngineClient {
 
   get busy() { return this.active > 0; }
 
+  /** The document state the workers' copies should hold. */
+  get key() { return `${this.opened}:${this.edits}`; }
+
+  /** A new document: every worker gets it before its next calculation. @param {import('../core/document.js').PowerDocument} doc */
+  setDocument(doc) {
+    this.doc = doc;
+    this.opened++;
+    this.edits = 0;
+    this.json = null;
+  }
+
+  /** Forwards an edit to the workers whose copies are current; the others get the whole document when next needed.
+   * @param {import('../core/store.js').Op[]} ops */
+  applyOps(ops) {
+    if (!this.doc || !ops.length) return;
+    const before = this.key;
+    this.edits++;
+    this.json = null;
+    for (const s of this.slots) {
+      if (s?.key === before) { s.worker.postMessage({ type: 'ops', ops, key: this.key }); s.key = this.key; }
+    }
+  }
+
+  /** Brings a worker's copy of the document up to date. @param {Slot} s */
+  async ensureDocument(s) {
+    while (this.doc && s.key !== this.key) {
+      const key = this.key, doc = this.doc;
+      if (this.json?.key !== key) {
+        this.json = { key, text: serialise(doc, () => this.key === key, yieldToBrowser).then(t => t ?? '') };
+      }
+      const text = await this.json.text;
+      // An edit or another document came meanwhile: start again with the state as it is now.
+      if (!text || this.key !== key) continue;
+      s.worker.postMessage({ type: 'doc', json: text, key });
+      s.key = key;
+    }
+  }
+
   /**
    * Starts worker `k` if needed. Returns null when workers are unavailable.
    * @param {number} k @param {WebAssembly.Module} module
@@ -55,7 +108,8 @@ export class EngineClient {
     if (existing) return existing;
     let worker;
     try { worker = this.factory(); } catch { this.inThread = true; return null; }
-    const s = { worker, pending: /** @type {Pending | null} */ (null) };
+    /** @type {Slot} */
+    const s = { worker, pending: null, key: '' };
     worker.onmessage = e => {
       const msg = e.data, p = s.pending;
       if (!p || msg.id !== p.id) return;
@@ -94,10 +148,13 @@ export class EngineClient {
         catch (e) { reject(e instanceof Error ? e : new Error(String(e))); }
       }, 0));
     }
+    // The worker computes on its own copy of the document when the request is about the current one.
+    const resident = doc !== null && doc === this.doc;
+    if (resident) await this.ensureDocument(s);
     return new Promise((resolve, reject) => {
       const id = ++this.seq;
       s.pending = { id, resolve, reject, onProgress };
-      s.worker.postMessage({ id, kind, doc, options });
+      s.worker.postMessage(resident ? { id, kind, key: this.key, options } : { id, kind, doc, options });
     });
   }
 
