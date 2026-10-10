@@ -51,11 +51,11 @@ test('draws the diagram with the backend it reports, and that backend is the exp
     expect(facts.backend).toBe('canvas2d');
     expect(facts.reason).toContain('WebGPU');
   }
-  // And the same picture reached the screen.
-  await page.waitForTimeout(100);
-  const img = decodePNG(await page.locator('#viewport').screenshot());
-  expect(share(img, [31, 92, 192])).toBeGreaterThan(0.0008);
-  expect(share(img, [23, 128, 74])).toBeGreaterThan(0.0008);
+  // And the same picture reached the screen (polled: the compositor may be a frame behind).
+  await expect.poll(async () => {
+    const img = decodePNG(await page.locator('#viewport').screenshot());
+    return Math.min(share(img, [31, 92, 192]), share(img, [23, 128, 74]));
+  }).toBeGreaterThan(0.0008);
 });
 
 test('runs a load flow from the keyboard and matches MATPOWER case14', async ({ page }) => {
@@ -873,9 +873,8 @@ test('switches theme and redraws the diagram in the dark palette', async ({ page
   await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('Shift+T');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-  await page.waitForTimeout(200);
-  const img = decodePNG(await page.locator('#viewport').screenshot());
-  expect(share(img, [16, 21, 27], 12)).toBeGreaterThan(0.5); // --dg-bg in the dark theme
+  // The redraw takes a frame or several (software WebGPU on CI is slow): poll the picture rather than wait a fixed time.
+  await expect.poll(async () => share(decodePNG(await page.locator('#viewport').screenshot()), [16, 21, 27], 12)).toBeGreaterThan(0.5); // --dg-bg in the dark theme
 });
 
 test('can be told to draw with Canvas 2D', async ({ page }) => {
