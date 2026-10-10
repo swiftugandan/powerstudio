@@ -6,6 +6,7 @@
 
 pub mod api;
 pub mod contingency;
+pub mod crypto;
 pub mod exchange;
 pub mod limits;
 pub mod loadflow;

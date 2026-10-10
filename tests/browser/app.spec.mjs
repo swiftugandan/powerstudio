@@ -597,6 +597,35 @@ test('exports a PowerStudio file that imports again unchanged', async ({ page })
   await expect(page.locator('.log')).toContainText('with 28 elements');
 });
 
+test('exports an encrypted project that opens only with its passphrase', async ({ page }) => {
+  await open(page, 'sample=riverside');
+  await palette(page, 'Export encrypted project');
+  const dlg = page.locator('.dialog');
+  await dlg.getByLabel('Passphrase', { exact: true }).fill('short');
+  await dlg.getByLabel('Type it again').fill('short');
+  await dlg.getByRole('button', { name: 'Encrypt and export' }).click();
+  await expect(dlg.locator('.field-error')).toContainText('at least 12 characters');
+  await dlg.getByLabel('Passphrase', { exact: true }).fill('river cable ring CHP');
+  await dlg.getByLabel('Type it again').fill('river cable ring CHP');
+  const download = page.waitForEvent('download');
+  await dlg.getByRole('button', { name: 'Encrypt and export' }).click();
+  const file = await (await download).path();
+  const text = readFileSync(file, 'utf8');
+  expect(JSON.parse(text).format).toBe('powerstudio-encrypted');
+  expect(text).not.toContain('Riverside');
+  // Opening it asks for the passphrase, refuses a wrong one, and opens the project with the right one.
+  const chooser = page.waitForEvent('filechooser');
+  await palette(page, 'Import file');
+  await (await chooser).setFiles(file);
+  await dlg.getByLabel('Passphrase', { exact: true }).fill('river cable ring');
+  await dlg.getByRole('button', { name: 'Open' }).click();
+  await expect(dlg.locator('.lead')).toContainText('The passphrase is not right');
+  await dlg.getByLabel('Passphrase', { exact: true }).fill('river cable ring CHP');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#doc-name')).toHaveValue('Riverside distribution');
+  await expect(page.locator('.log')).toContainText('with 28 elements');
+});
+
 test('switches theme and redraws the diagram in the dark palette', async ({ page }) => {
   await open(page);
   await page.locator('#viewport canvas').focus();
@@ -626,6 +655,29 @@ test('makes no network requests beyond loading the page, and forbids them by pol
   const external = urls.filter(u => !u.startsWith('http://127.0.0.1:8771/PowerStudio.html') && !u.startsWith('blob:') && !u.startsWith('data:'));
   expect(external).toEqual([]);
   await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute('content', /connect-src 'none'/);
+});
+
+test('writes HTML only through its own Trusted Types policy, where the browser enforces them', async ({ page, browserName }) => {
+  /** @type {string[]} */
+  const violations = [];
+  page.on('console', m => { if (/Trusted Type|trusted-types/i.test(m.text())) violations.push(m.text()); });
+  await open(page);
+  await loadFlow(page);
+  await page.keyboard.press('Alt+S');
+  await expect(page.locator('.dock-tab[data-tab="shortcircuit"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('meta[http-equiv="Content-Security-Policy"]')).toHaveAttribute('content', /require-trusted-types-for 'script'; trusted-types powerstudio powerstudio-worker/);
+  // The app itself broke no rule on the way.
+  expect(violations).toEqual([]);
+  const enforced = await page.evaluate(() => 'trustedTypes' in window);
+  test.skip(!enforced, `${browserName} has no Trusted Types; the policy is in place for when it does`);
+  // Raw HTML is refused, and no further policy can be made.
+  const refused = await page.evaluate(() => {
+    const out = { html: false, policy: false };
+    try { document.createElement('div').innerHTML = '<b>raw</b>'; } catch { out.html = true; }
+    try { /** @type {any} */ (window).trustedTypes.createPolicy('another', { createHTML: (/** @type {string} */ s) => s }); } catch { out.policy = true; }
+    return out;
+  });
+  expect(refused).toEqual({ html: true, policy: true });
 });
 
 test('fits a phone screen without sideways scrolling', async ({ page }) => {

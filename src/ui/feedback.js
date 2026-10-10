@@ -115,3 +115,38 @@ export async function confirm(title, text, confirmLabel) {
   const r = await modal({ title, body: h('p', { text }), actions: [{ label: 'Cancel', value: false }, { label: confirmLabel, primary: true, value: true }] });
   return r === true;
 }
+
+/**
+ * Asks for a passphrase. With `twice`, for a new file: it must be typed again and be at least `min` characters long.
+ * Resolves with the passphrase, or null when dismissed.
+ * @param {{ title: string, lead: string, action: string, twice?: boolean, min?: number }} spec
+ * @returns {Promise<string | null>}
+ */
+export function askPassphrase(spec) {
+  const field = (/** @type {string} */ id, /** @type {string} */ label) => {
+    const input = /** @type {HTMLInputElement} */ (h('input', { id, class: 'input', type: 'password', autocomplete: spec.twice ? 'new-password' : 'current-password', spellcheck: 'false' }));
+    return { input, row: [h('label', { for: id, text: label }), h('div', { class: 'field' }, input)] };
+  };
+  const first = field('pass-1', 'Passphrase'), second = spec.twice ? field('pass-2', 'Type it again') : null;
+  const error = h('div', { class: 'field-error', role: 'alert', hidden: true });
+  const body = h('div', {}, h('p', { class: 'lead', text: spec.lead }),
+    h('div', { class: 'props' }, ...first.row, ...(second ? second.row : [])), error);
+  /** @returns {string | null} */
+  const check = () => {
+    const v = first.input.value;
+    const problem = spec.twice && v.length < (spec.min ?? 0) ? `Use at least ${spec.min} characters; a few unrelated words are easiest to remember.`
+      : second && v !== second.input.value ? 'The two passphrases differ.'
+        : !v ? 'Type the passphrase.' : '';
+    error.textContent = problem;
+    error.hidden = !problem;
+    return problem ? null : v;
+  };
+  const submit = modal({ title: spec.title, body, actions: [{ label: 'Cancel', value: null }, { label: spec.action, primary: true, run: check }] });
+  // Enter in a field submits, as the primary button would.
+  for (const f of [first, second]) {
+    f?.input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); /** @type {HTMLButtonElement | null} */ (body.closest('.dialog')?.querySelector('.dialog-foot .primary') ?? null)?.click(); }
+    });
+  }
+  return submit;
+}

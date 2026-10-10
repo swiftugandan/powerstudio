@@ -7,3 +7,5 @@ pypowsybl==1.16.1
 pandas==2.3.3
 # Dynamics reference for design phase 5.
 andes==2.0.0
+# Reference implementation of Argon2 (phc-winner-argon2, through its Python binding) for the key derivation golden.
+argon2-cffi==25.1.0

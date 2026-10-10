@@ -2,11 +2,11 @@
  * width. A state fails on any violation; the message lists each rule with the elements it found. */
 import { test, expect } from '@playwright/test';
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 
-const axePath = createRequire(import.meta.url).resolve('axe-core/axe.min.js');
-
-// axe is injected as a script, which the built page's own Content-Security-Policy forbids.
-test.use({ bypassCSP: true });
+// axe runs as evaluated source: the built page's Trusted Types rule refuses a script element, in WebKit even with the
+// page's Content-Security-Policy bypassed.
+const axeSource = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
 
 /** @param {import('@playwright/test').Page} page @param {string} query */
 async function open(page, query = 'sample=ieee14') {
@@ -26,7 +26,7 @@ async function palette(page, text) {
  * @param {string} state what the page shows */
 async function audit(page, state) {
   await page.evaluate(() => Promise.all(document.getAnimations().map(a => a.finished)));
-  await page.addScriptTag({ path: axePath });
+  await page.evaluate(axeSource);
   const violations = await page.evaluate(async () => {
     const r = await /** @type {any} */ (window).axe.run(document, { runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] } });
     return r.violations.map((/** @type {any} */ v) => ({

@@ -9,7 +9,7 @@ import { toSVG } from '../render/svg.js';
 import { hitTest, inRect, HitIndex } from '../render/hittest.js';
 import { bar, bounds, positionOn, route, branchKeys, bendHandle } from '../render/geometry.js';
 import { snap } from '../core/layout.js';
-import { h } from './dom.js';
+import { h, setHtml } from './dom.js';
 import { icon } from './icons.js';
 import { kbd } from './keys.js';
 import { minOf, maxOf } from '../core/extent.js';
@@ -129,7 +129,7 @@ export class Viewport {
     const r = this.renderer;
     if (!r) return;
     this.badge.dataset.backend = r.backend;
-    this.badge.innerHTML = `<span class="led"></span><strong>${r.label}</strong>${r.detail ? `<span>${r.detail}</span>` : ''}`;
+    setHtml(this.badge, `<span class="led"></span><strong>${r.label}</strong>${r.detail ? `<span>${r.detail}</span>` : ''}`);
     this.badge.title = r.backend === 'webgpu' ? `Rendering with WebGPU${r.detail ? ` (${r.detail})` : ''}.` : `Rendering with Canvas 2D. ${this.fallbackReason}`;
     this.app.statusBackend(r.label, r.backend, this.badge.title);
   }
@@ -250,7 +250,7 @@ export class Viewport {
   /** @param {Tool} tool */
   setHint(tool) {
     const text = HINTS[tool];
-    this.hint.innerHTML = text ? `${text}${tool === 'pan' ? '' : ` · ${kbd('Escape')} to finish`}` : '';
+    setHtml(this.hint, text ? `${text}${tool === 'pan' ? '' : ` · ${kbd('Escape')} to finish`}` : '');
     this.host.dataset.tool = tool === 'select' ? 'select' : tool === 'pan' ? 'pan' : 'place';
     this.pending = null;
     this.invalidate('overlay');

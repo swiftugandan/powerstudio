@@ -16,7 +16,9 @@ import { dirname, join, relative } from 'node:path';
 const root = dirname(fileURLToPath(import.meta.url));
 /** The built page may run its own inline code, compile its embedded WebAssembly engine and start workers from Blob
  * URLs, and nothing else: no network connections, no external scripts, styles, fonts or images. */
-export const CSP = "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; worker-src blob:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+// Trusted Types, where the browser has them: HTML reaches the page only through the app's `powerstudio` policy
+// (src/ui/dom.js) and the worker's script only through `powerstudio-worker`, which takes the blob URL below and no other.
+export const CSP = "default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; worker-src blob:; connect-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types powerstudio powerstudio-worker";
 const WORKER = "new Worker(new URL('./worker/engine.worker.js', import.meta.url), { type: 'module' })";
 
 /** @param {string} dir @returns {Promise<string[]>} */
@@ -96,7 +98,9 @@ export async function buildApp() {
   // The engine travels gzip-compressed and base64-encoded; gzip with a fixed level and no timestamp keeps it byte-stable.
   const wasm = await readFile(join(root, 'src', 'engine', 'powerstudio-engine.wasm')).catch(() => { throw new Error('src/engine/powerstudio-engine.wasm is missing: run npm run build:engine.'); });
   const engine = gzipSync(wasm, { level: constants.Z_BEST_COMPRESSION }).toString('base64');
-  const bundle = `globalThis.__POWERSTUDIO_ENGINE__=${JSON.stringify(engine)};\nglobalThis.__POWERSTUDIO_WORKER_URL__=URL.createObjectURL(new Blob([${JSON.stringify(worker)}],{type:'text/javascript'}));\n${app}`.replace(/<\/script/gi, '<\\/script');
+  const workerUrl = `URL.createObjectURL(new Blob([${JSON.stringify(worker)}],{type:'text/javascript'}))`;
+  const trusted = "globalThis.trustedTypes?.createPolicy('powerstudio-worker',{createScriptURL:u=>{if(u!==url)throw new TypeError('Not the engine worker');return u}})";
+  const bundle = `globalThis.__POWERSTUDIO_ENGINE__=${JSON.stringify(engine)};\n{const url=${workerUrl};const p=${trusted};globalThis.__POWERSTUDIO_WORKER_URL__=p?p.createScriptURL(url):url;}\n${app}`.replace(/<\/script/gi, '<\\/script');
   const css = await readFile(join(root, 'style.css'), 'utf8');
   const favicon = await readFile(join(root, 'favicon.svg'), 'utf8');
   let html = await readFile(join(root, 'index.html'), 'utf8');

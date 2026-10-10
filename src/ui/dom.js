@@ -1,5 +1,16 @@
 /** Small DOM helpers. */
 
+/** The app's one Trusted Types policy, where the browser has them: HTML the app builds itself, every value in it
+ * passed through `esc`. The built app's Content-Security-Policy requires Trusted Types and allows no other policy,
+ * so `setHtml` is the only way HTML reaches the page. */
+const policy = /** @type {{ createHTML: (s: string) => string } | undefined} */ (
+  /** @type {any} */ (globalThis).trustedTypes?.createPolicy('powerstudio', { createHTML: (/** @type {string} */ s) => s }));
+
+/** Sets an element's HTML through the policy. @param {Element} el @param {string} html */
+export function setHtml(el, html) {
+  el.innerHTML = policy ? policy.createHTML(html) : html;
+}
+
 /** @param {string} s */
 export const esc = s => String(s).replace(/[&<>"']/g, c => /** @type {Record<string, string>} */ ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
@@ -13,7 +24,7 @@ export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v === undefined || v === null || v === false) continue;
-    if (k === 'html') el.innerHTML = v;
+    if (k === 'html') setHtml(el, v);
     else if (k === 'text') el.textContent = v;
     else if (k === 'class') el.className = v;
     else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);

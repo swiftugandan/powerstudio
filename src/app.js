@@ -26,8 +26,9 @@ import { printReport } from './ui/report.js';
 import { openContingencyDialog } from './ui/contingency-editor.js';
 import { importDialog } from './ui/import-dialog.js';
 import { IMPORT_TYPES } from './engine/exchange.js';
-import { toast, contextMenu } from './ui/feedback.js';
-import { h, esc, byId, download, fileName, yieldToBrowser } from './ui/dom.js';
+import { toast, contextMenu, askPassphrase } from './ui/feedback.js';
+import { seal, unseal, isSealed, MIN_PASSPHRASE } from './core/sealed.js';
+import { h, esc, byId, download, fileName, setHtml, yieldToBrowser } from './ui/dom.js';
 import { icon, logo } from './ui/icons.js';
 import { kbd, isMac } from './ui/keys.js';
 import { fixed, duration } from './ui/format.js';
@@ -147,9 +148,9 @@ export class App {
   }
 
   buildChrome() {
-    byId('brand').innerHTML = `${logo(24)}<span class="brand-name">PowerStudio</span><span class="brand-tag">Grid studies in the browser</span>`;
+    setHtml(byId('brand'), `${logo(24)}<span class="brand-name">PowerStudio</span><span class="brand-tag">Grid studies in the browser</span>`);
     const trigger = byId('palette-trigger');
-    trigger.innerHTML = `${icon('search', 15)}<span>Search commands and elements</span>${kbd('Mod+K')}`;
+    setHtml(trigger, `${icon('search', 15)}<span>Search commands and elements</span>${kbd('Mod+K')}`);
     trigger.setAttribute('aria-label', 'Search commands and elements');
     const name = /** @type {HTMLInputElement} */ (byId('doc-name'));
     name.addEventListener('change', () => {
@@ -287,7 +288,7 @@ export class App {
     const recording = p.variants.find(v => v.id === p.recording);
     chip.classList.toggle('recording', !!recording);
     chip.title = `Study case: ${c.name}${recording ? `. Changes to the equipment go to the variant “${recording.name}”.` : ''}`;
-    chip.innerHTML = `${icon(recording ? 'record' : 'layers', 14)}<span class="case">${esc(c.name)}</span>${recording ? `<span class="rec">${esc(recording.name)}</span>` : ''}${icon('chevronDown', 12)}`;
+    setHtml(chip, `${icon(recording ? 'record' : 'layers', 14)}<span class="case">${esc(c.name)}</span>${recording ? `<span class="rec">${esc(recording.name)}</span>` : ''}${icon('chevronDown', 12)}`);
   }
 
   /** The title bar's menu: the study cases, where edits go, and the project page. */
@@ -391,7 +392,7 @@ export class App {
     const el = byId('save-state');
     el.dataset.state = state;
     el.title = title;
-    el.innerHTML = `<span class="dot"></span><span>${text}</span>`;
+    setHtml(el, `<span class="dot"></span><span>${text}</span>`);
   }
 
   /** Imports files the user picks. @param {string} accept */
@@ -416,6 +417,11 @@ export class App {
       if (files.length === 1 && (/\.json$/i.test(files[0].name) || head.startsWith('{'))) {
         let json;
         try { json = JSON.parse(await files[0].text()); } catch { throw new Error('The file is not valid JSON.'); }
+        if (isSealed(json)) {
+          const text = await this.unsealFile(json, label);
+          if (text === null) { this.log('info', `Import of “${label}” cancelled.`); return; }
+          json = JSON.parse(text);
+        }
         const isProject = json?.format === PROJECT_FORMAT;
         const { doc, issues } = await this.normalize(isProject ? json.base : json);
         const id = newDocId();
@@ -469,13 +475,56 @@ export class App {
   }
 
   /** Exports the whole project, with its run log, as one file that imports back as a new project. */
-  async exportProject() {
+  /** The project file's parts, or null when the project changed while it was being written. */
+  async projectParts() {
     const p = this.project, runs = await this.library.runs(this.docId);
     const base = await serialise(p.base, () => this.project === p, yieldToBrowser);
-    if (base === null) return;
+    if (base === null) return null;
     const head = JSON.stringify(projectFileHead(p, runs));
-    download(new Blob([head.slice(0, -1), ',"base":', base, '}\n'], { type: 'application/json' }), fileName(p.base.name, '.powerstudio-project.json'));
-    this.log('ok', `Exported the project “${p.base.name}”: ${p.cases.length} study case${p.cases.length === 1 ? '' : 's'}, ${p.scenarios.length} scenario${p.scenarios.length === 1 ? '' : 's'}, ${p.variants.length} variant${p.variants.length === 1 ? '' : 's'} and ${runs.length} run${runs.length === 1 ? '' : 's'}.`);
+    const summary = `${p.cases.length} study case${p.cases.length === 1 ? '' : 's'}, ${p.scenarios.length} scenario${p.scenarios.length === 1 ? '' : 's'}, ${p.variants.length} variant${p.variants.length === 1 ? '' : 's'} and ${runs.length} run${runs.length === 1 ? '' : 's'}`;
+    return { name: p.base.name, parts: [head.slice(0, -1), ',"base":', base, '}\n'], summary };
+  }
+
+  async exportProject() {
+    const file = await this.projectParts();
+    if (!file) return;
+    download(new Blob(file.parts, { type: 'application/json' }), fileName(file.name, '.powerstudio-project.json'));
+    this.log('ok', `Exported the project “${file.name}”: ${file.summary}.`);
+  }
+
+  /** Asks for an encrypted file's passphrase until it opens or the user gives up; the file's text, or null.
+   * @param {import('./core/sealed.js').Sealed} sealed @param {string} label */
+  async unsealFile(sealed, label) {
+    let lead = `“${label}” is encrypted. Type the passphrase it was exported with.`;
+    for (;;) {
+      const pass = await askPassphrase({ title: 'Open an encrypted project', action: 'Open', lead });
+      if (pass === null) return null;
+      try { return await unseal(sealed, pass, this.deriveKey); } catch (error) {
+        lead = `${error instanceof Error ? error.message : error} Try again.`;
+      }
+    }
+  }
+
+  /** The engine's key derivation, for encrypted files. @type {import('./core/sealed.js').DeriveKey} */
+  deriveKey = async (header, payload) => (await this.engine.call(header, payload)).payload;
+
+  /** Exports the project locked with a passphrase (AES-256-GCM under an Argon2id key; docs/SECURITY.md). */
+  async exportEncrypted() {
+    const pass = await askPassphrase({ title: 'Export an encrypted project', action: 'Encrypt and export', twice: true, min: MIN_PASSPHRASE,
+      lead: 'The file opens in PowerStudio with this passphrase and with nothing else. It is not stored anywhere, so a forgotten passphrase cannot be recovered.' });
+    if (pass === null) return;
+    const file = await this.projectParts();
+    if (!file) return;
+    this.setStatusMessage('Encrypting…');
+    try {
+      const sealed = await seal(file.parts.join(''), pass, this.deriveKey);
+      download(new Blob([JSON.stringify(sealed), '\n'], { type: 'application/json' }), fileName(file.name, '.powerstudio-project.locked.json'));
+      this.log('ok', `Exported the project “${file.name}” encrypted: ${file.summary}.`);
+    } catch (error) {
+      this.log('error', `The encrypted export failed: ${error instanceof Error ? error.message : error}`);
+    } finally {
+      this.setStatusMessage('');
+    }
   }
 
   /** Exports the active study case's operating point as CGMES SSH and SV, in the files a CGMES project came from. */
@@ -958,19 +1007,19 @@ export class App {
     if (legend === undefined) legend = null;
     if (!legend) {
       const kvs = [...new Set(this.store.doc.elements.filter(e => e.cls === 'bus').map(e => /** @type {number} */ (e.vn)))].sort((a, b) => b - a);
-      if (!kvs.length) { el.innerHTML = ''; return; }
+      if (!kvs.length) { setHtml(el, ''); return; }
       const P = this.palette;
       const cls = (/** @type {number} */ kv) => (kv >= 200 ? P.kv.ehv : kv >= 60 ? P.kv.hv : kv >= 1 ? P.kv.mv : P.kv.lv);
-      el.innerHTML = `<span class="title">Voltage levels</span>${kvs.slice(0, 6).map(kv => `<span class="sw" data-kv="${kv}"><i style="background:${css(cls(kv))}"></i>${kv} kV</span>`).join('')}`
-        + '<span class="lod" hidden>Lower levels show as you zoom in</span>';
+      setHtml(el, `<span class="title">Voltage levels</span>${kvs.slice(0, 6).map(kv => `<span class="sw" data-kv="${kv}"><i style="background:${css(cls(kv))}"></i>${kv} kV</span>`).join('')}`
+        + '<span class="lod" hidden>Lower levels show as you zoom in</span>');
       this.viewport.showLevels();
       return;
     }
     if (legend.kind === 'ramp') {
-      el.innerHTML = `<span class="title">${legend.title}</span><span class="sw">${legend.from}<span class="ramp" style="background:linear-gradient(90deg,${legend.stops.map(css).join(',')})"></span>${legend.to}</span>`
-        + (legend.extra ?? []).map(x => `<span class="sw"><i style="background:${css(x.color)}"></i>${x.label}</span>`).join('');
+      setHtml(el, `<span class="title">${legend.title}</span><span class="sw">${legend.from}<span class="ramp" style="background:linear-gradient(90deg,${legend.stops.map(css).join(',')})"></span>${legend.to}</span>`
+        + (legend.extra ?? []).map(x => `<span class="sw"><i style="background:${css(x.color)}"></i>${x.label}</span>`).join(''));
     } else {
-      el.innerHTML = `<span class="title">${legend.title}</span>${legend.items.map(x => `<span class="sw"><i style="background:${css(x.color)}"></i>${x.label}</span>`).join('')}`;
+      setHtml(el, `<span class="title">${legend.title}</span>${legend.items.map(x => `<span class="sw"><i style="background:${css(x.color)}"></i>${x.label}</span>`).join('')}`);
     }
   }
 
@@ -1072,7 +1121,7 @@ export class App {
   /** @param {string} label @param {string} backend @param {string} title */
   statusBackend(label, backend, title) {
     if (!this.status) return;
-    this.status.backend.innerHTML = `${icon(backend === 'webgpu' ? 'check' : 'warning', 13)}<span>${label}</span>`;
+    setHtml(this.status.backend, `${icon(backend === 'webgpu' ? 'check' : 'warning', 13)}<span>${label}</span>`);
     this.status.backend.title = title;
     this.status.backend.dataset.backend = backend;
   }
@@ -1080,7 +1129,7 @@ export class App {
   updateStatus() {
     if (!this.status) return;
     const toolNames = /** @type {Record<Tool, string>} */ ({ select: 'Select', pan: 'Pan', bus: 'Insert busbar', line: 'Insert line', trafo: 'Insert transformer', gen: 'Insert machine', extgrid: 'Insert external grid', load: 'Insert load', shunt: 'Insert shunt' });
-    this.status.tool.innerHTML = `${icon(this.tool === 'select' ? 'select' : this.tool === 'pan' ? 'pan' : this.tool, 13)}<span>${toolNames[this.tool]}</span>`;
+    setHtml(this.status.tool, `${icon(this.tool === 'select' ? 'select' : this.tool === 'pan' ? 'pan' : this.tool, 13)}<span>${toolNames[this.tool]}</span>`);
     const n = this.selection.size;
     this.status.selection.textContent = n ? `${n} selected` : `${this.store.doc.elements.length} elements`;
   }
@@ -1102,7 +1151,7 @@ export class App {
     if (!this.status) return;
     const p = this.status.progress;
     p.hidden = false;
-    p.innerHTML = `<span>${CALC_LABEL[/** @type {CalcKind} */ (this.running)] ?? 'Calculating'}…</span><span class="progress"><i style="width:${total ? Math.round(done / total * 100) : 0}%"></i></span>`;
+    setHtml(p, `<span>${CALC_LABEL[/** @type {CalcKind} */ (this.running)] ?? 'Calculating'}…</span><span class="progress"><i style="width:${total ? Math.round(done / total * 100) : 0}%"></i></span>`);
   }
 
   hideProgress() { if (this.status) this.status.progress.hidden = true; }
@@ -1164,6 +1213,7 @@ export class App {
     c.add({ id: 'file.exportCgmes', label: 'Export CGMES SSH and SV', keywords: 'steady state hypothesis state variables operating point', icon: 'export', group: 'File', hint: 'The operating point of the active study case, in the CGMES files the project came from', enabled: () => this.project.source?.format === 'cgmes', run: () => { void this.exportCgmes(); } });
     c.add({ id: 'file.report', label: 'Print study report', keywords: 'pdf print report results summary', icon: 'results', group: 'File', hint: 'The study case\u2019s results and run records, for print or saving as PDF',
       run: () => { void printReport(this).catch(e => this.log('error', `The report could not be built: ${e instanceof Error ? e.message : e}`)); } });
+    c.add({ id: 'file.exportEncrypted', label: 'Export encrypted project', keywords: 'passphrase password secure lock aes', icon: 'layers', group: 'File', hint: 'The whole project, locked with a passphrase', run: () => { void this.exportEncrypted(); } });
     c.add({ id: 'file.exportProject', label: 'Export project', keywords: 'backup archive variants scenarios runs', icon: 'layers', group: 'File', hint: 'The whole project with its run log, as one file', run: () => { void this.exportProject(); } });
     c.add({ id: 'file.export', label: 'Export PowerStudio file', icon: 'export', keys: ['Mod+Shift+S'], global: true, group: 'File', run: () => this.exportJSON() });
     c.add({ id: 'file.exportSvg', label: 'Export diagram as SVG', icon: 'image', group: 'File', run: () => { download(new Blob([this.viewport.exportSVG()], { type: 'image/svg+xml' }), fileName(this.store.doc.name, '.svg')); this.log('ok', 'Exported the diagram as SVG.'); } });

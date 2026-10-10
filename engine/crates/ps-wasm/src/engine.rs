@@ -185,6 +185,36 @@ impl Engine {
             .ok_or("the request has no op")?;
         match op {
             "version" => Ok(ok(json!({ "engine": env!("CARGO_PKG_VERSION") }), Vec::new())),
+            // A key for an encrypted project file: Argon2id of the passphrase (the payload) with the header's salt and
+            // cost; the reply's payload is the 32-byte key.
+            "derive_key" => {
+                let num = |k: &str| -> Result<u32, String> {
+                    req.header
+                        .get(k)
+                        .and_then(Value::as_u64)
+                        .and_then(|v| u32::try_from(v).ok())
+                        .ok_or_else(|| format!("derive_key needs {k}"))
+                };
+                let salt: Vec<u8> = req
+                    .header
+                    .get("salt")
+                    .and_then(Value::as_array)
+                    .ok_or("derive_key needs salt")?
+                    .iter()
+                    .map(|b| {
+                        b.as_u64()
+                            .and_then(|b| u8::try_from(b).ok())
+                            .ok_or("salt bytes run from 0 to 255")
+                    })
+                    .collect::<Result<_, _>>()?;
+                let params = ps_study::crypto::KdfParams {
+                    memory_kib: num("memoryKiB")?,
+                    iterations: num("iterations")?,
+                    parallelism: num("parallelism")?,
+                };
+                let key = ps_study::crypto::derive_key(&req.payload, &salt, params)?;
+                Ok(ok(json!({}), key.to_vec()))
+            }
             // The dynamic model library: each control model's parameters in DYR order and their typical values, and the
             // typical round-rotor data.
             "library" => {

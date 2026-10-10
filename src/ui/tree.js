@@ -5,7 +5,7 @@
  * are ROW pixels tall (`.tree-row` in style.css); spacers above and below stand for the rest. Smaller trees render
  * whole. */
 
-import { h, esc } from './dom.js';
+import { h, esc, setHtml } from './dom.js';
 import { icon } from './icons.js';
 import { CLASSES, CLASS_ORDER } from '../core/catalog.js';
 
@@ -127,10 +127,10 @@ export class ModelTree {
     });
     if (r.id) li.dataset.id = r.id;
     if (r.cls) li.dataset.cls = r.cls;
-    li.innerHTML = `${r.kind === 'group' ? icon('chevronDown', 14).replace('class="icon"', 'class="icon twisty"') : '<span style="width:14px;flex:none"></span>'}`
+    setHtml(li, `${r.kind === 'group' ? icon('chevronDown', 14).replace('class="icon"', 'class="icon twisty"') : '<span style="width:14px;flex:none"></span>'}`
       + `${icon(r.iconName, 16).replace('class="icon"', 'class="icon glyph"')}<span class="label">${esc(r.label)}</span>`
       + (r.status ? `<span class="status" style="background:${r.status}"></span>` : '')
-      + `<span class="meta" title="${esc(r.meta)}">${esc(r.meta)}</span>`;
+      + `<span class="meta" title="${esc(r.meta)}">${esc(r.meta)}</span>`);
     return li;
   }
 

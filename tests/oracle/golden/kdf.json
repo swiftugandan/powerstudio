@@ -1,0 +1,29 @@
+{
+ "about": "Argon2id keys from the reference C implementation through argon2-cffi; written by scripts/oracle/kdf.py. Do not edit by hand.",
+ "cases": [
+  {
+   "passphrase": "correct horse battery staple",
+   "salt": "000102030405060708090a0b0c0d0e0f",
+   "memoryKiB": 65536,
+   "iterations": 3,
+   "parallelism": 4,
+   "key": "853b272a44db1421c02962669a55eb0994f3cab385ed1c4c79253eee19bab49e"
+  },
+  {
+   "passphrase": "Übertragungsnetz 380 kV — Prüfung",
+   "salt": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+   "memoryKiB": 65536,
+   "iterations": 3,
+   "parallelism": 1,
+   "key": "c69f66b42f616d20a62753c3c5f624c3261185acc9b1e6009a67e669446a05cc"
+  },
+  {
+   "passphrase": "",
+   "salt": "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a",
+   "memoryKiB": 131072,
+   "iterations": 4,
+   "parallelism": 2,
+   "key": "b60a70d97e5c6de5c1be64ce917b6bcd4cf38bb1f0d87b96e838f8beddd1f111"
+  }
+ ]
+}
