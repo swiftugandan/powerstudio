@@ -1,6 +1,14 @@
-//! N-1 contingency analysis: every selected branch or machine is taken out of service in turn and the load flow is
-//! solved again from the base-case voltages. Each outage is judged against the study case's loading limit and every
-//! node's voltage band.
+//! Contingency analysis: every selected outage is solved by an AC load flow from the base case and judged against
+//! the branch limits and every node's voltage band.
+//!
+//! The outages come from the study case: every line, transformer, generator or HVDC link it selects (N-1), and its
+//! list of contingencies of several elements. Both go through one type, [`Contingency`].
+//!
+//! The base case is built and solved once. An outage of one branch that does not split the network keeps the
+//! network's buses and its admittance pattern (the branch's admittances become zero), so it is solved on a copy of
+//! the base network, started from the base voltages, reusing the base case's ordering and symbolic factorisation
+//! ([`ps_lf::Cache`]). Every other outage (one that splits the network, a generator, a link, several elements) is
+//! built afresh through topology processing, as a load flow with those elements switched out would be.
 //!
 //! The work splits into chunks of outages ([`run_chunk`]) that [`merge`] combines in chunk order, so a pool of
 //! engines running contiguous chunks produces exactly the sequential result ([`run`]).
@@ -8,11 +16,15 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use ps_model::study::StudyCase;
+use ps_lf::{Cache, PuNetwork, Solution};
+use ps_model::study::{Contingency, StudyCase};
 use ps_model::{Class, Model};
+use ps_net::Calc;
+use ps_num::C64;
 use ps_topology::{Outages, active};
 
-use crate::loadflow::{self, LoadFlowReport, LoadFlowRun};
+use crate::limits;
+use crate::loadflow::{self, LoadFlowRun};
 use crate::progress::Progress;
 
 /// A limit violation in one case.
@@ -35,10 +47,13 @@ pub struct Violation {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Case {
-    /// Outaged element (or `base`).
+    /// Contingency identifier (or `base`).
     pub id: String,
-    /// Its class: `line`, `trafo`, `trafo3`, `gen` (or `base`).
+    /// The class of a single-element outage: `line`, `trafo`, `trafo3`, `gen`, `hvdc`; `multiple` for several
+    /// elements; `base` for the base case.
     pub cls: String,
+    /// The elements out.
+    pub elements: Vec<String>,
     /// Whether the load flow converged.
     pub converged: bool,
     /// Load flow outcome.
@@ -84,6 +99,24 @@ pub struct WorstVoltage {
     pub max_outage: String,
 }
 
+/// How the cases were solved.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Effort {
+    /// Outages solved on the base network with its ordering reused.
+    pub reused: usize,
+    /// Outages built afresh (splitting the network, machines, links, several elements).
+    pub rebuilt: usize,
+}
+
+/// Where the time went.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Timing {
+    /// The longest chunk, ms (the whole run when run in one).
+    pub total_ms: f64,
+}
+
 /// The contingency report.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -98,6 +131,10 @@ pub struct ContingencyReport {
     pub worst_voltage: BTreeMap<String, WorstVoltage>,
     /// Loading limit, %.
     pub limit: f64,
+    /// How the cases were solved.
+    pub effort: Effort,
+    /// Where the time went.
+    pub timing: Timing,
 }
 
 /// A chunk's results, in outage order and unsorted.
@@ -114,22 +151,37 @@ pub struct Chunk {
     pub worst_voltage: Vec<(String, WorstVoltage)>,
     /// Loading limit, %.
     pub limit: f64,
+    /// How this chunk's cases were solved.
+    pub effort: Effort,
+    /// Where the time went.
+    pub timing: Timing,
 }
 
-/// The outages a study case selects, in order: lines, transformers, then generators, each in model order.
-pub fn outage_list(model: &Model, study: &StudyCase) -> Vec<(Class, usize)> {
+/// The contingencies a study case selects, in order: lines, transformers, generators and HVDC links one at a time
+/// (each class in model order), then its list.
+pub fn definitions(model: &Model, study: &StudyCase) -> Vec<Contingency> {
     let st = &study.contingency;
     let none = Outages::none();
     let mut out = Vec::new();
     let mut add = |class: Class, n: usize, on: bool| {
-        if on {
-            out.extend((0..n).filter(|&r| active(model, &none, class, r)).map(|r| (class, r)));
+        if !on {
+            return;
+        }
+        for r in (0..n).filter(|&r| active(model, &none, class, r)) {
+            let id = model.id_of(class, r).unwrap_or("").to_string();
+            out.push(Contingency {
+                id: id.clone(),
+                name: model.name_of(class, r).to_string(),
+                elements: vec![id],
+            });
         }
     };
     add(Class::Line, model.lines.len(), st.lines);
     add(Class::Transformer2, model.transformers2.len(), st.trafos);
     add(Class::Transformer3, model.transformers3.len(), st.trafos);
     add(Class::Generator, model.generators.len(), st.gens);
+    add(Class::Hvdc, model.hvdc_lines.len(), st.hvdc);
+    out.extend(st.list.iter().cloned());
     out
 }
 
@@ -139,95 +191,348 @@ fn cls_name(class: Class) -> &'static str {
         Class::Transformer2 => "trafo",
         Class::Transformer3 => "trafo3",
         Class::Generator => "gen",
+        Class::Hvdc => "hvdc",
+        Class::Load => "load",
+        Class::Shunt => "shunt",
         _ => "other",
     }
 }
 
-/// Runs outages `range` of [`outage_list`] (the base case is solved in every chunk).
-pub fn run_chunk(
-    model: &Model,
-    study: &StudyCase,
-    range: std::ops::Range<usize>,
-    progress: &mut dyn Progress,
-) -> Result<Chunk, String> {
-    let limit = study.contingency.max_loading;
+/// What judging a solved network needs, per calculation branch and bus.
+struct Monitor {
+    /// Per branch: element identifier, the applicable limits of its ends (kA) and its rating (MVA).
+    branches: Vec<(String, [Option<f64>; 2], Option<f64>)>,
+    /// Per bus: identifier and voltage band.
+    buses: Vec<(String, f64, f64)>,
+}
+
+impl Monitor {
+    fn new(model: &Model, calc: &Calc, duration_s: Option<f64>) -> Self {
+        let branches = calc
+            .branches
+            .iter()
+            .map(|&src| {
+                (
+                    model.id_of(src.class, src.row as usize).unwrap_or("").to_string(),
+                    limits::end_limits(model, src, duration_s),
+                    limits::rated_mva(model, src),
+                )
+            })
+            .collect();
+        let buses = calc
+            .topo
+            .buses
+            .iter()
+            .enumerate()
+            .map(|(b, bus)| {
+                let (lo, hi) = bus.nodes.iter().map(|&n| &model.nodes[n as usize]).fold(
+                    (f64::NEG_INFINITY, f64::INFINITY),
+                    |(lo, hi), n| {
+                        (
+                            if n.v_min > 0.0 { lo.max(n.v_min) } else { lo },
+                            if n.v_max > 0.0 { hi.min(n.v_max) } else { hi },
+                        )
+                    },
+                );
+                (calc.bus_id(model, b), lo, hi)
+            })
+            .collect();
+        Self { branches, buses }
+    }
+}
+
+/// A solved state reduced to what a case reports: each branch's loading and each bus's voltage.
+struct Outcome {
+    loadings: Vec<(usize, f64)>,
+    voltages: Vec<(usize, f64)>,
+}
+
+/// Loadings and voltages of a solved network; buses that are not energised (no node) are left out.
+fn outcome(net: &PuNetwork, sol: &Solution, mon: &Monitor, real_bus: &[bool]) -> Outcome {
+    let sb = net.base_mva;
+    let flows = ps_lf::branch_flows(net, &sol.vm, &sol.va);
+    let loadings = flows
+        .iter()
+        .filter_map(|fl| {
+            let (_, lim, rated) = &mon.branches[fl.id];
+            let i = [fl.i_from_ka, fl.i_to_ka];
+            let s = [fl.s_from.abs() * sb, fl.s_to.abs() * sb];
+            // A branch the outage switched out (its admittances zero) is not judged.
+            if out_of_service(&net.branches[fl.id]) {
+                return None;
+            }
+            limits::loading(*lim, *rated, i, s).map(|l| (fl.id, l))
+        })
+        .collect();
+    let voltages = (0..net.buses.len())
+        .filter(|&b| real_bus[b])
+        .map(|b| (b, sol.vm[b]))
+        .collect();
+    Outcome { loadings, voltages }
+}
+
+/// Whether a branch is switched out on the base network (the fast path sets its admittances to zero).
+fn out_of_service(br: &ps_lf::PuBranch) -> bool {
+    br.yft == C64::ZERO && br.ytf == C64::ZERO && br.yff == C64::ZERO && br.ytt == C64::ZERO
+}
+
+/// The base case's state for the fast path: the network as solved, started from its voltages, and the branches
+/// whose loss splits it.
+struct Base {
+    calc: Calc,
+    net: PuNetwork,
+    opt: ps_lf::Options,
+    bridges: HashSet<usize>,
+    monitor: Monitor,
+    real_bus: Vec<bool>,
+}
+
+/// Branches whose removal splits the network (bridges of its graph; parallel branches never are).
+fn bridges(net: &PuNetwork) -> HashSet<usize> {
+    let n = net.buses.len();
+    let mut adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+    for (k, br) in net.branches.iter().enumerate() {
+        if br.f != br.t {
+            adj[br.f].push((br.t, k));
+            adj[br.t].push((br.f, k));
+        }
+    }
+    let mut disc = vec![usize::MAX; n];
+    let mut low = vec![0usize; n];
+    let mut out = HashSet::new();
+    let mut time = 0;
+    for root in 0..n {
+        if disc[root] != usize::MAX {
+            continue;
+        }
+        // Iterative depth-first search: (bus, edge it was entered by, next neighbour index).
+        let mut stack: Vec<(usize, usize, usize)> = vec![(root, usize::MAX, 0)];
+        disc[root] = time;
+        low[root] = time;
+        time += 1;
+        while let Some(&mut (u, via, ref mut next)) = stack.last_mut() {
+            if *next < adj[u].len() {
+                let (v, e) = adj[u][*next];
+                *next += 1;
+                if e == via {
+                    continue;
+                }
+                if disc[v] == usize::MAX {
+                    disc[v] = time;
+                    low[v] = time;
+                    time += 1;
+                    stack.push((v, e, 0));
+                } else {
+                    low[u] = low[u].min(disc[v]);
+                }
+            } else {
+                stack.pop();
+                if let Some(&(p, _, _)) = stack.last() {
+                    low[p] = low[p].min(low[u]);
+                    if low[u] > disc[p] {
+                        out.insert(via);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The base case, solved once, and what every contingency starts from.
+struct Prepared {
+    base: Base,
+    base_case: Case,
+    start: Vec<Option<(f64, f64)>>,
+    base_dead: HashSet<String>,
+    post_duration: Option<f64>,
+    limit: f64,
+}
+
+fn prepare(model: &Model, study: &StudyCase) -> Result<Prepared, String> {
+    let st = &study.contingency;
+    let limit = st.max_loading;
+    let post_duration = (st.acceptable_s > 0.0).then_some(st.acceptable_s);
+    // A model that carries a solution (an imported state) starts its base case from it.
+    let stored = model.nodes.iter().any(|n| n.v0 > 0.0);
     let run = LoadFlowRun {
         settings: study.loadflow,
+        start: stored.then(|| {
+            model
+                .nodes
+                .iter()
+                .map(|n| (n.v0 > 0.0).then(|| (n.v0, n.angle0.to_radians())))
+                .collect()
+        }),
         ..Default::default()
     };
-    let (calc, sol, base) = loadflow::solve(model, &run);
-    if !base.converged {
-        return Err(format!("The base case does not converge: {}", base.message));
+    let (calc, sol, base_report) = loadflow::solve(model, &run);
+    if !base_report.converged {
+        return Err(format!("The base case does not converge: {}", base_report.message));
     }
-    let bands: HashMap<&str, (f64, f64)> = model
-        .nodes
-        .iter()
-        .map(|n| (n.id.as_str(), (n.v_min, n.v_max)))
-        .collect();
-    let base_dead: HashSet<&str> = base.deenergized.iter().map(String::as_str).collect();
-    let base_case = judge("base", "base", &base, &bands, limit, None, &base_dead);
+    let real_bus: Vec<bool> = calc.topo.buses.iter().map(|b| !b.nodes.is_empty()).collect();
+    let base_dead: HashSet<String> = base_report.deenergized.iter().cloned().collect();
+    // The base case is judged against permanent limits; outages against those for the acceptable duration.
+    let base_monitor = Monitor::new(model, &calc, None);
+    let base_out = outcome(&sol.net, &sol, &base_monitor, &real_bus);
+    let base_case = judge(
+        "base",
+        "base",
+        Vec::new(),
+        &base_report_status(&base_report),
+        Some(&base_out),
+        &base_monitor,
+        limit,
+        None,
+        Vec::new(),
+    );
     let mut start = vec![None; model.nodes.len()];
     for (b, bus) in calc.topo.buses.iter().enumerate() {
         for &n in &bus.nodes {
             start[n as usize] = Some((sol.vm[b], sol.va[b]));
         }
     }
-    let list = outage_list(model, study);
+    let mut net = sol.net.clone();
+    for (b, bus) in net.buses.iter_mut().enumerate() {
+        bus.vm0 = sol.vm[b];
+        bus.va0 = sol.va[b];
+    }
+    let opt = ps_lf::Options {
+        warm_start: true,
+        ..loadflow::options(&study.loadflow, model.meta.base_mva, true)
+    };
+    let base = Base {
+        bridges: bridges(&net),
+        monitor: Monitor::new(model, &calc, post_duration),
+        net,
+        opt,
+        calc,
+        real_bus,
+    };
+    Ok(Prepared {
+        base,
+        base_case,
+        start,
+        base_dead,
+        post_duration,
+        limit,
+    })
+}
+
+/// The elements of a contingency resolved to classes and rows, its class name, and the identifiers not found.
+fn resolve<'a>(index: &ps_model::IdIndex, c: &'a Contingency) -> (Vec<(Class, usize)>, &'static str, Vec<&'a str>) {
+    let found: Vec<(Class, usize)> = c
+        .elements
+        .iter()
+        .filter_map(|id| Class::ALL.iter().find_map(|&k| index.get(k, id).map(|row| (k, row))))
+        .collect();
+    let cls = match found.as_slice() {
+        [(k, _)] => cls_name(*k),
+        _ => "multiple",
+    };
+    let missing = c
+        .elements
+        .iter()
+        .filter(|id| !Class::ALL.iter().any(|&k| index.get(k, id).is_some()))
+        .map(String::as_str)
+        .collect();
+    (found, cls, missing)
+}
+
+/// Runs contingencies `range` of [`definitions`] (the base case is solved in every chunk).
+pub fn run_chunk(
+    model: &Model,
+    study: &StudyCase,
+    range: std::ops::Range<usize>,
+    progress: &mut dyn Progress,
+) -> Result<Chunk, String> {
+    let t0 = ps_num::clock::now_ms();
+    let Prepared {
+        base,
+        base_case,
+        start,
+        base_dead,
+        post_duration,
+        limit,
+    } = prepare(model, study)?;
+    let base_dead: HashSet<&str> = base_dead.iter().map(String::as_str).collect();
+    let mut cache = Cache::default();
+    let list = definitions(model, study);
     let range = range.start.min(list.len())..range.end.min(list.len());
     let total = range.len();
+    let index = model.index();
     let mut cases = Vec::with_capacity(total);
     let mut worst_loading: Vec<(String, WorstLoading)> = Vec::new();
     let mut wl_index: HashMap<String, usize> = HashMap::new();
     let mut worst_voltage: Vec<(String, WorstVoltage)> = Vec::new();
     let mut wv_index: HashMap<String, usize> = HashMap::new();
-    for (done, &(class, row)) in list[range].iter().enumerate() {
-        let mut outages = Outages::none();
-        outages.insert(class, row);
-        let id = model.id_of(class, row).unwrap_or("").to_string();
-        let r = loadflow::run(
-            model,
-            &LoadFlowRun {
-                settings: study.loadflow,
-                outages,
-                start: Some(start.clone()),
-            },
-        );
-        cases.push(judge(
-            &id,
-            cls_name(class),
-            &r,
-            &bands,
+    let mut effort = Effort::default();
+    for (done, c) in list[range].iter().enumerate() {
+        let (found, cls, missing) = resolve(&index, c);
+        let solved = if missing.is_empty() {
+            solve_case(
+                model,
+                study,
+                &base,
+                &mut cache,
+                &found,
+                &start,
+                &base_dead,
+                post_duration,
+                &mut effort,
+            )
+        } else {
+            Solved {
+                status: Status {
+                    converged: false,
+                    message: format!("Unknown element(s): {}.", missing.join(", ")),
+                },
+                sol: None,
+                rebuilt: None,
+                lost: Vec::new(),
+            }
+        };
+        let out = solved.outcome(&base);
+        let monitor = solved.monitor(&base);
+        let case = judge(
+            &c.id,
+            cls,
+            c.elements.clone(),
+            &solved.status,
+            out.as_ref(),
+            monitor,
             limit,
             Some(&base_case),
-            &base_dead,
-        ));
-        if r.converged {
-            for b in &r.branches {
-                let Some(value) = b.loading else { continue };
-                match wl_index.get(&b.id) {
+            solved.lost.clone(),
+        );
+        if let Some(out) = &out {
+            for &(b, value) in &out.loadings {
+                let id = &monitor.branches[b].0;
+                match wl_index.get(id) {
                     Some(&k) if value <= worst_loading[k].1.value => {}
                     Some(&k) => {
                         worst_loading[k].1 = WorstLoading {
                             value,
-                            outage: id.clone(),
+                            outage: c.id.clone(),
                         }
                     }
                     None => {
-                        wl_index.insert(b.id.clone(), worst_loading.len());
+                        wl_index.insert(id.clone(), worst_loading.len());
                         worst_loading.push((
-                            b.id.clone(),
+                            id.clone(),
                             WorstLoading {
                                 value,
-                                outage: id.clone(),
+                                outage: c.id.clone(),
                             },
                         ));
                     }
                 }
             }
-            for b in &r.buses {
-                let k = *wv_index.entry(b.id.clone()).or_insert_with(|| {
+            for &(b, vm) in &out.voltages {
+                let id = &monitor.buses[b].0;
+                let k = *wv_index.entry(id.clone()).or_insert_with(|| {
                     worst_voltage.push((
-                        b.id.clone(),
+                        id.clone(),
                         WorstVoltage {
                             min: f64::INFINITY,
                             min_outage: String::new(),
@@ -238,16 +543,17 @@ pub fn run_chunk(
                     worst_voltage.len() - 1
                 });
                 let w = &mut worst_voltage[k].1;
-                if b.vm < w.min {
-                    w.min = b.vm;
-                    w.min_outage.clone_from(&id);
+                if vm < w.min {
+                    w.min = vm;
+                    w.min_outage.clone_from(&c.id);
                 }
-                if b.vm > w.max {
-                    w.max = b.vm;
-                    w.max_outage.clone_from(&id);
+                if vm > w.max {
+                    w.max = vm;
+                    w.max_outage.clone_from(&c.id);
                 }
             }
         }
+        cases.push(case);
         progress.report((done + 1) as f64, total as f64);
     }
     Ok(Chunk {
@@ -256,7 +562,195 @@ pub fn run_chunk(
         worst_loading,
         worst_voltage,
         limit,
+        effort,
+        timing: Timing {
+            total_ms: ps_num::clock::now_ms() - t0,
+        },
     })
+}
+
+struct Status {
+    converged: bool,
+    message: String,
+}
+
+fn base_report_status(r: &loadflow::LoadFlowReport) -> Status {
+    Status {
+        converged: r.converged,
+        message: r.message.clone(),
+    }
+}
+
+/// A solved contingency: its network as solved, with the monitor and buses of a rebuilt one.
+struct Solved {
+    status: Status,
+    sol: Option<Solution>,
+    rebuilt: Option<(Monitor, Vec<bool>)>,
+    lost: Vec<String>,
+}
+
+impl Solved {
+    fn outcome(&self, base: &Base) -> Option<Outcome> {
+        let sol = self.sol.as_ref().filter(|s| s.converged)?;
+        let (mon, real) = self
+            .rebuilt
+            .as_ref()
+            .map_or((&base.monitor, &base.real_bus), |(m, r)| (m, r));
+        Some(outcome(&sol.net, sol, mon, real))
+    }
+
+    fn monitor<'a>(&'a self, base: &'a Base) -> &'a Monitor {
+        self.rebuilt.as_ref().map_or(&base.monitor, |(m, _)| m)
+    }
+}
+
+/// Solves one contingency: on the base network when it is one branch that keeps the network whole, otherwise built
+/// afresh.
+#[allow(clippy::too_many_arguments)]
+fn solve_case(
+    model: &Model,
+    study: &StudyCase,
+    base: &Base,
+    cache: &mut Cache,
+    found: &[(Class, usize)],
+    start: &[Option<(f64, f64)>],
+    base_dead: &HashSet<&str>,
+    post_duration: Option<f64>,
+    effort: &mut Effort,
+) -> Solved {
+    let branch = match found {
+        [(k @ (Class::Line | Class::Transformer2), row)] => base
+            .calc
+            .branches
+            .iter()
+            .position(|b| b.class == *k && b.row as usize == *row && b.winding == 0)
+            .filter(|b| !base.bridges.contains(b)),
+        _ => None,
+    };
+    if let Some(b) = branch {
+        effort.reused += 1;
+        let mut net = base.net.clone();
+        let br = &mut net.branches[b];
+        br.yff = C64::ZERO;
+        br.yft = C64::ZERO;
+        br.ytf = C64::ZERO;
+        br.ytt = C64::ZERO;
+        let sol = ps_lf::solve_cached(&net, &base.opt, cache);
+        return Solved {
+            status: Status {
+                converged: sol.converged,
+                message: sol.message.clone(),
+            },
+            sol: Some(sol),
+            rebuilt: None,
+            lost: Vec::new(),
+        };
+    }
+    effort.rebuilt += 1;
+    let mut outages = Outages::none();
+    for &(k, row) in found {
+        outages.insert(k, row);
+    }
+    let (calc, sol, report) = loadflow::solve(
+        model,
+        &LoadFlowRun {
+            settings: study.loadflow,
+            outages,
+            start: Some(start.to_vec()),
+        },
+    );
+    let lost = report
+        .deenergized
+        .iter()
+        .filter(|b| !base_dead.contains(b.as_str()))
+        .cloned()
+        .collect();
+    let monitor = Monitor::new(model, &calc, post_duration);
+    let real_bus: Vec<bool> = calc.topo.buses.iter().map(|b| !b.nodes.is_empty()).collect();
+    Solved {
+        status: Status {
+            converged: report.converged,
+            message: report.message.clone(),
+        },
+        sol: Some(sol),
+        rebuilt: Some((monitor, real_bus)),
+        lost,
+    }
+}
+
+/// Post-contingency flows and voltages of one contingency, by identifier, for checking the engine against other
+/// tools. Flows are MW and Mvar into a branch at its ends (`p1`, `q1`, `p2`, `q2`); voltages p.u. and degrees.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Detail {
+    /// Contingency identifier.
+    pub id: String,
+    /// Whether its load flow converged.
+    pub converged: bool,
+    /// Load flow outcome.
+    pub message: String,
+    /// Whether it was solved on the base network with the base case's ordering.
+    pub reused: bool,
+    /// Flows of every two-terminal branch in service.
+    pub flows: HashMap<String, [f64; 4]>,
+    /// Voltage of every energised bus.
+    pub voltages: HashMap<String, (f64, f64)>,
+}
+
+/// Solves the given contingencies through the same paths as [`run_chunk`] and returns their flows and voltages.
+pub fn detailed(model: &Model, study: &StudyCase, list: &[Contingency]) -> Result<Vec<Detail>, String> {
+    let p = prepare(model, study)?;
+    let base_dead: HashSet<&str> = p.base_dead.iter().map(String::as_str).collect();
+    let index = model.index();
+    let mut cache = Cache::default();
+    let mut effort = Effort::default();
+    let mut out = Vec::with_capacity(list.len());
+    for c in list {
+        let (found, _, missing) = resolve(&index, c);
+        if !missing.is_empty() {
+            return Err(format!("{}: unknown element(s) {}", c.id, missing.join(", ")));
+        }
+        let before = effort.reused;
+        let solved = solve_case(
+            model,
+            study,
+            &p.base,
+            &mut cache,
+            &found,
+            &p.start,
+            &base_dead,
+            p.post_duration,
+            &mut effort,
+        );
+        let mon = solved.monitor(&p.base);
+        let mut flows = HashMap::new();
+        let mut voltages = HashMap::new();
+        if let Some(sol) = solved.sol.as_ref().filter(|s| s.converged) {
+            let sb = sol.net.base_mva;
+            for fl in ps_lf::branch_flows(&sol.net, &sol.vm, &sol.va) {
+                if out_of_service(&sol.net.branches[fl.id]) {
+                    continue;
+                }
+                flows.insert(
+                    mon.branches[fl.id].0.clone(),
+                    [fl.s_from.re * sb, fl.s_from.im * sb, fl.s_to.re * sb, fl.s_to.im * sb],
+                );
+            }
+            for (b, (id, _, _)) in mon.buses.iter().enumerate() {
+                if b < sol.vm.len() {
+                    voltages.insert(id.clone(), (sol.vm[b], sol.va[b].to_degrees()));
+                }
+            }
+        }
+        out.push(Detail {
+            id: c.id.clone(),
+            converged: solved.status.converged,
+            message: solved.status.message.clone(),
+            reused: effort.reused > before,
+            flows,
+            voltages,
+        });
+    }
+    Ok(out)
 }
 
 /// Combines chunks of contiguous outage ranges, given in outage order.
@@ -267,8 +761,13 @@ pub fn merge(chunks: Vec<Chunk>) -> Result<ContingencyReport, String> {
     let mut cases = Vec::new();
     let mut worst_loading: BTreeMap<String, WorstLoading> = BTreeMap::new();
     let mut worst_voltage: BTreeMap<String, WorstVoltage> = BTreeMap::new();
+    let mut effort = Effort::default();
+    let mut timing = Timing::default();
     for chunk in std::iter::once(first).chain(iter) {
         cases.extend(chunk.cases);
+        effort.reused += chunk.effort.reused;
+        effort.rebuilt += chunk.effort.rebuilt;
+        timing.total_ms = timing.total_ms.max(chunk.timing.total_ms);
         for (id, w) in chunk.worst_loading {
             match worst_loading.get_mut(&id) {
                 Some(cur) if w.value > cur.value => *cur = w,
@@ -314,45 +813,44 @@ pub fn merge(chunks: Vec<Chunk>) -> Result<ContingencyReport, String> {
         worst_loading,
         worst_voltage,
         limit,
+        effort,
+        timing,
     })
 }
 
-/// Runs every selected outage.
+/// Runs every selected contingency.
 pub fn run(model: &Model, study: &StudyCase, progress: &mut dyn Progress) -> Result<ContingencyReport, String> {
     merge(vec![run_chunk(model, study, 0..usize::MAX, progress)?])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn judge(
     id: &str,
     cls: &str,
-    r: &LoadFlowReport,
-    bands: &HashMap<&str, (f64, f64)>,
+    elements: Vec<String>,
+    status: &Status,
+    out: Option<&Outcome>,
+    mon: &Monitor,
     limit: f64,
     base: Option<&Case>,
-    base_dead: &HashSet<&str>,
+    lost_buses: Vec<String>,
 ) -> Case {
     let mut c = Case {
         id: id.into(),
         cls: cls.into(),
-        converged: r.converged,
-        message: r.message.clone(),
+        elements,
+        converged: status.converged,
+        message: status.message.clone(),
         max_loading: None,
         max_loading_id: String::new(),
         min_v: None,
         min_v_bus: String::new(),
         max_v: None,
         max_v_bus: String::new(),
-        lost_buses: r
-            .deenergized
-            .iter()
-            .filter(|b| !base_dead.contains(b.as_str()))
-            .cloned()
-            .collect(),
+        lost_buses,
         violations: Vec::new(),
     };
-    if !r.converged {
-        return c;
-    }
+    let Some(out) = out else { return c };
     let in_base =
         |kind: &str, el: &str| base.is_some_and(|b| b.violations.iter().any(|v| v.kind == kind && v.id == el));
     let violation = |kind: &str, id: &str, value: f64, limit: f64| Violation {
@@ -362,34 +860,78 @@ fn judge(
         limit,
         in_base: in_base(kind, id),
     };
-    for b in &r.branches {
-        let Some(loading) = b.loading else { continue };
+    for &(b, loading) in &out.loadings {
+        let bid = &mon.branches[b].0;
         if c.max_loading.is_none_or(|m| loading > m) {
             c.max_loading = Some(loading);
-            c.max_loading_id.clone_from(&b.id);
+            c.max_loading_id.clone_from(bid);
         }
         if loading > limit {
-            c.violations.push(violation("loading", &b.id, loading, limit));
+            c.violations.push(violation("loading", bid, loading, limit));
         }
     }
-    for b in &r.buses {
-        if c.min_v.is_none_or(|m| b.vm < m) {
-            c.min_v = Some(b.vm);
-            c.min_v_bus.clone_from(&b.id);
+    for &(b, vm) in &out.voltages {
+        let (bid, vmin, vmax) = &mon.buses[b];
+        if c.min_v.is_none_or(|m| vm < m) {
+            c.min_v = Some(vm);
+            c.min_v_bus.clone_from(bid);
         }
-        if c.max_v.is_none_or(|m| b.vm > m) {
-            c.max_v = Some(b.vm);
-            c.max_v_bus.clone_from(&b.id);
+        if c.max_v.is_none_or(|m| vm > m) {
+            c.max_v = Some(vm);
+            c.max_v_bus.clone_from(bid);
         }
-        let Some(&(vmin, vmax)) = bands.get(b.id.as_str()) else {
-            continue;
-        };
-        if b.vm < vmin - 1e-9 {
-            c.violations.push(violation("undervoltage", &b.id, b.vm, vmin));
+        if vm < vmin - 1e-9 {
+            c.violations.push(violation("undervoltage", bid, vm, *vmin));
         }
-        if b.vm > vmax + 1e-9 {
-            c.violations.push(violation("overvoltage", &b.id, b.vm, vmax));
+        if vm > vmax + 1e-9 {
+            c.violations.push(violation("overvoltage", bid, vm, *vmax));
         }
     }
     c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ps_lf::PuBranch;
+
+    fn branch(f: usize, t: usize) -> PuBranch {
+        PuBranch {
+            id: 0,
+            f,
+            t,
+            yff: C64::new(0.0, -10.0),
+            yft: C64::new(0.0, 10.0),
+            ytf: C64::new(0.0, 10.0),
+            ytt: C64::new(0.0, -10.0),
+            shift: 0.0,
+            ratio: 1.0,
+        }
+    }
+
+    #[test]
+    fn bridges_are_the_branches_whose_loss_splits_the_network() {
+        // A ring 0-1-2-0 with a spur 2-3, and a doubled branch 3-4.
+        let mut net = PuNetwork {
+            buses: vec![
+                ps_lf::PuBus {
+                    base_kv: 1.0,
+                    vm0: 1.0,
+                    va0: 0.0
+                };
+                5
+            ],
+            ..Default::default()
+        };
+        net.branches = vec![
+            branch(0, 1),
+            branch(1, 2),
+            branch(2, 0),
+            branch(2, 3),
+            branch(3, 4),
+            branch(3, 4),
+        ];
+        let b = bridges(&net);
+        assert_eq!(b, HashSet::from([3]));
+    }
 }

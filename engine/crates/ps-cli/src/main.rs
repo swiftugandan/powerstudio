@@ -23,7 +23,7 @@ use std::process::ExitCode;
 use ps_study::{LoadFlowRun, Silent, api};
 use serde_json::{Value, json};
 
-const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] [--sv <out.xml>]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]";
+const USAGE: &str = "usage: ps study <kind> <document.json> [--options <json>]\n       ps lf <case.m> [--tol <MVA>] [--qlim] [--flat] [--warm]\n       ps bench <case.m> [--repeat <n>] [--warm]\n       ps inspect <file|folder|archive>... [--props]\n       ps cgmes <file|folder|archive>... [--lf] [--warm] [--model] [--sv <out.xml>]\n       ps psse <case.raw> [--lf] [--warm] [--model]\n       ps export <input>... --raw <33|35> [--out <file>] [--solution <file>]\n       ps contingency <input>... [--gens] [--from <k>] [--to <k>]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -128,7 +128,7 @@ fn positional(args: &[String]) -> Vec<String> {
         } else if a.starts_with("--") {
             skip = matches!(
                 a.as_str(),
-                "--raw" | "--out" | "--solution" | "--sv" | "--options" | "--tol" | "--repeat"
+                "--raw" | "--out" | "--solution" | "--sv" | "--options" | "--tol" | "--repeat" | "--from" | "--to"
             );
         } else {
             out.push(a.clone());
@@ -185,6 +185,25 @@ fn run(args: &[String]) -> Result<String, String> {
                 study: imp.study,
             };
             Ok(api::handle(kind, &opts, Some(&loaded), &mut Silent)?.to_string())
+        }
+        Some("contingency") => {
+            // N-1 of a model's branches (and generators with --gens), timed; prints the effort and the worst cases.
+            let model = load_any(&positional(args))?;
+            let mut study = ps_model::study::StudyCase::default();
+            study.loadflow = ps_model::study::LoadFlowSettings {
+                tolerance: value(args, "--tol").and_then(|v| v.parse().ok()).unwrap_or(0.001),
+                max_iter: 50,
+                ..ps_model::study::LoadFlowSettings::plain()
+            };
+            study.contingency.gens = flag(args, "--gens");
+            let from = value(args, "--from").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let to = value(args, "--to").and_then(|v| v.parse().ok()).unwrap_or(usize::MAX);
+            let t0 = ps_num::clock::now_ms();
+            let chunk = ps_study::contingency::run_chunk(&model, &study, from..to, &mut ps_study::Silent)?;
+            let ms = ps_num::clock::now_ms() - t0;
+            let failed = chunk.cases.iter().filter(|c| !c.converged).count();
+            let violating = chunk.cases.iter().filter(|c| !c.violations.is_empty()).count();
+            Ok(json!({ "cases": chunk.cases.len(), "failed": failed, "violating": violating, "effort": chunk.effort, "timing": chunk.timing, "ms": ms, "msPerCase": ms / chunk.cases.len().max(1) as f64 }).to_string())
         }
         Some(cmd @ ("lf" | "bench")) => {
             let path = args.get(1).ok_or(USAGE)?;

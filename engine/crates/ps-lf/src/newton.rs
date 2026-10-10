@@ -236,8 +236,62 @@ pub(crate) struct Solver {
     pub factored: bool,
 }
 
+/// What a solve can lend later solves of a network with the same equations and admittance pattern: the Jacobian's
+/// layout and its ordering and symbolic factorisation. Contingency analysis solves thousands of outages that keep the
+/// pattern (a branch's admittances set to zero leave its entries in place) and pays for the ordering once.
+#[derive(Default)]
+pub struct Cache {
+    entry: Option<CacheEntry>,
+    /// Solves that reused the analysis.
+    pub hits: usize,
+    /// Solves that analysed afresh.
+    pub misses: usize,
+}
+
+struct CacheEntry {
+    st: Structure,
+    row_ptr: Vec<usize>,
+    col: Vec<usize>,
+    lay: Layout,
+    lu: FaerLu,
+}
+
+impl Cache {
+    /// The layout and an analysed solver for these equations, from the cache when they match, otherwise analysed and
+    /// kept.
+    fn get(&mut self, y: &Ybus, st: &Structure) -> (Layout, FaerLu, Result<(), ps_sparse::SolveError>) {
+        if let Some(e) = &self.entry
+            && e.st == *st
+            && e.row_ptr == y.row_ptr
+            && e.col == y.col
+        {
+            self.hits += 1;
+            return (e.lay.clone(), e.lu.analysed_copy(), Ok(()));
+        }
+        self.misses += 1;
+        let lay = Layout::new(y, st);
+        let mut lu = FaerLu::new();
+        let analysed = lu.analyse(&lay.pattern);
+        if analysed.is_ok() {
+            self.entry = Some(CacheEntry {
+                st: st.clone(),
+                row_ptr: y.row_ptr.clone(),
+                col: y.col.clone(),
+                lay: lay.clone(),
+                lu: lu.analysed_copy(),
+            });
+        }
+        (lay, lu, analysed)
+    }
+}
+
 /// Solves the load flow.
 pub fn solve(net: &PuNetwork, opt: &Options) -> Solution {
+    solve_cached(net, opt, &mut Cache::default())
+}
+
+/// Solves the load flow, reusing (and filling) `cache`.
+pub fn solve_cached(net: &PuNetwork, opt: &Options, cache: &mut Cache) -> Solution {
     let t0 = clock::now_ms();
     let n = net.buses.len();
     let mut timing = crate::newton::Timing::default();
@@ -316,9 +370,7 @@ pub fn solve(net: &PuNetwork, opt: &Options) -> Solution {
     }
     let y = Ybus::build(&work.net, &[]);
     let ta = clock::now_ms();
-    let lay = Layout::new(&y, &st);
-    let mut lu = FaerLu::new();
-    let analysed = lu.analyse(&lay.pattern);
+    let (lay, lu, analysed) = cache.get(&y, &st);
     timing.analyse_ms += clock::now_ms() - ta;
     let mut s = Solver {
         y,

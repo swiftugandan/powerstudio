@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use ps_study::contingency::{self, outage_list};
+use ps_study::contingency::{self, definitions};
 use ps_study::{LoadFlowRun, Silent, loadflow, outages_by_id};
 
 #[test]
@@ -96,13 +96,16 @@ fn chunks_merge_to_the_sequential_result() {
         let mut imp = input(name);
         imp.study.contingency.gens = true;
         let whole = contingency::run(&imp.model, &imp.study, &mut Silent).unwrap();
-        let n = outage_list(&imp.model, &imp.study).len();
+        let n = definitions(&imp.model, &imp.study).len();
         for parts in [2, 3, 7] {
             let size = n.div_ceil(parts);
             let chunks = (0..parts)
                 .map(|p| contingency::run_chunk(&imp.model, &imp.study, p * size..(p + 1) * size, &mut Silent).unwrap())
                 .collect();
-            assert_eq!(contingency::merge(chunks).unwrap(), whole, "{name} in {parts} parts");
+            // Everything but the time taken.
+            let mut merged = contingency::merge(chunks).unwrap();
+            merged.timing = whole.timing;
+            assert_eq!(merged, whole, "{name} in {parts} parts");
         }
     }
 }

@@ -366,38 +366,17 @@ fn assemble(model: &Model, calc: &Calc, sol: &ps_lf::Solution, st: &LoadFlowSett
             let row = src.row as usize;
             let (p_from, q_from) = (fl.s_from.re * sb, fl.s_from.im * sb);
             let (p_to, q_to) = (fl.s_to.re * sb, fl.s_to.im * sb);
-            let (id, cls, loading) = match src.class {
-                Class::Line => {
-                    let l = &model.lines[row];
-                    let rated_ka = l
-                        .limits
-                        .iter()
-                        .filter(|c| c.duration_s.is_none())
-                        .map(|c| c.amps / 1000.0)
-                        .fold(f64::INFINITY, f64::min);
-                    let loading = (rated_ka.is_finite() && rated_ka > 0.0)
-                        .then(|| fl.i_from_ka.max(fl.i_to_ka) / rated_ka * 100.0);
-                    (l.id.clone(), "line", loading)
-                }
-                Class::Transformer2 => {
-                    let t = &model.transformers2[row];
-                    let s_max = fl.s_from.abs().max(fl.s_to.abs()) * sb;
-                    (
-                        t.id.clone(),
-                        "trafo",
-                        (t.rated_mva > 0.0).then(|| s_max / t.rated_mva * 100.0),
-                    )
-                }
-                _ => {
-                    let t = &model.transformers3[row];
-                    let rated = t.windings[usize::from(src.winding.max(1)) - 1].rated_mva;
-                    (
-                        t.id.clone(),
-                        "trafo3",
-                        (rated > 0.0).then(|| fl.s_from.abs() * sb / rated * 100.0),
-                    )
-                }
+            let (id, cls) = match src.class {
+                Class::Line => (model.lines[row].id.clone(), "line"),
+                Class::Transformer2 => (model.transformers2[row].id.clone(), "trafo"),
+                _ => (model.transformers3[row].id.clone(), "trafo3"),
             };
+            let loading = crate::limits::loading(
+                crate::limits::end_limits(model, src, None),
+                crate::limits::rated_mva(model, src),
+                [fl.i_from_ka, fl.i_to_ka],
+                [fl.s_from.abs() * sb, fl.s_to.abs() * sb],
+            );
             losses += p_from + p_to;
             BranchResult {
                 id,

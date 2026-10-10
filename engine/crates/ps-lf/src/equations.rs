@@ -141,6 +141,7 @@ impl Structure {
 }
 
 /// The Jacobian's pattern for a structure and, for every Ybus entry, where each of its derivative terms lands.
+#[derive(Clone)]
 pub(crate) struct Layout {
     /// The sparsity pattern.
     pub pattern: Pattern,

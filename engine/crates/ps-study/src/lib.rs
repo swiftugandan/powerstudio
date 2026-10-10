@@ -7,6 +7,7 @@
 pub mod api;
 pub mod contingency;
 pub mod exchange;
+pub mod limits;
 pub mod loadflow;
 pub mod progress;
 pub mod rms;

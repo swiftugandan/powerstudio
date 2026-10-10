@@ -2,11 +2,15 @@
 
 use faer::dyn_stack::{MemBuffer, MemStack, StackReq};
 use faer::linalg::lu::partial_pivoting::factor::PartialPivLuParams;
+use faer::sparse::linalg::SupernodalThreshold;
 use faer::sparse::linalg::lu::{LuRef, LuSymbolicParams, NumericLu, SymbolicLu, factorize_symbolic_lu};
 use faer::sparse::{SparseColMatRef, SymbolicSparseColMatRef};
 use faer::{Conj, MatMut, Par, Spec};
 
 use crate::{FactorStats, Pattern, SolveError, SparseSolver};
+
+/// Order from which the supernodal factorisation is used.
+const SUPERNODAL_FROM: usize = 1000;
 
 /// faer's sparse LU: COLAMD column ordering and the symbolic factorisation in [`SparseSolver::analyse`], partial
 /// pivoting and numeric factorisation in [`SparseSolver::factor`]. The symbolic result and the numeric storage are
@@ -33,6 +37,16 @@ impl FaerLu {
     /// A new, empty solver.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A solver that shares this one's ordering and symbolic factorisation and has no numeric factors yet: for
+    /// systems with the same pattern (a load flow after an outage that keeps the pattern).
+    pub fn analysed_copy(&self) -> Self {
+        Self {
+            pattern: self.pattern.clone(),
+            symbolic: self.symbolic.clone(),
+            ..Self::default()
+        }
     }
 
     fn ensure_scratch(&mut self, req: StackReq) -> Result<(), SolveError> {
@@ -91,7 +105,14 @@ impl SparseSolver for FaerLu {
             None,
             &pattern.row_idx,
         );
-        let symbolic = factorize_symbolic_lu(sym, LuSymbolicParams::default()).map_err(|_| SolveError::OutOfMemory)?;
+        // faer's own choice between simplicial and supernodal factorisation picks simplicial on power system
+        // Jacobians of a few thousand unknowns, where supernodal is 2.4 times faster (ACTIVSg2000 and 25k); on small
+        // systems the two are even (docs/ENGINE.md, numerical methods).
+        let mut params = LuSymbolicParams::default();
+        if pattern.nrows >= SUPERNODAL_FROM {
+            params.supernodal_flop_ratio_threshold = SupernodalThreshold::FORCE_SUPERNODAL;
+        }
+        let symbolic = factorize_symbolic_lu(sym, params).map_err(|_| SolveError::OutOfMemory)?;
         self.symbolic = Some(symbolic);
         self.pattern = Some(pattern.clone());
         self.factored = false;

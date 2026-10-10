@@ -25,5 +25,7 @@ pub use network::{
     BusKind, MachineMode, PuBranch, PuBus, PuGrid, PuLoad, PuMachine, PuNetwork, PuShunt, PuShuntControl, PuTapBranch,
     TapAxis, TapTarget, TwoPort, UnitKind, nominal_angles, two_port,
 };
-pub use newton::{Balance, Control, ControlLog, IterationLog, Options, Solution, Timing, UnitOutput, solve};
+pub use newton::{
+    Balance, Cache, Control, ControlLog, IterationLog, Options, Solution, Timing, UnitOutput, solve, solve_cached,
+};
 pub use ybus::Ybus;

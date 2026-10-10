@@ -146,8 +146,20 @@ pub struct ShortCircuitSettings {
     pub location: String,
 }
 
-/// Contingency settings.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// A contingency: elements that fail together, by identifier.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Contingency {
+    /// Identifier, unique within the study case.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Identifiers of the elements that fail.
+    pub elements: Vec<String>,
+}
+
+/// Contingency analysis settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ContingencySettings {
     /// Take out lines.
@@ -156,8 +168,16 @@ pub struct ContingencySettings {
     pub trafos: bool,
     /// Take out generators.
     pub gens: bool,
+    /// Take out HVDC links.
+    pub hvdc: bool,
     /// Loading limit, %.
     pub max_loading: f64,
+    /// How long an overload after an outage may last before operators act, seconds: a branch is judged against the
+    /// largest of its limits that holds at least that long (its permanent limit always does). 0 judges against
+    /// permanent limits only.
+    pub acceptable_s: f64,
+    /// Further contingencies, such as several elements failing together.
+    pub list: Vec<Contingency>,
 }
 
 impl Default for ContingencySettings {
@@ -166,7 +186,10 @@ impl Default for ContingencySettings {
             lines: true,
             trafos: true,
             gens: false,
+            hvdc: false,
             max_loading: 100.0,
+            acceptable_s: 0.0,
+            list: Vec::new(),
         }
     }
 }

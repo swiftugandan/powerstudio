@@ -138,9 +138,9 @@ pub fn handle(kind: &str, opts: &Value, doc: Option<&Loaded>, progress: &mut dyn
         }
         "contingency" => to_json(&contingency::run(model, study, progress)?),
         "contingency_plan" => {
-            let ids: Vec<&str> = contingency::outage_list(model, study)
-                .iter()
-                .map(|&(c, r)| model.id_of(c, r).unwrap_or(""))
+            let ids: Vec<String> = contingency::definitions(model, study)
+                .into_iter()
+                .map(|c| c.id)
                 .collect();
             Ok(json!({ "count": ids.len(), "ids": ids }))
         }
