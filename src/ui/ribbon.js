@@ -37,6 +37,7 @@ export const TABS = [
   { id: 'view', label: 'View', groups: [
     { label: 'Navigate', items: [{ cmd: 'view.fit', size: 'large' }, { stack: ['view.zoomIn', 'view.zoomOut'] }] },
     { label: 'Annotations', items: [{ stack: ['view.boxes', 'view.names', 'view.branchNames'] }] },
+    { label: 'Labels', items: [{ stack: ['view.disentangle', 'labels.reset'] }] },
     { label: 'Colouring', items: [{ stack: ['view.colourResults', 'view.colourVoltage'] }] },
     { label: 'Panels', items: [{ stack: ['view.tree', 'view.inspector', 'view.dock'] }] },
     { label: 'Theme', items: [{ stack: ['view.themeSystem', 'view.themeLight', 'view.themeDark'] }] },

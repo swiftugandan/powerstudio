@@ -17,7 +17,8 @@
    "x": 0,
    "y": -380,
    "len": 240,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "B2",
@@ -30,7 +31,8 @@
    "x": 0,
    "y": -140,
    "len": 480,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "B3",
@@ -43,7 +45,8 @@
    "x": -360,
    "y": 120,
    "len": 160,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "B4",
@@ -56,7 +59,8 @@
    "x": -360,
    "y": 380,
    "len": 160,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "B5",
@@ -69,7 +73,8 @@
    "x": 400,
    "y": 120,
    "len": 180,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "B6",
@@ -82,7 +87,8 @@
    "x": 680,
    "y": 120,
    "len": 120,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "B7",
@@ -95,7 +101,8 @@
    "x": 400,
    "y": 380,
    "len": 160,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "B8",
@@ -108,7 +115,8 @@
    "x": 0,
    "y": 380,
    "len": 160,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "B9",
@@ -121,7 +129,8 @@
    "x": 0,
    "y": 120,
    "len": 160,
-   "orient": "h"
+   "orient": "h",
+   "labels": {}
   },
   {
    "id": "X1",
@@ -138,7 +147,8 @@
    "x0x1": 1,
    "r0x0": 0.1,
    "pos": 0,
-   "side": "above"
+   "side": "above",
+   "labels": {}
   },
   {
    "id": "T1",
@@ -181,7 +191,8 @@
    "tapRange": 0,
    "hvPos": -0.3,
    "lvPos": -0.15,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "T2",
@@ -224,7 +235,8 @@
    "tapRange": 0,
    "hvPos": 0.3,
    "lvPos": 0.15,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "T3",
@@ -267,7 +279,8 @@
    "tapRange": 0,
    "hvPos": 0.5,
    "lvPos": -0.5,
-   "bend": 60
+   "bend": 60,
+   "labels": {}
   },
   {
    "id": "T4",
@@ -310,7 +323,8 @@
    "tapRange": 0,
    "hvPos": 0,
    "lvPos": 0,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "L1",
@@ -330,7 +344,8 @@
    "b0": 125.66,
    "fromPos": -0.45,
    "toPos": 0.3,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "L2",
@@ -350,7 +365,8 @@
    "b0": 125.66,
    "fromPos": -0.2,
    "toPos": -0.2,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "L3",
@@ -370,7 +386,8 @@
    "b0": 125.66,
    "fromPos": 0.3,
    "toPos": -0.35,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "L4",
@@ -390,7 +407,8 @@
    "b0": 125.66,
    "fromPos": 0.3,
    "toPos": 0,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "L5",
@@ -410,7 +428,8 @@
    "b0": 1.5,
    "fromPos": 0.45,
    "toPos": -0.3,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "L6",
@@ -430,7 +449,8 @@
    "b0": 1.5,
    "fromPos": 0,
    "toPos": 0,
-   "bend": 0
+   "bend": 0,
+   "labels": {}
   },
   {
    "id": "G1",
@@ -482,7 +502,8 @@
    "governor": null,
    "stabiliser": null,
    "pos": 0,
-   "side": "above"
+   "side": "above",
+   "labels": {}
   },
   {
    "id": "D1",
@@ -505,7 +526,8 @@
    "motorRx": 0.1,
    "motorPoles": 0,
    "pos": 0.2,
-   "side": "below"
+   "side": "below",
+   "labels": {}
   },
   {
    "id": "D2",
@@ -528,7 +550,8 @@
    "motorRx": 0.1,
    "motorPoles": 0,
    "pos": 0.25,
-   "side": "below"
+   "side": "below",
+   "labels": {}
   },
   {
    "id": "D3",
@@ -551,7 +574,8 @@
    "motorRx": 0.1,
    "motorPoles": 0,
    "pos": 0.3,
-   "side": "below"
+   "side": "below",
+   "labels": {}
   },
   {
    "id": "D4",
@@ -574,7 +598,8 @@
    "motorRx": 0.1,
    "motorPoles": 0,
    "pos": 0.25,
-   "side": "below"
+   "side": "below",
+   "labels": {}
   },
   {
    "id": "D5",
@@ -597,7 +622,8 @@
    "motorRx": 0.1,
    "motorPoles": 0,
    "pos": 0,
-   "side": "below"
+   "side": "below",
+   "labels": {}
   },
   {
    "id": "D6",
@@ -620,7 +646,8 @@
    "motorRx": 0.1,
    "motorPoles": 0,
    "pos": -0.42,
-   "side": "above"
+   "side": "above",
+   "labels": {}
   },
   {
    "id": "S1",
@@ -638,7 +665,8 @@
    "vTarget": 1,
    "vBand": 2,
    "pos": 0.42,
-   "side": "above"
+   "side": "above",
+   "labels": {}
   }
  ],
  "study": {

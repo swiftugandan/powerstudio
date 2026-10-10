@@ -193,3 +193,26 @@ export class ReconnectGesture extends EditGesture {
     }
   }
 }
+
+/** Drags a label away from where the diagram put it; it keeps that offset from its default position (pinned). */
+export class LabelGesture extends EditGesture {
+  /** @param {Viewport} vp @param {import('../../render/labels.js').LabelIndex['items'][number]} label @param {Point} start */
+  constructor(vp, label, start) {
+    super(vp);
+    this.label = label;
+    this.start = start;
+    this.moved = false;
+  }
+
+  /** @override @param {Pointer} e */
+  move(e) {
+    const dx = e.p.x - this.start.x, dy = e.p.y - this.start.y;
+    if (!this.moved && Math.hypot(dx, dy) * this.vp.camera.zoom < 3) return;
+    this.moved = true;
+    const { owner, slot, rect, def } = this.label, el = this.store.get(owner);
+    if (!el) return;
+    const offset = [Math.round(rect.x0 + dx - def.x), Math.round(rect.y0 + dy - def.y)];
+    this.store.transact('Move label', tx => tx.set(owner, 'labels', { .../** @type {object} */ (el.labels), [slot]: offset }), { coalesce: this.key });
+  }
+}
+

@@ -38,6 +38,15 @@ the short-circuit results, the data sheet, the study case dialog, the command pa
 layout, in both themes, and tabs through the workspace to check that every keyboard stop shows a focus mark. It runs
 in all four projects.
 
+Label placement has its own checks. `tests/labels.test.mjs` builds both samples' diagrams with load-flow,
+short-circuit and contingency results and requires that no name or result box overlaps another, that labels take
+their default places with "Disentangle labels" off, that a dragged label keeps its offset, that the same input gives
+the same diagram to the byte, and that moving a label is a drawing edit. In the browser, the same overlap check runs
+in each browser's fonts, a test drags, undoes and resets a label, and another checks that the widths Node uses
+(`conservativeMeasure`) are never narrower than what each browser measures. `node scripts/scene-bench.mjs` times the
+diagram build of a synthetic 70,000-busbar grid with load-flow results in Chromium and prints the longest step
+(`--fixed` for labels in fixed places).
+
 ## Documentation screenshots
 
 ```sh

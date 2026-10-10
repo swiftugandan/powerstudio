@@ -203,6 +203,93 @@ test('resizes, reroutes and reconnects with the diagram handles', async ({ page 
   await expect(page.locator('#inspector-panel input[data-key="pos"]')).toHaveValue('0.3');
 });
 
+/** @param {import('@playwright/test').Page} page @returns {Promise<Array<{ owner: string, slot: string, x0: number, y0: number, x1: number, y1: number, defX: number, defY: number }>>} */
+const labelsOf = page => page.evaluate(() => /** @type {any} */ (window).powerstudio.labels);
+
+/** Pairs of labels that overlap. @param {Awaited<ReturnType<typeof labelsOf>>} ls */
+function overlapping(ls) {
+  const out = [];
+  for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) {
+    const a = ls[i], b = ls[j];
+    if (a.x0 < b.x1 - 1e-6 && b.x0 < a.x1 - 1e-6 && a.y0 < b.y1 - 1e-6 && b.y0 < a.y1 - 1e-6) out.push(`${a.owner}.${a.slot} × ${b.owner}.${b.slot}`);
+  }
+  return out;
+}
+
+test('places names and result boxes clear of each other in the browser\'s fonts, or in fixed places on request', async ({ page }) => {
+  for (const sample of ['ieee14', 'riverside']) {
+    await open(page, `sample=${sample}`);
+    await loadFlow(page);
+    await expect.poll(async () => (await labelsOf(page)).filter(l => l.slot === 'endA').length).toBeGreaterThan(5);
+    expect(overlapping(await labelsOf(page))).toEqual([]);
+  }
+  // Switched off, every label sits in its default place.
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('Shift+L');
+  await expect.poll(async () => (await labelsOf(page)).every(l => l.x0 === l.defX && l.y0 === l.defY)).toBe(true);
+  await page.keyboard.press('Shift+L');
+  await expect.poll(async () => overlapping(await labelsOf(page)).length).toBe(0);
+});
+
+test('the widths used where no fonts are (tests, the website) are never narrower than the browser\'s', async ({ page }) => {
+  const { conservativeMeasure } = await import('../../src/render/metrics.js');
+  const { ieee14 } = await import('../../src/samples/ieee14.js');
+  const { riverside } = await import('../../src/samples/riverside.js');
+  const names = [...ieee14().elements, ...riverside().elements].map(e => e.name).filter(Boolean);
+  const boxes = ['1.020 p.u.  -146.97°', '-152.6 MW', '-17.6 Mvar', 'P 232.4 MW', 'Ik″ 12.34 kA', 'ip  31.20 kA', '100.0 % (Line 1-2)', 'δ 12.3°', 'min 0.950 p.u.'];
+  /** @type {Array<{ font: 'sans' | 'mono', weight: 400 | 600, size: number, text: string }>} */
+  const cases = [...names.flatMap(text => [{ font: /** @type {const} */ ('sans'), weight: /** @type {const} */ (600), size: 14, text }, { font: /** @type {const} */ ('sans'), weight: /** @type {const} */ (400), size: 12, text }]),
+    ...boxes.map(text => ({ font: /** @type {const} */ ('mono'), weight: /** @type {const} */ (400), size: 11, text }))];
+  await open(page);
+  const measured = await page.evaluate(cases => {
+    const fonts = { sans: 'system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif', mono: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace' };
+    const ctx = /** @type {CanvasRenderingContext2D} */ (document.createElement('canvas').getContext('2d'));
+    return cases.map(c => { ctx.font = `${c.weight} ${c.size}px ${fonts[c.font]}`; return ctx.measureText(c.text).width; });
+  }, cases);
+  cases.forEach((c, i) => expect(conservativeMeasure(c.font, c.weight, c.size, c.text), `${c.font} ${c.weight}: ${c.text}`).toBeGreaterThanOrEqual(measured[i]));
+});
+
+test('drags a result box to a place of its own, undoes it, and lets the diagram place it again', async ({ page }) => {
+  await open(page);
+  await loadFlow(page);
+  await page.locator('#viewport canvas').focus();
+  await page.keyboard.press('F');
+  await page.keyboard.press('=');
+  await page.keyboard.press('=');
+  /** @param {number} x @param {number} y */
+  const at = (x, y) => page.evaluate(([px, py]) => /** @type {any} */ (window).powerstudio.toPage(px, py), [x, y]);
+  const box = async () => /** @type {NonNullable<Awaited<ReturnType<typeof labelsOf>>[number]>} */ ((await labelsOf(page)).find(l => l.owner === 'B4' && l.slot === 'box'));
+  await expect.poll(async () => !!(await box())).toBe(true);
+  const before = await box();
+  const from = await at((before.x0 + before.x1) / 2, (before.y0 + before.y1) / 2), to = await at((before.x0 + before.x1) / 2 + 60, (before.y0 + before.y1) / 2 + 80);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 8 });
+  await page.mouse.up();
+  // Pressing the label selected its busbar; the inspector says the label was placed by hand.
+  await expect(page.locator('#inspector-panel')).toContainText('1 placed by hand');
+  await expect.poll(async () => Math.round((await box()).x0 - before.x0)).toBe(60);
+  expect(Math.round((await box()).y0 - before.y0)).toBe(80);
+  expect(overlapping(await labelsOf(page))).toEqual([]);
+  await page.keyboard.press('ControlOrMeta+Z');
+  await expect.poll(async () => (await box()).x0).toBe(before.x0);
+  await page.keyboard.press('ControlOrMeta+Shift+Z');
+  await expect.poll(async () => Math.round((await box()).x0 - before.x0)).toBe(60);
+  await palette(page, 'Reset label positions');
+  await expect.poll(async () => (await box()).x0).toBe(before.x0);
+  await expect(page.locator('#inspector-panel')).toContainText('Placed automatically');
+});
+
+test('shows every row and label of the ribbon on every tab', async ({ page }) => {
+  await open(page);
+  for (const tab of ['Home', 'Insert', 'Calculate', 'View', 'Help']) {
+    await page.getByRole('tab', { name: tab, exact: true }).click();
+    const panels = await page.evaluate(() => [...document.querySelectorAll('.ribbon-panel')].filter(p => /** @type {HTMLElement} */ (p).offsetParent)
+      .map(p => ({ client: p.clientHeight, scroll: p.scrollHeight })));
+    for (const p of panels) expect(p.scroll, tab).toBeLessThanOrEqual(p.client);
+  }
+});
+
 test('keeps work in the browser across a reload', async ({ page }) => {
   await open(page, 'sample=riverside');
   const name = page.locator('#doc-name');

@@ -27,6 +27,7 @@ features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md f
   reproducibility, writes the SBOM, attests and drafts the release. `node scripts/check-reproducible.mjs` and
   `node scripts/sbom.mjs` run the same checks locally.
 - `PS_SCREENSHOTS=1 npx playwright test screenshots --project=webgpu`: refreshes `docs/screenshots/`.
+- `node scripts/scene-bench.mjs`: times the diagram build of a 70,000-busbar grid with labels in Chromium.
 
 ## Rules
 
@@ -58,6 +59,9 @@ features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md f
   Keep the one `new Worker(new URL('./worker/engine.worker.js', import.meta.url), { type: 'module' })` in `main.js`
   as written.
 - Both renderers draw the same `DisplayList`; add a primitive to both (and to `svg.js`) or to neither.
+- Every text on the diagram is a label request in `scene.js`, placed by `labels.js`; never draw text there directly,
+  or the placer cannot keep labels apart. Measure text with the scene input's `measure`. Diagram input goes through
+  a tool and a gesture in `src/ui/tools/` (docs/design/CAD.md).
 - Shortcuts: never bind keys the browser owns (F5, F11, Ctrl+N, Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+1…9).
 - UI copy: British English, plain verbs, sentence case.
 - Look at the screenshots after UI changes; hold the UI to a pixel-perfect standard in both themes and at phone width.

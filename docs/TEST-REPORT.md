@@ -4,6 +4,27 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## Diagram labels, CAD phases C0 and C1 (2026-10-10, local, branch `cad`)
+
+Same environment as phase 7. Local runs only; nothing pushed.
+
+| Check | Result |
+| --- | --- |
+| Labels overlapping another, after a load flow, before and after | IEEE 14-bus 45 of 80 result boxes over another box or a busbar name, Riverside 18 of 42; now none of 111 and 60 labels, names included |
+| `tests/labels.test.mjs` (both samples, load flow, short circuit and contingency, branch names on) | 10 passed |
+| The same overlap check in each browser's fonts, label drag, undo and reset, the option, Node widths not narrower than any browser's | Passed in all four projects |
+| Ribbon panels clipping their content, every tab | None (the panel was 64 px for 82 px of content) |
+| Tool split (C0): browser suite unchanged | 155 passed, 33 skipped, before the new tests |
+| Node tests, browser tests after C1 | 125 passed; 171 passed, 33 skipped |
+| Oracle goldens after exporting the inputs with the new `labels` field | Recomputed byte for byte |
+| Diagram build of a 70,000-busbar grid with 560,000 labels, Chromium 156 (`scripts/scene-bench.mjs`) | 1.3 to 1.7 s in 999 steps; longest step 28 to 87 ms against the 100 ms bar |
+
+The fonts check found that the widths first assumed for Node were too narrow (0.6 em for monospaced text against
+Menlo's 0.602 and WebKit's 0.618, and `°` drawn from a fallback font), so result boxes laid out without fonts could
+be narrower than their text; Node now counts 0.64 em, and 1.2 em beyond ASCII. One crowded spot still takes a long
+leader: on Riverside's 120-unit Hilltop CHP busbar the transformer's flow box sits beyond the bar's end, because its
+own route runs along the bar's level; phase C3's routing addresses such routes.
+
 ## Release hardening, phase 7 (2026-10-10, local, version 1.0.0)
 
 Same environment as phases 1 to 6, plus Playwright's Firefox and WebKit builds. Local runs only.

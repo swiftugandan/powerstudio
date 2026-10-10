@@ -63,6 +63,8 @@ export class DisplayList {
     this.minZoom = 0;
     /** For a large diagram, the zoom from which each voltage level shows (see `levelZooms` in scene.js). @type {Map<number, number> | null} */
     this.levels = null;
+    /** Where the scene placed its labels, for hit testing and the drawing's extent. @type {import('./labels.js').LabelIndex | null} */
+    this.labels = null;
   }
 
   /** @param {number} i */

@@ -5,7 +5,7 @@
  * engineer enters them; the engine converts them to its model on import (engine/crates/ps-io/src/powerstudio.rs). */
 
 /**
- * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus' | 'trafo' | 'controller'} FieldType
+ * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus' | 'trafo' | 'controller' | 'labels'} FieldType
  * @typedef {'basic' | 'loadflow' | 'shortcircuit' | 'rms' | 'graphic'} FieldGroup
  * @typedef {{
  *   key: string, label: string, type: FieldType, group: FieldGroup, default: unknown,
@@ -36,6 +36,12 @@ const bus = (key, label) => ({ key, label, type: 'bus', group: 'basic', default:
 const optionalBus = (key, label, empty, extra = {}) => ({ key, label, type: 'bus', group: 'loadflow', default: '', optional: empty, ...extra });
 const inService = /** @type {FieldSpec} */ ({ key: 'inService', label: 'In service', type: 'bool', group: 'basic', default: true, operating: true });
 const name = /** @type {FieldSpec} */ ({ key: 'name', label: 'Name', type: 'string', group: 'basic', default: '' });
+/** The label slots of the diagram (src/render/labels.js). */
+export const LABEL_SLOTS = Object.freeze(['name', 'box', 'endA', 'endB', 'mid']);
+/** Where the user dragged an element's labels: per slot, the offset from the label's default position. Edits
+ * replace the whole value, so every element can share the frozen empty default. */
+const labels = /** @type {FieldSpec} */ ({ key: 'labels', label: 'Labels', type: 'labels', group: 'graphic', default: Object.freeze({}),
+  help: 'Labels dragged by hand keep their place; reset them to let the diagram place them again.' });
 /** Position of a connection along its bus bar, from -0.5 (start) to 0.5 (end). @param {string} key @param {string} label */
 const attach = (key, label) => num(key, label, 0, { group: 'graphic', min: -0.5, max: 0.5, help: 'Position along the bus bar, from -0.5 (start) to 0.5 (end).' });
 
@@ -228,6 +234,7 @@ export const CLASSES = {
       num('y', 'Position y', 0, { group: 'graphic' }),
       num('len', 'Bar length', 120, { group: 'graphic', min: 20 }),
       { key: 'orient', label: 'Orientation', type: 'enum', group: 'graphic', default: 'h', options: ['h', 'v'] },
+      labels,
     ],
   },
   line: {
@@ -245,6 +252,7 @@ export const CLASSES = {
       num('b0', 'Zero-sequence B0′', 1.8, { unit: 'µS/km', min: 0, group: 'shortcircuit' }),
       attach('fromPos', 'From connection'), attach('toPos', 'To connection'),
       num('bend', 'Route offset', 0, { group: 'graphic', help: 'Moves the middle segment of the route.' }),
+      labels,
     ],
   },
   trafo: {
@@ -298,6 +306,7 @@ export const CLASSES = {
         help: 'As the unit transformer of a power station unit without an on-load tap changer: how far its taps may move the voltage either way, for KSO.' }),
       attach('hvPos', 'HV connection'), attach('lvPos', 'LV connection'),
       num('bend', 'Route offset', 0, { group: 'graphic', help: 'Moves the middle segment of the route.' }),
+      labels,
     ],
   },
   gen: {
@@ -350,6 +359,7 @@ export const CLASSES = {
         help: 'A stabiliser acts through the exciter; without an exciter it has no effect.' },
       attach('pos', 'Connection'),
       { key: 'side', label: 'Side', type: 'enum', group: 'graphic', default: 'above', options: SIDES },
+      labels,
     ],
   },
   extgrid: {
@@ -366,6 +376,7 @@ export const CLASSES = {
       num('r0x0', 'R0/X0 ratio', 0.1, { min: 0, group: 'shortcircuit' }),
       attach('pos', 'Connection'),
       { key: 'side', label: 'Side', type: 'enum', group: 'graphic', default: 'above', options: SIDES },
+      labels,
     ],
   },
   load: {
@@ -393,6 +404,7 @@ export const CLASSES = {
         help: 'For the decay of the motor\u2019s current by the breaking time. Zero when not known: the breaking current then takes no decay, which errs high.' }),
       attach('pos', 'Connection'),
       { key: 'side', label: 'Side', type: 'enum', group: 'graphic', default: 'below', options: SIDES },
+      labels,
     ],
   },
   shunt: {
@@ -412,6 +424,7 @@ export const CLASSES = {
         help: 'Full width of the band the voltage may lie in without switching, % of the busbar\'s nominal voltage.' }),
       attach('pos', 'Connection'),
       { key: 'side', label: 'Side', type: 'enum', group: 'graphic', default: 'below', options: SIDES },
+      labels,
     ],
   },
 };
@@ -450,6 +463,14 @@ export function checkValue(f, v) {
     case 'string': case 'bus': case 'trafo': return typeof v === 'string' ? '' : `${f.label} must be text.`;
     case 'bool': return typeof v === 'boolean' ? '' : `${f.label} must be true or false.`;
     case 'enum': return f.options?.includes(/** @type {string} */ (v)) ? '' : `${f.label} must be one of ${f.options?.join(', ')}.`;
+    case 'labels': {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) return `${f.label} must map label slots to offsets.`;
+      for (const [slot, o] of Object.entries(v)) {
+        if (!LABEL_SLOTS.includes(slot)) return `${f.label}: "${slot}" is not a label slot.`;
+        if (!Array.isArray(o) || o.length !== 2 || !o.every(x => typeof x === 'number' && Number.isFinite(x))) return `${f.label}: the ${slot} offset must be two numbers.`;
+      }
+      return '';
+    }
     case 'controller': {
       if (v === null) return '';
       if (!v || typeof v !== 'object') return `${f.label} must be a model with its parameters, or none.`;

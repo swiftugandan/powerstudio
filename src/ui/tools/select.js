@@ -2,7 +2,7 @@
  * ends), or draws a marquee from empty space. */
 
 import { Tool } from './tool.js';
-import { PanGesture, MarqueeGesture, MoveGesture, SlideGesture, ResizeGesture, BendGesture, ReconnectGesture } from './gestures.js';
+import { PanGesture, MarqueeGesture, MoveGesture, SlideGesture, ResizeGesture, BendGesture, ReconnectGesture, LabelGesture } from './gestures.js';
 import { hitTest } from '../../render/hittest.js';
 import { route, branchKeys, bendHandle } from '../../render/geometry.js';
 
@@ -19,6 +19,13 @@ export class SelectTool extends Tool {
   down(e) {
     const vp = this.vp, app = vp.app;
     const hit = hitTest(app.store.doc.elements, e.p, vp.camera.zoom, app.selection, vp.index());
+    // A selected element's handles come first; then labels, which are drawn over the elements.
+    const label = hit && hit.part !== 'body' ? null : vp.labelAt(e.p);
+    if (label) {
+      if (e.shift || e.mod) { app.toggleSelection(label.owner); return null; }
+      if (!app.selection.has(label.owner)) app.setSelection([label.owner]);
+      return new LabelGesture(vp, label, e.p);
+    }
     if (!hit) {
       // On a touch screen, a drag over empty space moves the view.
       if (e.touch) { if (!e.shift) app.setSelection([]); return new PanGesture(vp, e); }
@@ -55,8 +62,10 @@ export class SelectTool extends Tool {
   hover(e) {
     const vp = this.vp, app = vp.app;
     const hit = hitTest(app.store.doc.elements, e.p, vp.camera.zoom, app.selection, vp.index());
-    vp.host.dataset.hover = !hit ? '' : hit.part === 'body' ? 'element' : 'handle';
-    if ((hit?.id ?? '') !== app.hover) app.setHover(hit?.id ?? '');
+    const label = hit && hit.part !== 'body' ? null : vp.labelAt(e.p);
+    vp.host.dataset.hover = label ? 'label' : !hit ? '' : hit.part === 'body' ? 'element' : 'handle';
+    const id = label?.owner ?? hit?.id ?? '';
+    if (id !== app.hover) app.setHover(id);
   }
 }
 

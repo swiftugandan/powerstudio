@@ -13,6 +13,7 @@ import { activeCase } from '../core/project.js';
 import { STUDY_FIELDS } from '../core/document.js';
 import { CLASSES } from '../core/catalog.js';
 import { buildScene } from '../render/scene.js';
+import { canvasMeasure } from '../render/metrics.js';
 import { toSVG } from '../render/svg.js';
 import { buildOverlay } from './overlay.js';
 import { readPalette } from './theme.js';
@@ -208,8 +209,8 @@ function diagram(app) {
   const kind = app.overlayKind;
   const stored = kind === 'none' ? undefined : app.results[kind];
   const overlay = stored && kind !== 'none' ? buildOverlay(kind, stored.result, doc, P, { colouring: app.prefs.colouring, rmsIndex: app.rmsIndex }).overlay : null;
-  const list = buildScene({ elements: doc.elements, palette: P, selection: new Set(), hover: '', overlay, preview: null, labels: { names: true, branchNames: false, boxes: true } });
-  const svg = toSVG(list, app.viewport.extent(), P.bg, doc.name);
+  const list = buildScene({ elements: doc.elements, palette: P, selection: new Set(), hover: '', overlay, preview: null, labels: { names: true, branchNames: false, boxes: true, disentangle: true }, measure: canvasMeasure() });
+  const svg = toSVG(list, app.viewport.extent(list), P.bg, doc.name);
   return h('section', { class: 'report-section report-diagram' }, h('h2', { text: stored ? `Diagram with the ${TITLE[/** @type {CalcKind} */ (kind)].toLowerCase()} results` : 'Diagram' }),
     h('div', { class: 'report-svg', html: svg }));
 }

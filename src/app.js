@@ -775,6 +775,29 @@ export class App {
     this.setStatusMessage(`${label}. ${kbd('Mod+Z').replace(/<[^>]+>/g, '')} undoes it.`);
   }
 
+  /** Elements whose labels were dragged by hand: the selection's, or all when nothing is selected. */
+  hasPinnedLabels() {
+    const scope = this.selection.size ? [...this.selection].map(id => this.store.get(id)) : this.store.doc.elements;
+    return scope.some(e => !!e && Object.keys(/** @type {object} */ (e.labels)).length > 0);
+  }
+
+  /**
+   * Lets the diagram place labels dragged by hand again: one label, or every label of the selection, or of the whole
+   * diagram when nothing is selected. @param {string} [owner] @param {string} [slot]
+   */
+  resetLabels(owner, slot) {
+    const scope = owner ? [this.store.get(owner)] : this.selection.size ? [...this.selection].map(id => this.store.get(id)) : this.store.doc.elements;
+    const els = scope.filter(e => !!e && Object.keys(/** @type {object} */ (e.labels)).length > 0);
+    if (!els.length) return;
+    this.store.transact(owner && slot ? 'Reset label position' : 'Reset label positions', tx => {
+      for (const e of /** @type {Element[]} */ (els)) {
+        const rest = { .../** @type {Record<string, unknown>} */ (e.labels) };
+        if (slot) delete rest[slot]; else for (const k of Object.keys(rest)) delete rest[k];
+        tx.set(e.id, 'labels', rest);
+      }
+    });
+  }
+
   toggleService() {
     const els = [...this.selection].map(id => this.store.get(id)).filter(e => e && e.cls !== 'bus');
     if (!els.length) return;
@@ -1159,13 +1182,16 @@ export class App {
   /** @param {'ok' | 'info' | 'warn' | 'error'} kind @param {string} text @param {Parameters<typeof toast>[2]} [opt] */
   toast(kind, text, opt) { toast(kind, text, opt); }
 
-  /** @param {number} x @param {number} y @param {string} id @param {{ x: number, y: number } | null} at */
-  contextMenu(x, y, id, at) {
+  /** @param {number} x @param {number} y @param {string} id @param {{ x: number, y: number } | null} at
+   * @param {{ owner: string, slot: string } | null} [label] the label the menu was opened on */
+  contextMenu(x, y, id, at, label = null) {
     const el = id ? this.store.get(id) : null;
     /** @type {import('./ui/feedback.js').MenuItem[]} */
     const items = [];
     if (el) {
       items.push({ label: 'Properties', icon: 'settings', run: () => this.focusInspector() });
+      const pinned = /** @type {Record<string, unknown>} */ (el.labels);
+      if (label && pinned[label.slot]) items.push({ label: 'Reset label position', icon: 'resetLabels', run: () => this.resetLabels(el.id, label.slot) });
       if (el.cls === 'bus') {
         items.push({ label: 'Short circuit at this busbar', icon: 'shortcircuit', run: () => this.faultAt(el.id) });
         items.push({ label: 'Add fault to simulation', icon: 'rms', run: () => this.addRmsFault(el.id) });
@@ -1296,11 +1322,14 @@ export class App {
     c.add({ id: 'view.fit', label: 'Fit', icon: 'fit', keys: ['F'], group: 'View', hint: 'Fit the diagram in the window', run: () => this.viewport.fit() });
     c.add({ id: 'view.zoomIn', label: 'Zoom in', icon: 'zoomIn', keys: ['+', '='], group: 'View', run: () => this.viewport.zoomBy(1.25) });
     c.add({ id: 'view.zoomOut', label: 'Zoom out', icon: 'zoomOut', keys: ['-'], group: 'View', run: () => this.viewport.zoomBy(0.8) });
-    const pref = (/** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ ic, /** @type {'boxes' | 'names' | 'branchNames'} */ key, /** @type {string[]} */ keys = []) =>
+    const pref = (/** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ ic, /** @type {'boxes' | 'names' | 'branchNames' | 'disentangle'} */ key, /** @type {string[]} */ keys = []) =>
       c.add({ id, label, icon: ic, keys, group: 'View', pressed: () => this.prefs[key], run: () => { this.prefs[key] = !this.prefs[key]; this.savePrefs(); this.viewport.invalidate(); } });
     pref('view.boxes', 'Result boxes', 'boxes', 'boxes', ['Shift+R']);
     pref('view.names', 'Names', 'names', 'names', ['Shift+N']);
     pref('view.branchNames', 'Line names', 'line', 'branchNames');
+    pref('view.disentangle', 'Disentangle labels', 'disentangle', 'disentangle', ['Shift+L']);
+    c.add({ id: 'labels.reset', label: 'Reset label positions', icon: 'resetLabels', group: 'View', hint: 'Let the diagram place labels dragged by hand again (the selection\'s, or all)',
+      enabled: () => this.hasPinnedLabels(), run: () => this.resetLabels() });
     c.add({ id: 'view.colourResults', label: 'Colour by results', icon: 'colour', group: 'View', pressed: () => this.prefs.colouring === 'results', run: () => { this.prefs.colouring = 'results'; this.savePrefs(); this.rebuildOverlay(); this.viewport.invalidate(); } });
     c.add({ id: 'view.colourVoltage', label: 'Colour by voltage level', icon: 'colour', group: 'View', pressed: () => this.prefs.colouring === 'voltage', run: () => { this.prefs.colouring = 'voltage'; this.savePrefs(); this.rebuildOverlay(); this.viewport.invalidate(); } });
     c.add({ id: 'view.tree', label: 'Model panel', icon: 'panelLeft', keys: ['Mod+Shift+M'], global: true, group: 'View', pressed: () => this.prefs.left, run: () => this.setPanel('left') });

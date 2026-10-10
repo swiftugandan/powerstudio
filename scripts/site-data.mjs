@@ -45,7 +45,7 @@ export function diagramSvg(theme) {
   const P = palette(theme);
   const { overlay } = buildOverlay('loadflow', lf, doc, P, { colouring: 'results' });
   const list = buildScene({ elements: doc.elements, palette: P, selection: new Set(), hover: '', overlay, preview: null,
-    labels: { names: true, branchNames: false, boxes: true }, zoom: 0.6 });
+    labels: { names: true, branchNames: false, boxes: true, disentangle: true }, zoom: 0.6 });
   // At this level of detail the app shows busbar voltages and branch loadings but leaves out the end flows.
   const b = bounds(doc.elements);
   const box = { x0: b.x0 - 120, y0: b.y0 + 10, x1: b.x1 + 180, y1: b.y1 - 40 };

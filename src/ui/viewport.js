@@ -15,6 +15,7 @@ import { h, setHtml } from './dom.js';
 import { icon } from './icons.js';
 import { kbd } from './keys.js';
 import { minOf, maxOf } from '../core/extent.js';
+import { canvasMeasure } from '../render/metrics.js';
 
 /**
  * @typedef {import('../core/catalog.js').Element} Element
@@ -60,9 +61,13 @@ export class Viewport {
     this.pinch = /** @type {{ d: number, zoom: number, mid: { x: number, y: number } } | null} */ (null);
     this.dragSeq = 0;
     this.frames = 0;
+    /** Text widths in the fonts the renderers draw. */
+    this.measure = canvasMeasure();
     /** @type {HitIndex | null} */
     this.hitIndex = null;
     this.hitRevision = -1;
+    /** Where the last diagram built put its labels. @type {import('../render/labels.js').LabelIndex | null} */
+    this.labelIndex = null;
 
     this.badge = h('div', { class: 'vp-badge', role: 'status', 'aria-live': 'polite' });
     this.legend = h('div', { class: 'vp-legend', 'aria-label': 'Legend' });
@@ -195,6 +200,7 @@ export class Viewport {
   *sceneJob(r) {
     const list = yield* sceneSteps(this.sceneInput());
     this.levels = list.levels;
+    this.labelIndex = list.labels;
     this.showLevels();
     if (r instanceof Canvas2DRenderer) r.commit('base', yield* r.packSteps(list));
     else r.commit('base', yield* r.packSteps(list));
@@ -214,7 +220,8 @@ export class Viewport {
     const app = this.app;
     return {
       elements: app.store.doc.elements, palette: app.palette, selection: app.selection, hover: app.hover,
-      overlay: app.overlay, preview: this.preview(), labels: { names: app.prefs.names, branchNames: app.prefs.branchNames, boxes: app.prefs.boxes },
+      overlay: app.overlay, preview: this.preview(), measure: this.measure,
+      labels: { names: app.prefs.names, branchNames: app.prefs.branchNames, boxes: app.prefs.boxes, disentangle: app.prefs.disentangle },
     };
   }
 
@@ -299,27 +306,32 @@ export class Viewport {
   // ----- Export -----
 
   exportSVG() {
-    return toSVG(this.buildList(), this.extent(), this.app.palette.bg, this.app.store.doc.name);
+    const list = this.buildList();
+    return toSVG(list, this.extent(list), this.app.palette.bg, this.app.store.doc.name);
   }
 
-  /** The whole diagram's extent with room for labels and result boxes, in world units. */
-  extent() {
-    const box = bounds(this.app.store.doc.elements);
-    const pad = 40;
-    return { x0: box.x0 - pad - 160, y0: box.y0 - pad, x1: box.x1 + pad + 160, y1: box.y1 + pad };
+  /**
+   * The whole drawing's extent in world units: the network with its stubs and symbols, and every label where the
+   * placer put it, with a margin. @param {import('../render/displaylist.js').DisplayList} [list] a built diagram
+   */
+  extent(list = this.buildList()) {
+    const box = bounds(this.app.store.doc.elements), labels = list.labels?.extent(), pad = 40;
+    return {
+      x0: Math.min(box.x0, labels?.x0 ?? Infinity) - pad, y0: Math.min(box.y0, labels?.y0 ?? Infinity) - pad,
+      x1: Math.max(box.x1, labels?.x1 ?? -Infinity) + pad, y1: Math.max(box.y1, labels?.y1 ?? -Infinity) + pad,
+    };
   }
 
   /** Renders the whole diagram off screen with Canvas 2D at twice the resolution. @returns {Promise<Blob>} */
   exportPNG() {
-    const box = bounds(this.app.store.doc.elements);
-    const pad = 40, scale = 2;
-    const w = box.x1 - box.x0 + 2 * pad + 320, hgt = box.y1 - box.y0 + 2 * pad;
+    const list = this.buildList(), box = this.extent(list), scale = 2;
+    const w = box.x1 - box.x0, hgt = box.y1 - box.y0;
     const canvas = document.createElement('canvas');
     const r = new Canvas2DRenderer(canvas);
     const cam = new Camera();
     cam.width = w; cam.height = hgt; cam.zoom = 1; cam.cx = (box.x0 + box.x1) / 2; cam.cy = (box.y0 + box.y1) / 2;
     r.resize(w, hgt, scale);
-    r.setScene(this.buildList());
+    r.setScene(list);
     // An export draws the whole diagram at once, however large.
     r.cached = false;
     r.draw(cam, { ...this.app.palette, grid: [0, 0, 0, 0] }, scale);
@@ -426,6 +438,9 @@ export class Viewport {
     return this.hitIndex;
   }
 
+  /** The label under a point, as last drawn, if it shows at this zoom. @param {{ x: number, y: number }} p */
+  labelAt(p) { return this.labelIndex?.at(p, this.camera.zoom) ?? null; }
+
   /** Busbar under a point, if any. @param {{ x: number, y: number }} p */
   busAt(p) {
     const tol = 10 / this.camera.zoom;
@@ -473,8 +488,9 @@ export class Viewport {
   /** @param {MouseEvent} e */
   onDouble(e) {
     const { sx, sy } = this.local(/** @type {any} */ (e));
-    const hit = hitTest(this.app.store.doc.elements, this.camera.toWorld(sx, sy), this.camera.zoom, new Set(), this.index());
-    if (hit) { this.app.setSelection([hit.id]); this.app.focusInspector(); }
+    const p = this.camera.toWorld(sx, sy);
+    const id = this.labelAt(p)?.owner ?? hitTest(this.app.store.doc.elements, p, this.camera.zoom, new Set(), this.index())?.id;
+    if (id) { this.app.setSelection([id]); this.app.focusInspector(); }
   }
 
   /** @param {MouseEvent} e */
@@ -482,8 +498,9 @@ export class Viewport {
     e.preventDefault();
     const { sx, sy } = this.local(/** @type {any} */ (e));
     const p = this.camera.toWorld(sx, sy);
-    const hit = hitTest(this.app.store.doc.elements, p, this.camera.zoom, new Set(), this.index());
-    if (hit && !this.app.selection.has(hit.id)) this.app.setSelection([hit.id]);
-    this.app.contextMenu(e.clientX, e.clientY, hit?.id ?? '', p);
+    const label = this.labelAt(p);
+    const id = label?.owner ?? hitTest(this.app.store.doc.elements, p, this.camera.zoom, new Set(), this.index())?.id ?? '';
+    if (id && !this.app.selection.has(id)) this.app.setSelection([id]);
+    this.app.contextMenu(e.clientX, e.clientY, id, p, label);
   }
 }

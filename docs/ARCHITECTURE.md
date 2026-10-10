@@ -110,6 +110,23 @@ of its ends, symbols show once they are 3 px across, and an element with a viola
 its band) shows at every zoom. Shapes and triangles carry their minimum zoom, as result boxes do, and the legend
 dims the levels the view leaves out. Smaller diagrams draw everything at every zoom.
 
+**Labels (`labels.js`, `metrics.js`).** Every text on the diagram is a label: busbar, element and branch names and
+every result box. The scene builds the diagram in two passes: the first draws the elements and records their
+footprints (bars and symbols as solid, routes and stubs as lines) on a grid over the drawing, and collects a label
+request for each text with its measured size and an ordered list of candidate positions, the first of which is the
+label's default place; the second places the labels and draws them. The placer is greedy, in priority order (labels
+the user dragged, then violations, then names, busbar boxes, element boxes, loading boxes, flow boxes), and gives each
+label the first candidate that overlaps nothing, or else the cheapest by area overlapped, distance and rank, searching
+rings around the anchor with an orthogonal leader line back to it when every candidate collides. Touching another
+label costs more than anything else, so on both samples and for every study no label overlaps another. A label the
+user dragged keeps its offset from its default place in the owner's `labels` field. With "Disentangle labels" off,
+every label takes its default place. Requests are flat records and the grid lives in typed arrays, so the 560,000
+labels of a 70,000-busbar diagram with a load flow on it place in about 1.5 s, spread over frames, with no step over
+100 ms in Chromium (`scripts/scene-bench.mjs`). Text is measured with the fonts the renderers draw (`canvasMeasure`);
+Node, which has no fonts, uses widths that err wide (`conservativeMeasure`), and a browser test checks they do in
+every browser. The display list carries the placed labels (`list.labels`), which the viewport uses to hit-test them
+and exports use to size the drawing.
+
 Three backends draw the same lists:
 
 - `webgpu.js` renders shapes as instanced quads whose edges come from signed distance functions in WGSL, triangles
@@ -124,6 +141,13 @@ Hit testing (`hittest.js`) works on the geometry in world coordinates, so it doe
 `HitIndex`, built once per document revision, keeps the diagram's orthogonal segments (busbars, branch routes and
 stubs) sorted by position, so the pointer looks at the band of segments around it rather than at every element; a
 test checks that it finds exactly what a full scan finds.
+
+**Diagram input (`src/ui/tools/`).** The viewport owns the camera, the frames and the renderer, and hands pointer
+input to the active tool as normalised events (world and screen position, modifiers). A tool (`select.js`, `place.js`)
+decides what a press does and returns a gesture (`gestures.js`: pan, marquee, move, slide, resize, bend, reconnect,
+label), which receives the movements and the release; each edit gesture writes through `store.transact` with one
+coalescing key, so a whole drag is one step in the history. Panning with the middle button or Space, pinching and the
+wheel work the same in every tool.
 
 **UI (`src/ui/`, `src/app.js`).** `App` owns the store, the selection, the active tool, calculation results and
 preferences, and defines every command. Ribbon buttons, palette entries, context menus and keyboard shortcuts all run

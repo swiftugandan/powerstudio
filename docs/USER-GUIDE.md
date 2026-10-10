@@ -91,6 +91,14 @@ Results appear on the diagram (coloured by loading or voltage, with result boxes
 the calculation. Click a row to select the element; sort by any column; export the table as CSV. A result that no
 longer matches the network after an edit is marked as old.
 
+**Labels on the diagram.** Names and result boxes are placed so that none covers another: each starts in its usual
+place and moves aside, along its line or bar, when that place is taken; where nothing nearby is free it moves further
+and a thin leader line joins it to its element. Drag any label to put it where you want it: it stays there, relative
+to its element, when the element moves, and the inspector's Diagram group says how many of the element's labels you
+placed by hand. "Reset label positions" (View tab, or right-click a label) returns the selection's labels, or all of
+them, to automatic placement. To have every label in its fixed place instead, switch off "Disentangle labels" (View
+tab, Shift+L). Result boxes show once their text is large enough to read.
+
 **Short circuit.** Choose a fault type (three-phase, line-to-line, line-to-earth) and maximum or minimum currents. With
 no location the fault is applied at every busbar in turn; select a busbar and choose "Short circuit at selected
 busbar" for one location, which also lists the current in every branch. Ib is shown for maximum three-phase currents,

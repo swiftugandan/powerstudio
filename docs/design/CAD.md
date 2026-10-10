@@ -1,6 +1,7 @@
 # Diagram editing to professional CAD standard
 
-Status: proposed, 2026-10-10. Follows release 1.0.0 (docs/design/NATIONAL-GRADE.md); planned as release 1.1.
+Status: approved 2026-10-10; C0 and C1 done locally on branch `cad` (docs/TEST-REPORT.md), C2 to C4 to follow.
+Follows release 1.0.0 (docs/design/NATIONAL-GRADE.md); planned as release 1.1.
 
 ## 1. Summary
 

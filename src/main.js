@@ -32,6 +32,8 @@ Object.defineProperty(window, 'powerstudio', {
       const r = /** @type {HTMLElement} */ (document.getElementById('viewport')).getBoundingClientRect(), p = app.viewport.camera.toScreen(x, y);
       return { x: r.left + p.x, y: r.top + p.y };
     },
+    /** Where the diagram last placed its labels, in world units. */
+    get labels() { return (app.viewport.labelIndex?.items ?? []).map(({ owner, slot, rect, def, minZoom }) => ({ owner, slot, ...rect, defX: def.x, defY: def.y, minZoom })); },
     /** The current frame read back from the active renderer, as a PNG data URL. */
     snapshot: () => app.viewport.snapshotPNG(),
   }),

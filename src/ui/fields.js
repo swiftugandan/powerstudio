@@ -69,6 +69,7 @@ export function elementPicker(buses, value, id, pick, optional, noun = 'busbar')
 export function fieldRow(f, value, commit, ctx = {}) {
   const id = ctx.id ?? `f-${f.key}-${Math.random().toString(36).slice(2, 7)}`;
   if (f.type === 'controller') return controllerRows(f, /** @type {Record<string, unknown> | null} */ (value), commit, id);
+  if (f.type === 'labels') return labelRows(f, /** @type {Record<string, unknown>} */ (value));
   const label = h('label', { for: id, text: ctx.labelOverride ?? f.label, title: f.help });
   const error = h('div', { class: 'field-error', role: 'alert', hidden: true });
   const wrap = h('div', { class: 'field' });
@@ -183,4 +184,16 @@ export function enumLabel(key, v) {
     factor: 'Machines, by participation factor', margin: 'Machines, by remaining margin', load: 'Loads, by active power',
   })[v] ?? v;
   return v;
+}
+
+/**
+ * Where an element's labels are: placed by the diagram, or how many were dragged by hand, with a reset.
+ * @param {FieldSpec} f @param {Record<string, unknown> | undefined} value @returns {HTMLElement[]}
+ */
+function labelRows(f, value) {
+  const moved = Object.keys(value ?? {}).length;
+  const label = h('span', { class: 'label', text: f.label, title: f.help });
+  const wrap = h('div', { class: 'field field-summary' }, h('span', { text: moved ? `${moved} placed by hand` : 'Placed automatically' }),
+    moved ? h('button', { type: 'button', class: 'btn sm', 'data-cmd': 'labels.reset', text: 'Reset' }) : null);
+  return [label, wrap];
 }
