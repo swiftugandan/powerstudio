@@ -58,6 +58,9 @@ The CGMES goldens come from PowSyBl through pypowsybl (same environment):
 .venv/bin/python scripts/oracle/psse.py             # every case in tests/oracle/psse-cases.json
 .venv/bin/python scripts/oracle/psse.py ieee300     # one case
 .venv/bin/python scripts/oracle/matpower.py         # every case in tests/oracle/matpower-cases.json
+.venv/bin/python scripts/oracle/controls.py         # load flow controls, one at a time and together
+.venv/bin/python scripts/oracle/security.py         # every single-element outage (security analysis)
+.venv/bin/python scripts/oracle/sensitivity.py      # DC power transfer distribution factors
 ```
 
 Both use the OpenLoadFlow settings in `scripts/oracle/olf.py`: a plain Newton-Raphson with every control off, so the

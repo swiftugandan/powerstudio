@@ -283,14 +283,25 @@ export class Dock {
   renderContingency() {
     const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').ContingencyResult, ms: number }} */ (app.results.contingency);
     const failed = r.cases.filter(c => !c.converged).length, viol = r.cases.filter(c => c.converged && c.violations.some(v => !v.inBase)).length;
-    const pill = failed || viol ? h('span', { class: 'pill bad', html: `${icon('warning', 13)}${viol} outage${viol === 1 ? '' : 's'} with new violations${failed ? `, ${failed} not solvable` : ''}` }) : h('span', { class: 'pill ok', html: `${icon('check', 13)}Secure under every single outage` });
-    const summary = h('div', { class: 'summary', html: `<span>Outages <b>${r.cases.length}</b></span><span>Loading limit <b>${r.limit} %</b></span><span>Base case max <b>${fixed(r.base.maxLoading, 1)} %</b></span><span>Time <b>${duration(ms)}</b></span>` });
+    const pill = failed || viol ? h('span', { class: 'pill bad', html: `${icon('warning', 13)}${viol} contingenc${viol === 1 ? 'y' : 'ies'} with new violations${failed ? `, ${failed} not solvable` : ''}` }) : h('span', { class: 'pill ok', html: `${icon('check', 13)}Secure under every contingency` });
+    const e = r.effort, acted = r.cases.filter(c => c.remedial.length).length;
+    const work = e.screened ? `<span title="Outages the quick decoupled solution cleared, and those solved by a full load flow">Screened <b>${e.screened}</b> of <b>${r.cases.length}</b></span>` : '';
+    const summary = h('div', { class: 'summary', html: `<span>Contingencies <b>${r.cases.length}</b></span>${work}${acted ? `<span>Remedial actions on <b>${acted}</b></span>` : ''}<span>Loading limit <b>${r.limit} %</b></span><span>Base case max <b>${fixed(r.base.maxLoading, 1)} %</b></span><span>Time <b>${duration(ms)}</b></span>` });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary);
     const describe = (/** @type {import('../engine/reports.js').ContingencyCase} */ c) => c.violations.map(v => v.kind === 'loading' ? `${this.nameOf(v.id)} ${fixed(v.value, 0)} %` : `${this.nameOf(v.id)} ${fixed(v.value, 3)} p.u.`).join(', ');
+    const own = new Map(app.store.doc.study.contingency.list.map(c => [c.id, c.name || c.id]));
+    const ruleName = new Map(app.store.doc.study.contingency.remedial.map(x => [x.id, x.name || x.id]));
+    const kindOf = (/** @type {import('../engine/reports.js').ContingencyCase} */ c) =>
+      c.cls === 'multiple' ? `${c.elements.length} elements` : /** @type {Record<string, { label: string } | undefined>} */ (CLASSES)[c.cls]?.label ?? c.cls;
+    const state = (/** @type {import('../engine/reports.js').ContingencyCase} */ c) => {
+      if (!c.converged) return 'Not solvable';
+      const v = c.violations.length ? `${c.violations.length} violation${c.violations.length === 1 ? '' : 's'}` : 'Secure';
+      return c.screened ? `${v} (screened)` : c.remedial.length ? `${v} after action` : v;
+    };
     const table = this.table([
-      { key: 'name', label: 'Outage', value: (/** @type {any} */ c) => this.nameOf(c.id) },
-      { key: 'cls', label: 'Type', value: (/** @type {any} */ c) => CLASSES[/** @type {import('../core/catalog.js').ElementClass} */ (c.cls)].label },
-      { key: 'state', label: 'Result', value: (/** @type {any} */ c) => (!c.converged ? 'Not solvable' : c.violations.length ? `${c.violations.length} violation${c.violations.length === 1 ? '' : 's'}` : 'Secure'),
+      { key: 'name', label: 'Contingency', value: (/** @type {any} */ c) => own.get(c.id) ?? this.nameOf(c.id) },
+      { key: 'cls', label: 'Type', value: (/** @type {any} */ c) => kindOf(c) },
+      { key: 'state', label: 'Result', value: (/** @type {any} */ c) => state(c),
         cls: (/** @type {any} */ c) => (!c.converged || c.violations.some((/** @type {any} */ v) => !v.inBase) ? 'bad' : c.violations.length ? 'warn' : '') },
       { key: 'maxLoading', label: 'Max loading', unit: '%', num: true, value: (/** @type {any} */ c) => c.maxLoading, text: (/** @type {any} */ c) => fixed(c.maxLoading, 1), bar: (/** @type {any} */ c) => Number.isFinite(c.maxLoading) ? { pct: c.maxLoading, color: loadCss(c.maxLoading) } : null },
       { key: 'maxLoadingId', label: 'Most loaded', value: (/** @type {any} */ c) => (c.maxLoadingId ? this.nameOf(c.maxLoadingId) : '') },
@@ -298,6 +309,8 @@ export class Dock {
       { key: 'maxV', label: 'Max u', unit: 'p.u.', num: true, value: (/** @type {any} */ c) => c.maxV, text: (/** @type {any} */ c) => fixed(c.maxV, 4) },
       { key: 'lost', label: 'Lost busbars', value: (/** @type {any} */ c) => c.lostBuses.map((/** @type {string} */ b) => this.nameOf(b)).join(', ') },
       { key: 'viol', label: 'Violations', value: (/** @type {any} */ c) => describe(c), title: (/** @type {any} */ c) => describe(c) },
+      ...(acted ? [{ key: 'remedial', label: 'Remedial actions', value: (/** @type {any} */ c) => c.remedial.map((/** @type {string} */ id) => ruleName.get(id) ?? id).join(', '),
+        title: (/** @type {any} */ c) => (c.remedial.length ? `${c.violationsBefore} violation${c.violationsBefore === 1 ? '' : 's'} before the actions` : '') }] : []),
     ], r.cases, 'contingency', 'n1', 'state', 1);
     this.mount([bar], table);
   }

@@ -446,7 +446,7 @@ kbd {
 .dock-tab .count.bad { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
 .dock-spacer { flex: 1; }
 .dock-body { flex: 1; min-height: 0; overflow: auto; position: relative; }
-.dock-head { position: sticky; top: 0; z-index: 2; flex: none; }
+.dock-head { position: sticky; top: 0; left: 0; z-index: 2; flex: none; }
 .dock-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface-2); flex-wrap: wrap; }
 .dock-toolbar .summary { display: flex; gap: 14px; flex-wrap: wrap; color: var(--text-2); font-size: 12px; }
 .dock-toolbar .summary b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -681,3 +681,44 @@ table.grid td.muted { color: var(--text-3); }
   .plot-side { display: none; }
   .statusbar .hide-narrow { display: none; }
 }
+
+/* Contingency dialog */
+.btn.sm { height: 26px; padding: 0 9px; font-size: 12px; gap: 5px; }
+.dialog-body p.study-note { font-size: 12px; margin: 8px 0 0; }
+.cont-editor .cont-note { font-size: 12px; margin: -2px 0 10px; max-width: 70ch; }
+.cont-editor .cont-empty { font-size: 12px; color: var(--text-3); margin: 0 0 8px; }
+.cont-editor > .btn { margin-bottom: 6px; }
+.cont-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 8px; table-layout: fixed; }
+.cont-table th { text-align: left; font-weight: 600; color: var(--text-2); padding: 0 6px 4px 0; }
+.cont-table td { padding: 3px 6px 3px 0; vertical-align: top; }
+.cont-table th:first-child, .cont-table td.cont-name { width: 30%; }
+.cont-table th:last-child, .cont-table td.cont-del { width: 30px; padding-right: 0; }
+.cont-table.rows td:nth-child(1) { width: 34%; }
+.cont-table.rows td:nth-child(3) { width: 26%; }
+.cont-table .input { height: 26px; width: 100%; }
+.cont-table .field { width: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 0; }
+.chips .input { flex: 1 1 140px; min-width: 120px; width: auto; height: 26px; }
+.chip { display: inline-flex; align-items: center; gap: 2px; height: 24px; max-width: 100%; padding: 0 2px 0 8px; border-radius: 12px;
+  background: var(--surface-3); color: var(--text); font-size: 12px; }
+.chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip.quiet { padding-right: 8px; color: var(--text-2); }
+.chip button { display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 10px; background: transparent; color: var(--text-2); cursor: pointer; flex: none; }
+.chip button:hover { background: var(--surface-2); color: var(--text); }
+.chip button:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.rule { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 10px; background: var(--surface-2); }
+.rule-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.rule-head .input { flex: 1; height: 28px; font-weight: 600; }
+.rule-label { font-size: 11.5px; font-weight: 650; color: var(--text-2); margin: 10px 0 5px; }
+.rule .cont-table { margin-bottom: 4px; }
+.rule .btn.sm { margin-top: 2px; }
+.rule .chips select.input { flex: 0 1 200px; min-width: 150px; width: auto; }
+@media (max-width: 640px) {
+  .cont-table.rows, .cont-table.rows tbody, .cont-table.rows tr { display: block; }
+  .cont-table.rows tr { display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .cont-table.rows td { display: block; width: auto !important; padding: 0; }
+  .cont-table.rows td:nth-child(1), .cont-table.rows td:nth-child(2), .cont-table.rows td:nth-child(3) { grid-column: 1; }
+  .cont-table.rows td.cont-del { grid-column: 2; grid-row: 1; }
+  .cont-table th:first-child, .cont-table td.cont-name { width: 40%; }
+}
+.cont-editor p.cont-empty.invalid { color: var(--danger); }

@@ -150,6 +150,26 @@ HVDC links follow PowSyBl's setpoint model (`HvdcUtils.getConverterStationTarget
 less the stations' losses and R·P²/V²; a line-commutated station consumes |P|·tan(acos pf) with pf = ½·(cos ANMX +
 cos 60°). That power factor is PowSyBl's approximation of PSS/E's converter equations, which neither tool solves.
 
+## Contingency analysis and sensitivities
+
+The security goldens (`tests/oracle/golden/security-*.json`, written by `scripts/oracle/security.py`) are PowSyBl's
+AC security analysis with OpenLoadFlow 2.3.0 (pypowsybl 1.16.1), the plain settings of `olf.py` and contingency
+propagation off, over every single-element outage of the PSS/E reference cases and of ACTIVSg2000. They hold physics
+only (flows and voltages of the elements each outage moves most), since the two tools judge limits by their own
+rules. The DC sensitivity goldens (`sensitivity-*.json`, `scripts/oracle/sensitivity.py`) are PowSyBl's DC
+sensitivity analysis of every branch flow to every generator's injection with the slack fixed, which is the PTDF of a
+transfer to the slack bus; transformer ratios are left out of both DC models.
+
+Screening uses the fast decoupled load flow of B. Stott and O. Alsac, "Fast decoupled load flow", IEEE Transactions on
+Power Apparatus and Systems PAS-93 (1974) 859–869, in the XB form that R. A. M. van Amerongen compared with the
+original in "A general-purpose version of the fast decoupled load flow", IEEE Transactions on Power Systems 4 (1989)
+760–770: resistances are left out of B′ only. An outage enters B′ and B″ through the Woodbury identity
+(M. A. Woodbury, "Inverting modified matrices", Memorandum Report 42, Statistical Research Group, Princeton, 1950),
+the matrix inversion lemma of every compensation method for contingency analysis. Line outage distribution factors
+follow from the PTDFs as in A. J. Wood, B. F. Wollenberg and G. B. Sheblé, Power Generation, Operation, and Control,
+3rd edition, Wiley, 2014, chapter 7. No value in the tests comes from these texts; they describe the methods, and
+the goldens and the full AC solution are the references.
+
 ## Short-circuit method
 
 The voltage factors c, the correction factors KT and KG, the fictitious generator resistances, the peak factor κ

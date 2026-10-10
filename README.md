@@ -23,7 +23,7 @@ Offline copy: download `PowerStudio.html` from the [latest release](https://gith
 | Rendering | WebGPU (WGSL signed-distance shapes, SDF text, 4× MSAA) with a real Canvas 2D fallback; the badge shows the backend actually in use and why it fell back | Browser tests in two Chromium projects check the reported backend and decode screenshot pixels |
 | Load flow | Newton-Raphson on sparse matrices with reference, PV and PQ busbars, transformer taps and phase shifts, reactive limits, DC start, load scaling, de-energised islands | Agrees with MATPOWER's algorithm (PYPOWER) on case14, case30 and case118 to 1e-9 p.u., and with pandapower on both samples; the engine solves the 25,000-bus ACTIVSg25k case in 0.3 s as WebAssembly (measured under Node's V8) |
 | Short circuit | Three-phase, line-to-line and line-to-earth faults at every busbar or one location; maximum and minimum; Ik″, ip (κ method B or C), Ith, Sk″, branch contributions | Agrees with pandapower's IEC 60909 implementation to about 1e-15 relative (three-phase, line-to-line) and 2e-8 (earth faults) |
-| Contingency | N-1 outages of lines, transformers and machines, run in parallel across workers, ranked, with loading and voltage violations and the worst case per element on the diagram | Each case matches an independent load flow with the element out; parallel runs equal the sequential result |
+| Contingency | N-1 outages of lines, transformers and machines, plus your own contingencies of several elements; remedial actions (switching, redispatch, taps, load shedding) on conditions; optional screening that solves only outages near a limit in full; run in parallel across workers, ranked, with loading and voltage violations and the worst case per element on the diagram; contingency lists import and export as JSON | Outages agree with PowSyBl's security analysis on 22 PSS/E cases and the 2,000-bus ACTIVSg grid; screening never skips an outage that full AC flags; parallel runs equal the sequential result |
 | Stability | Classical-model RMS simulation with fault, clearing, tripping and load-step events; rotor angle, speed, power and voltage plots; time cursor on the diagram | Equal-area critical clearing time and the linearised swing frequency |
 | Results | Result boxes and colour coding on the diagram, sortable tables, CSV export, an output log, results marked stale after edits, optional recalculation on edit | Browser tests compare table values with MATPOWER |
 | Files | Documents saved automatically in IndexedDB; open CGMES 2.4.15 and 3.0 models, PSS/E RAW files (versions 33 and 35) and MATPOWER `.m` cases (also by drag and drop), with a dialog that shows what was read, what the diagram simplifies and how closely it reproduces the imported load flow; export JSON, SVG, PNG and CSV | The engine's imports agree with PowSyBl on 12 CGMES configurations, 23 RAW files and 7 large MATPOWER grids; the editor's version of every one reproduces the imported load flow to 2e-12 p.u.; browser tests import case30 and a RAW file and round-trip an export |
@@ -117,8 +117,9 @@ IEEE 14 sample models its three-winding transformer as three two-winding units, 
 elements are only in or out of service. The engine solves networks of tens of thousands of buses (docs/ENGINE.md
 gives the timings), but the diagram editor has been used only with networks of up to a few hundred busbars.
 
-**Contingency.** Single outages (N-1) only; no N-2, remedial actions or automatic generation redispatch (the
-reference machines pick up lost generation).
+**Contingency.** Contingencies of several elements are listed by hand; there is no automatic N-2 enumeration.
+Remedial actions fire once per contingency and do not chain, and there is no optimal redispatch: lost generation
+goes to the reference machines, or is shared as the load flow's balance setting says.
 
 **Stability.** Classical model only: no exciters, governors, stabilisers, subtransient dynamics or motor loads;
 loads are constant impedances; faults are bolted three-phase faults at busbars. No electromagnetic transients.

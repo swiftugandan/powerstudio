@@ -30,7 +30,7 @@ export const TABS = [
   { id: 'calculate', label: 'Calculate', groups: [
     { label: 'Steady state', items: [{ cmd: 'calc.loadflow', size: 'large' }, { stack: ['calc.autoLoadFlow', 'calc.qlimits', 'calc.dcStart'] }] },
     { label: 'Faults', items: [{ cmd: 'calc.shortcircuit', size: 'large' }, { stack: ['sc.fault3ph', 'sc.fault2ph', 'sc.fault1ph'] }, { stack: ['sc.max', 'sc.min', 'sc.allBuses'] }] },
-    { label: 'Security', items: [{ cmd: 'calc.contingency', size: 'large' }] },
+    { label: 'Security', items: [{ cmd: 'calc.contingency', size: 'large' }, { stack: ['contingency.edit', 'contingency.gens', 'contingency.screening'] }] },
     { label: 'Dynamics', items: [{ cmd: 'calc.rms', size: 'large' }, { stack: ['rms.events', 'calc.cancel'] }] },
     { label: 'Study case', items: [{ cmd: 'study.settings', size: 'large' }, { stack: ['results.clear', 'results.csv'] }] },
   ] },

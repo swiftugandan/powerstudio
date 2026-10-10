@@ -168,21 +168,94 @@ against pandapower at every bus of both samples for all twelve combinations of f
 reports no ip or Ith for earth faults); a hand calculation for a single infeed; Kirchhoff's current law at the fault
 for the branch contributions; the correction factors against their formulas (`ps-sc` unit tests).
 
-## N-1 contingency analysis
+## Contingency analysis
 
-`ps-study::contingency` takes each selected line, transformer or machine out in turn (lines, then transformers, then
-machines, each in model order) and solves the load flow again from the base-case voltages. Each case lists its
-highest loading, its voltage extremes, buses it cuts off and its violations of the study case loading limit and of
-every node's voltage band, marking those already present in the base case. Cases are ranked with unsolvable cases
-first, then by the number of violations, then by highest loading.
+`ps-study::contingency` solves the network after each contingency and judges the result against the study case's
+limits. The contingencies are every selected line, transformer, machine and HVDC link taken out alone (in that order,
+each in model order, with the element's identifier as the contingency's), followed by the study case's own list: a
+contingency there has its own identifier and takes out several elements together, such as both circuits of a double
+line. Each case lists its highest loading, its voltage extremes, the buses it cuts off and its violations of the
+loading limit and of every node's voltage band, marking those already present in the base case. Cases are ranked with
+unsolvable cases first, then by the number of violations, then by highest loading.
 
-The outages split into contiguous chunks. The browser runs the chunks on a pool of workers (one engine instance
-each, up to eight) and the engine merges them in outage order, keeping the first case on ties, so the result is
-identical to a sequential run whatever the pool size.
+**Limits.** A branch end is judged against the largest of its limits that lasts at least the study case's time to act
+(`acceptableS`; its permanent limit always qualifies), in kA where the end has a current limit and against its MVA
+rating otherwise. With the default of 0 s only permanent limits count.
 
-**Checked by** `engine/crates/ps-study/tests/contingency.rs` and `tests/contingency.test.mjs`: every case equals a
-separate load flow with that element out; Line 1-2 out overloads Line 1-5 on the IEEE 14 sample; radial outages
-report the lost nodes; runs split into 2, 3 and 7 chunks merge to exactly the sequential report.
+**Solving.** The base case is solved once and every contingency starts from its voltages. A single-branch outage
+that leaves the network connected (Tarjan's bridges tell which do) keeps the base network's matrix pattern: the
+branch's admittances are zeroed and the sparse analysis of the base Jacobian is reused, which takes 27 ms per outage
+on the 10,000-bus ACTIVSg grid natively. Bridges, machines, HVDC links and multi-element contingencies rebuild the
+network. The report's `effort` counts the outages each way.
+
+**Screening** (off by default). Each single-branch outage that keeps the network connected is first solved by fast
+decoupled iterations on its full AC equations, in the XB form (B′ from branch reactances alone for angles, B″ from
+the full susceptance matrix for magnitudes), starting
+from the base solution. B′ and B″ are factorised once for the base network; the outage enters as a rank-two
+correction of those factors (the Woodbury identity), so no outage needs a factorisation of its own. The iterations
+stop at 1e-4 p.u. of mismatch and converge in three or four. When the result keeps every branch below
+(100 − margin) % of the loading limit and every voltage the voltage margin inside its band, the case is reported as
+screened with the estimate's highest loading; anything else, including iterations that do not converge, gets the full
+Newton load flow. An element already inside the margins in the base case counts only when the outage worsens it (by
+0.1 % of loading or 0.001 p.u.), so a base-case near-overload does not send every outage to the full solve. The
+defaults are 5 % and 0.01 p.u.
+
+A first version estimated with one linear step from the base factors. It missed voltage collapses: on IEEE 57 it moved
+the lowest voltage by 0.01 p.u. where the full solution falls to 0.65. The outage-corrected iterations are the fix,
+and the guarantee test below holds the screen to them.
+
+**Remedial actions.** A rule names the contingencies it is for (none: every one), conditions on the post-contingency
+solution (a branch's loading above a value, a node's voltage below or above one, the contingency taking out a given
+element) and actions (switching an element in or out, setting a machine's active power or a transformer's tap
+position, shedding a share of a load's P and Q). After a contingency is solved, every rule whose conditions all hold
+fires; their actions apply together and the contingency is solved once more, by a full rebuild. The case then reports
+the state after the actions, the rules that fired (`remedial`) and how many violations the outage caused before them
+(`violationsBefore`). Rules do not chain: actions are not re-checked against the conditions after the second solve.
+Screening hands an outage to the full solve whenever a rule would fire on its estimate.
+
+**The contingency file.** The app imports and exports a study case's own contingencies and rules as JSON
+(`src/core/contingencies.js`):
+
+```json
+{ "format": "powerstudio-contingencies", "version": 1,
+  "contingencies": [{ "id": "C1", "name": "Double circuit 1-2", "elements": ["L1", "L2"] }],
+  "remedialActions": [{ "id": "R1", "name": "Shed load at bus 3", "contingencies": ["L1"],
+    "conditions": [{ "kind": "loading", "element": "L2", "above": 100 }],
+    "actions": [{ "kind": "loadShed", "element": "D3", "percent": 60 }] }] }
+```
+
+Condition kinds are `loading` (`element`, `above` in %), `voltageBelow` and `voltageAbove` (`node`, `below` or
+`above` in p.u.) and `outage` (`element`); action kinds are `switch` (`element`, `inService`), `generation`
+(`element`, `p` in MW), `tap` (`element`, `position`) and `loadShed` (`element`, `percent`). Reading a file keeps
+what names elements of this network of the right class. A rule never ends up wider than written: one with a condition
+that does not fit the network, or whose contingencies are all missing, is skipped whole, and removing an element
+from the diagram removes the rules that depend on it in the same way (undo restores them).
+
+**Parallel runs.** The contingencies split into contiguous chunks. The browser runs the chunks on a pool of workers
+(one engine instance each, up to eight) and the engine merges them in contingency order, keeping the first case on
+ties, so the result is identical to a sequential run whatever the pool size. Only `timing` differs between runs.
+
+**DC sensitivities.** `ps-lf::sensitivity` holds the network's linear models: a factorised DC model (B′) that gives
+power transfer distribution factors (PTDF) for any transfer, line outage distribution factors (LODF) and angles, and
+the decoupled voltage model (B″). Both take a branch outage as a low-rank correction, which is what screening uses.
+
+**Checked by:**
+
+- `engine/crates/ps-study/tests/security.rs` against PowSyBl's security analysis (OpenLoadFlow, goldens from
+  `scripts/oracle/security.py`): every single-element outage of the 22 PSS/E reference cases and of ACTIVSg2000, the
+  ten branches whose flow changes most per outage to 1e-3 MW or Mvar at both ends and the five buses whose voltage
+  changes most to 1e-6 p.u. Outages that cut PowSyBl's slack bus off are left out, since each tool then picks a new
+  reference by its own rule.
+- `engine/crates/ps-study/tests/sensitivity.rs` against PowSyBl's DC sensitivity analysis (`scripts/oracle/sensitivity.py`):
+  PTDFs on IEEE 14, 39 and 118 to 5e-11.
+- `engine/crates/ps-study/tests/contingency.rs`: every case equals a separate load flow with the element out; Line 1-2
+  out overloads Line 1-5 on the IEEE 14 sample; radial outages report the lost nodes; chunked runs merge to exactly the
+  sequential report; and the screening guarantee, which runs every PSS/E case and ACTIVSg2000 with and without
+  screening and requires every outage that full AC flags (a new violation or no solution) to have been solved in full.
+  Screening clears 2,585 of ACTIVSg2000's 3,206 branch outages, and takes ACTIVSg10k from 26 to 11.5 ms per outage
+  natively. A remedial action relieves the IEEE 14 overload and leaves every other outage unchanged.
+- `tests/contingency.test.mjs` and `tests/contingencies.test.mjs`: the same through WebAssembly, the file's checks, and
+  removal and undo in the document.
 
 ## Stability (RMS simulation)
 

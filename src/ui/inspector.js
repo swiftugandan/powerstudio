@@ -165,10 +165,12 @@ export class Inspector {
     } else if (kind === 'contingency' && R.contingency) {
       /** @type {import('../engine/reports.js').ContingencyResult} */
       const r = R.contingency.result;
+      const own = app.store.doc.study.contingency.list;
+      const named = (/** @type {string} */ id) => app.store.get(id)?.name || own.find(c => c.id === id)?.name || id;
       const w = r.worstLoading[el.id];
-      if (w) rows.push(['Worst loading', `${fixed(w.value, 1)} %`], ['Worst outage', app.store.get(w.outage)?.name || w.outage]);
+      if (w) rows.push(['Worst loading', `${fixed(w.value, 1)} %`], ['Worst contingency', named(w.outage)]);
       const v = r.worstVoltage[el.id];
-      if (v) rows.push(['Lowest voltage', `${fixed(v.min, 4)} p.u.`], ['  when out', app.store.get(v.minOutage)?.name || v.minOutage], ['Highest voltage', `${fixed(v.max, 4)} p.u.`]);
+      if (v) rows.push(['Lowest voltage', `${fixed(v.min, 4)} p.u.`], ['Lowest voltage after', named(v.minOutage)], ['Highest voltage', `${fixed(v.max, 4)} p.u.`]);
       const c = r.cases.find(x => x.id === el.id);
       if (c) rows.push(['When out of service', c.converged ? `${c.violations.length} violation${c.violations.length === 1 ? '' : 's'}` : 'No convergence']);
     } else if (kind === 'rms' && R.rms) {

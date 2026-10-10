@@ -179,6 +179,25 @@ export class Tx {
         for (const f of CLASSES[other.cls].fields) if (f.type === 'bus' && f.optional !== undefined && other[f.key] === id) this.set(other.id, f.key, '');
       }
     }
+    // The study case forgets the element: simulation events on it, and it in contingencies and remedial actions.
+    const study = this.store.doc.study;
+    const events = study.rms.events.filter(e => e.target !== id);
+    if (events.length !== study.rms.events.length) this.setStudy('rms', 'events', events);
+    const list = study.contingency.list.map(c => ({ ...c, elements: c.elements.filter(e => e !== id) })).filter(c => c.elements.length);
+    if (JSON.stringify(list) !== JSON.stringify(study.contingency.list)) this.setStudy('contingency', 'list', list);
+    // A rule with a condition on the element goes (without the condition it would fire more widely than meant), and
+    // so does a rule only for contingencies that no longer exist (it would otherwise be for every one).
+    const kept = new Set(list.map(c => c.id));
+    /** @type {typeof study.contingency.remedial} */
+    const remedial = [];
+    for (const r of study.contingency.remedial) {
+      if (r.conditions.some(c => ('node' in c ? c.node : c.element) === id)) continue;
+      const contingencies = r.contingencies.filter(c => c !== id && (kept.has(c) || this.store.get(c)));
+      const actions = r.actions.filter(a => a.element !== id);
+      if (!actions.length || (r.contingencies.length && !contingencies.length)) continue;
+      remedial.push({ ...r, contingencies, actions });
+    }
+    if (JSON.stringify(remedial) !== JSON.stringify(study.contingency.remedial)) this.setStudy('contingency', 'remedial', remedial);
     const index = this.store.doc.elements.indexOf(el);
     this.run({ type: 'remove', el, index });
   }
@@ -194,7 +213,7 @@ export class Tx {
   setStudy(section, key, value) {
     const target = /** @type {Record<string, any>} */ (this.store.doc.study)[section];
     if (!target) throw new Error(`Unknown study section ${section}.`);
-    if (key !== 'events') {
+    if (!(key === 'events' || (section === 'contingency' && (key === 'list' || key === 'remedial')))) {
       const spec = /** @type {Record<string, readonly import('./catalog.js').FieldSpec[]>} */ (STUDY_FIELDS)[section]?.find(f => f.key === key);
       if (!spec) throw new Error(`Unknown study setting ${section}.${key}.`);
       const err = checkValue(spec, value);

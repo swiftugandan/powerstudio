@@ -207,10 +207,50 @@ test('short circuit, contingency and stability run from the palette and the ribb
   await expect(page.locator('table.grid tbody tr[data-id="B8"]')).toContainText('27.350');
   await page.locator('.ribbon-tab[data-tab="calculate"]').click();
   await page.locator('.ribbon-panel [data-cmd="calc.contingency"]').click();
-  await expect(page.locator('.dock-toolbar .pill.bad')).toContainText('10 outages with new violations');
+  await expect(page.locator('.dock-toolbar .pill.bad')).toContainText('10 contingencies with new violations');
   await page.locator('.ribbon-panel [data-cmd="calc.rms"]').click();
   await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('All machines stay in synchronism');
   await expect(page.locator('.plot canvas')).toBeVisible();
+});
+
+test('defines a two-line contingency and a remedial action, and the analysis reports both', async ({ page }) => {
+  await open(page);
+  await palette(page, 'Contingencies');
+  const dlg = page.locator('.dialog');
+  await expect(dlg.locator('h2')).toHaveText('Contingencies and remedial actions');
+  await dlg.getByRole('button', { name: 'Add contingency' }).click();
+  const add = dlg.getByLabel('Add an element to this contingency');
+  for (const id of ['L1', 'L2']) { await add.fill(id); await add.press('Tab'); }
+  await expect(dlg.locator('.cont-table .chip')).toHaveText(['Line 1-2', 'Line 1-5']);
+  await dlg.getByLabel('Contingency name').fill('Both lines from bus 1');
+  await dlg.getByRole('button', { name: 'Add remedial action' }).click();
+  const rule = dlg.locator('.rule');
+  await rule.getByLabel('Remedial action name').fill('Shed load at bus 3');
+  const outage = rule.getByLabel('Add the outage of an element');
+  await outage.fill('L1');
+  await outage.press('Tab');
+  await expect(rule.locator('.chip')).toHaveText(['Outage of Line 1-2']);
+  await rule.getByLabel('Condition branch').fill('Line 1-5');
+  await rule.getByLabel('Condition branch').press('Tab');
+  await expect(rule.getByLabel('Condition branch')).toHaveValue('Line 1-5');
+  await rule.getByLabel('Action', { exact: true }).selectOption('loadShed');
+  await rule.getByLabel('Action element').fill('D3');
+  await rule.getByLabel('Action element').press('Tab');
+  await rule.getByLabel('Share shed').fill('80');
+  await rule.getByLabel('Share shed').press('Tab');
+  await dlg.getByRole('button', { name: 'Apply' }).click();
+  await expect(dlg).toHaveCount(0);
+  await page.keyboard.press('Alt+N');
+  await expect(page.locator('.dock-toolbar .summary')).toContainText('Contingencies 21');
+  await expect(page.locator('.dock-toolbar .summary')).toContainText('Remedial actions on 1');
+  await expect(page.locator('table.grid tbody tr[data-id="C1"]')).toContainText('Both lines from bus 1');
+  await expect(page.locator('table.grid tbody tr[data-id="C1"]')).toContainText('2 elements');
+  await expect(page.locator('table.grid tbody tr[data-id="L1"]')).toContainText('after action');
+  await expect(page.locator('table.grid tbody tr[data-id="L1"]')).toContainText('Shed load at bus 3');
+  // Undo takes the definitions back out of the study case.
+  await page.keyboard.press('ControlOrMeta+Z');
+  await palette(page, 'Contingencies');
+  await expect(dlg.locator('.cont-empty')).toHaveText(['No contingencies of your own yet.', 'No remedial actions yet.']);
 });
 
 test('imports a MATPOWER case and solves it to the MATPOWER solution', async ({ page }) => {

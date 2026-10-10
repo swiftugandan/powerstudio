@@ -39,6 +39,11 @@ export async function openStudyDialog(app, focusSection) {
       }));
     }
     body.append(h('h3', { text: TITLES[section], id: `study-${section}` }), props);
+    if (section === 'contingency') {
+      const { list, remedial } = doc.study.contingency;
+      const own = `${list.length} contingenc${list.length === 1 ? 'y' : 'ies'} of your own and ${remedial.length} remedial action${remedial.length === 1 ? '' : 's'}`;
+      body.append(h('p', { class: 'study-note', text: `${own}. Edit them from Calculate, Security, Contingencies.` }));
+    }
   }
   body.append(h('h3', { text: 'Simulation events' }), eventEditor(app, /** @type {any} */ (draft.rms)));
   const ok = await modal({

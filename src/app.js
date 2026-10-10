@@ -19,6 +19,7 @@ import { buildOverlay } from './ui/overlay.js';
 import { openPalette } from './ui/palette.js';
 import { openBackstage, closeBackstage } from './ui/backstage.js';
 import { openStudyDialog } from './ui/study.js';
+import { openContingencyDialog } from './ui/contingency-editor.js';
 import { importDialog } from './ui/import-dialog.js';
 import { IMPORT_TYPES } from './engine/exchange.js';
 import { toast, contextMenu } from './ui/feedback.js';
@@ -410,7 +411,8 @@ export class App {
       for (const b of r.buses) { const e = this.store.get(b.id); if (e && (b.vm < /** @type {number} */ (e.vmin) || b.vm > /** @type {number} */ (e.vmax))) out.set(b.id, b.vm < /** @type {number} */ (e.vmin) ? 'var(--res-low)' : 'var(--res-high)'); }
       for (const id of r.deenergized) out.set(id, 'var(--text-3)');
     } else if (this.overlayKind === 'contingency' && this.results.contingency) {
-      for (const c of this.results.contingency.result.cases) if (!c.converged || c.violations.some((/** @type {any} */ v) => !v.inBase)) out.set(c.id, 'var(--res-high)');
+      // The elements whose loss (alone or with others) leaves new violations or no solution.
+      for (const c of this.results.contingency.result.cases) if (!c.converged || c.violations.some((/** @type {any} */ v) => !v.inBase)) for (const id of c.elements) out.set(id, 'var(--res-high)');
     }
     return out;
   }
@@ -615,7 +617,8 @@ export class App {
       /** @type {import('./engine/reports.js').ContingencyResult} */
       const n1 = r;
       const bad = n1.cases.filter(c => c.converged && c.violations.some(v => !v.inBase)).length, failed = n1.cases.filter(c => !c.converged).length;
-      this.log(bad || failed ? 'warn' : 'ok', `N-1 analysis of ${n1.cases.length} outages in ${duration(ms)}: ${bad} with new violations${failed ? `, ${failed} without a solution` : ''}.`);
+      const screened = n1.effort.screened ? `, ${n1.effort.screened} cleared by screening` : '';
+      this.log(bad || failed ? 'warn' : 'ok', `Contingency analysis of ${n1.cases.length} contingencies in ${duration(ms)}${screened}: ${bad} with new violations${failed ? `, ${failed} without a solution` : ''}.`);
     } else {
       /** @type {import('./engine/reports.js').RmsResult} */
       const rms = r;
@@ -874,7 +877,7 @@ export class App {
     // Calculate
     c.add({ id: 'calc.loadflow', keywords: 'power flow newton raphson voltages', label: 'Load flow', icon: 'loadflow', keys: ['Alt+L', 'Mod+Enter'], global: true, group: 'Calculate', hint: 'Run a Newton-Raphson load flow', enabled: idle, run: () => this.calc('loadflow') });
     c.add({ id: 'calc.shortcircuit', keywords: 'fault iec 60909 kurzschluss ikss', label: 'Short circuit', icon: 'shortcircuit', keys: ['Alt+S'], global: true, group: 'Calculate', hint: 'IEC 60909-style short-circuit currents', enabled: idle, run: () => this.calc('shortcircuit') });
-    c.add({ id: 'calc.contingency', keywords: 'n-1 outage security', label: 'Contingency', icon: 'contingency', keys: ['Alt+N'], global: true, group: 'Calculate', hint: 'N-1 analysis: every branch out in turn', enabled: idle, run: () => this.calc('contingency') });
+    c.add({ id: 'calc.contingency', keywords: 'n-1 outage security', label: 'Contingency', icon: 'contingency', keys: ['Alt+N'], global: true, group: 'Calculate', hint: 'Every branch out in turn, and the contingencies of the study case', enabled: idle, run: () => this.calc('contingency') });
     c.add({ id: 'calc.rms', keywords: 'stability transient dynamic rotor angle rms', label: 'Simulation', icon: 'rms', keys: ['Alt+R'], global: true, group: 'Calculate', hint: 'Stability simulation with the study case events', enabled: idle, run: () => this.calc('rms') });
     c.add({ id: 'calc.cancel', label: 'Cancel calculation', icon: 'stop', keys: ['Mod+.'], global: true, group: 'Calculate', enabled: () => !!this.running, run: () => this.engine.cancel() });
     c.add({ id: 'calc.autoLoadFlow', label: 'Recalculate on edit', icon: 'loadflow', group: 'Calculate', hint: 'Run the load flow again after each change once it has been run', pressed: () => this.prefs.autoLoadFlow, run: () => { this.prefs.autoLoadFlow = !this.prefs.autoLoadFlow; this.savePrefs(); } });
@@ -892,6 +895,10 @@ export class App {
       run: () => { const busSel = [...this.selection].find(id => this.store.get(id)?.cls === 'bus'); this.store.transact('Fault location', tx => tx.setStudy('shortcircuit', 'location', this.store.doc.study.shortcircuit.location ? '' : busSel ?? '')); } });
     c.add({ id: 'sc.atSelection', keywords: 'fault here', label: 'Short circuit at selected busbar', icon: 'shortcircuit', group: 'Calculate', enabled: () => [...this.selection].some(id => this.store.get(id)?.cls === 'bus'),
       run: () => { const id = [...this.selection].find(x => this.store.get(x)?.cls === 'bus'); if (id) this.faultAt(id); } });
+    studyToggle('contingency.gens', 'Generator outages', 'gen', 'contingency', 'gens', true, false);
+    studyToggle('contingency.screening', 'Screen outages first', 'loadflow', 'contingency', 'screening', true, false);
+    c.add({ id: 'contingency.edit', keywords: 'remedial action special protection double circuit n-2 list', label: 'Contingencies', icon: 'settings', group: 'Study case',
+      hint: 'Contingencies of several elements, and remedial actions', run: () => openContingencyDialog(this) });
     c.add({ id: 'rms.events', label: 'Events', icon: 'settings', group: 'Study case', hint: 'Edit the disturbance sequence of the simulation', run: () => openStudyDialog(this, 'rms') });
     c.add({ id: 'study.settings', label: 'Study case', icon: 'settings', keys: ['Mod+,'], global: true, group: 'Study case', hint: 'Settings of every calculation', run: () => openStudyDialog(this) });
     c.add({ id: 'results.clear', label: 'Clear results', icon: 'close', group: 'Calculate', enabled: () => Object.keys(this.results).length > 0, run: () => { this.results = {}; this.setOverlay('none'); this.dock.render(); this.log('info', 'Results cleared.'); } });

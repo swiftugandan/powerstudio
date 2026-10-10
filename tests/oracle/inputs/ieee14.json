@@ -1018,7 +1018,13 @@
    "lines": true,
    "trafos": true,
    "gens": false,
-   "maxLoading": 100
+   "maxLoading": 100,
+   "acceptableS": 0,
+   "screening": false,
+   "screeningMargin": 5,
+   "screeningVoltage": 0.01,
+   "list": [],
+   "remedial": []
   },
   "rms": {
    "tEnd": 3,

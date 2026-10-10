@@ -5,6 +5,7 @@
  * against the catalogue and reports what it fixed or rejected. */
 
 import { CLASSES, checkValue, endsOf, isClass, makeElement } from './catalog.js';
+import { checkContingencies } from './contingencies.js';
 
 /**
  * @typedef {import('./catalog.js').Element} Element
@@ -16,7 +17,9 @@ import { CLASSES, checkValue, endsOf, isClass, makeElement } from './catalog.js'
  *     balance: 'reference' | 'maxP' | 'targetP' | 'factor' | 'margin' | 'load', slackTolerance: number, remoteVoltage: boolean,
  *     voltageDependentLoads: boolean, tapControl: boolean, shuntControl: boolean, phaseControl: boolean },
  *   shortcircuit: { fault: '3ph' | '2ph' | '1ph', mode: 'max' | 'min', kappa: 'B' | 'C', lvTolerance: '6' | '10', location: string },
- *   contingency: { lines: boolean, trafos: boolean, gens: boolean, maxLoading: number },
+ *   contingency: { lines: boolean, trafos: boolean, gens: boolean, maxLoading: number, acceptableS: number,
+ *     screening: boolean, screeningMargin: number, screeningVoltage: number,
+ *     list: import('./contingencies.js').Contingency[], remedial: import('./contingencies.js').RemedialAction[] },
  *   rms: { tEnd: number, dt: number, events: SimEvent[] },
  * }} Study
  * @typedef {{ format: 'powerstudio', version: 1, name: string, description: string, baseMVA: number, frequency: 50 | 60,
@@ -59,6 +62,14 @@ export const STUDY_FIELDS = {
     { key: 'trafos', label: 'Transformer outages', type: 'bool', group: 'loadflow', default: true },
     { key: 'gens', label: 'Generator outages', type: 'bool', group: 'loadflow', default: false },
     { key: 'maxLoading', label: 'Loading limit', type: 'number', group: 'loadflow', default: 100, unit: '%', min: 1, max: 1000 },
+    { key: 'acceptableS', label: 'Time to act on an overload', type: 'number', group: 'loadflow', default: 0, unit: 's', min: 0, max: 86400,
+      help: 'A branch is judged against the largest of its limits that lasts at least this long. 0 uses permanent limits only.' },
+    { key: 'screening', label: 'Screen outages first', type: 'bool', group: 'loadflow', default: false,
+      help: 'Each branch outage is first solved by a quick decoupled method. Only outages that come near a limit get a full load flow.' },
+    { key: 'screeningMargin', label: 'Screening loading margin', type: 'number', group: 'loadflow', default: 5, unit: '%', min: 0, max: 50,
+      help: 'An outage whose quick solution loads a branch within this margin of the loading limit gets a full load flow.' },
+    { key: 'screeningVoltage', label: 'Screening voltage margin', type: 'number', group: 'loadflow', default: 0.01, unit: 'p.u.', min: 0, max: 0.2,
+      help: 'An outage whose quick solution brings a voltage within this margin of its band gets a full load flow.' },
   ],
   rms: [
     { key: 'tEnd', label: 'Simulation time', type: 'number', group: 'rms', default: 3, unit: 's', min: 0.01, max: 120 },
@@ -76,6 +87,8 @@ export function defaultStudy() {
     study[section] = Object.fromEntries(fields.map(f => [f.key, f.default]));
   }
   study.rms.events = [];
+  study.contingency.list = [];
+  study.contingency.remedial = [];
   return /** @type {Study} */ (/** @type {unknown} */ (study));
 }
 
@@ -178,6 +191,10 @@ export function normalizeDocument(input) {
     }
   }
   const ids = new Set(doc.elements.map(e => e.id));
+  const lists = checkContingencies(study.contingency?.list, study.contingency?.remedial, new Map(doc.elements.map(e => [e.id, e.cls])));
+  doc.study.contingency.list = lists.contingencies;
+  doc.study.contingency.remedial = lists.remedial;
+  issues.push(...lists.issues.map(i => `Study case: ${i}`));
   for (const ev of Array.isArray(study.rms?.events) ? study.rms.events : []) {
     const e = /** @type {Record<string, unknown>} */ (ev);
     if (typeof e?.t !== 'number' || !EVENT_KINDS.includes(/** @type {never} */ (e.kind)) || typeof e.target !== 'string' || !ids.has(e.target)) {

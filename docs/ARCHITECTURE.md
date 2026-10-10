@@ -34,7 +34,9 @@ flowchart LR
 **Core (`src/core/`).** The document model of the editor, with no DOM access. `catalog.js` defines every element
 class and its fields (type, unit, limits, group, help text); the inspector, the import gate and validation all read
 from it. `document.js` holds the document shape, the study case settings and `normalizeDocument`, the single gate
-every opened or imported file passes. `store.js` is the only way to change a document: transactions record each
+every opened or imported file passes. `contingencies.js` checks the study case's own contingencies and remedial
+actions, for documents and for the contingency file alike, so a rule can never end up wider than written.
+`store.js` is the only way to change a document: transactions record each
 operation with the value it replaced, so undo and redo are exact, and edits that share a coalescing key (a drag,
 typing in one field) merge into one step. `layout.js` draws a diagram for networks that arrive without one: an exact
 force-directed layout up to 400 busbars, and above that a cell-grid variant whose busbars are packed into rows, so
@@ -92,7 +94,10 @@ and inspector, rebuilds the diagram, re-runs the load flow when "Recalculate on 
 The model tree (`tree.js`, above 2,000 rows) and the result tables (`table.js`, above 500 rows) are virtual: they
 keep every row's description, sort with one shared collator, and put only the rows in view into the page, so a
 70,000-busbar network opens in about a second and its tables scroll freely. Code that takes the extent of large
-arrays uses `core/extent.js`, because spreading them into `Math.min` overflows the call stack.
+arrays uses `core/extent.js`, because spreading them into `Math.min` overflows the call stack. Dialogs that edit
+the study case (`study.js`, `contingency-editor.js`) work on a draft and write it back in one transaction on Apply;
+the contingency editor's element pickers fill their suggestion lists only when first focused, since a large network
+has tens of thousands of candidates.
 
 **Workers (`src/worker/`, `src/ui/engine-client.js`).** Each worker holds one engine instance, created from the
 compiled module the page sends it, so the module is compiled once however many workers start. The engine client
