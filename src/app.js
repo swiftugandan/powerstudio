@@ -38,7 +38,7 @@ import { REPO_URL } from './core/version.js';
 /**
  * @typedef {import('./core/catalog.js').Element} Element
  * @typedef {import('./core/document.js').PowerDocument} PowerDocument
- * @typedef {import('./ui/viewport.js').Tool} Tool
+ * @typedef {import('./ui/viewport.js').ToolId} Tool
  * @typedef {'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} CalcKind
  * @typedef {{ result: any, ms: number, revision: number, run?: string }} StoredResult `run`: its record in the run log
  */

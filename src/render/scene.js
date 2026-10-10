@@ -16,7 +16,9 @@ import { bar, route, longestSegment, stub, bendHandle, branchKeys, BAR_WIDTH, SY
  *   | { kind: 'ghost-bus', x: number, y: number, len: number }
  *   | { kind: 'ghost-port', cls: string, bus: string, pos: number, side: 'above' | 'below' }} Preview
  * @typedef {{ elements: Element[], palette: Palette, selection: Set<string>, hover: string, overlay: Overlay | null,
- *   preview: Preview | null, labels: { names: boolean, branchNames: boolean, boxes: boolean } }} SceneInput
+ *   preview: Preview | null, labels: { names: boolean, branchNames: boolean, boxes: boolean },
+ *   measure?: import('./metrics.js').Measure }} SceneInput
+ *   `measure` gives text widths; without it the scene uses widths that err wide (Node has no fonts)
  */
 
 const BRANCH_W = 2.2, STUB_W = 2;

@@ -240,8 +240,9 @@ function invert(op) {
   }
 }
 
-/** Fields that only place an element on the diagram; no calculation reads them. */
-export const DRAWING_KEYS = new Set(['x', 'y', 'len', 'orient', 'fromPos', 'toPos', 'hvPos', 'lvPos', 'pos', 'side', 'bend']);
+/** Fields that only place an element on the diagram (the catalogue's graphic group); no calculation reads them, so
+ * they never reach the engine, never mark results as old and never enter a variant's recording. */
+export const DRAWING_KEYS = new Set(Object.values(CLASSES).flatMap(c => c.fields.filter(f => f.group === 'graphic').map(f => f.key)));
 /** Fields whose change leaves calculation results current: the drawing and the names. */
 const GRAPHIC_KEYS = new Set([...DRAWING_KEYS, 'name']);
 

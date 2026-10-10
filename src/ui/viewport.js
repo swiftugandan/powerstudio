@@ -1,14 +1,16 @@
-/** The diagram viewport: owns the renderer and camera, rebuilds the scene when something changes, and turns pointer
- * input into editing actions (select, move, resize, reroute, reconnect, place, connect, pan and zoom). */
+/** The diagram viewport: owns the renderer and camera, rebuilds the scene when something changes, and hands pointer
+ * input to the active tool (`src/ui/tools/`). Panning, pinching and the wheel work the same in every tool. */
 
 import { Camera } from '../render/camera.js';
 import { createRenderer } from '../render/renderer.js';
 import { Canvas2DRenderer } from '../render/canvas2d.js';
 import { buildScene, buildOverlay, sceneSteps } from '../render/scene.js';
 import { toSVG } from '../render/svg.js';
-import { hitTest, inRect, HitIndex } from '../render/hittest.js';
-import { bar, bounds, positionOn, route, branchKeys, bendHandle } from '../render/geometry.js';
-import { snap } from '../core/layout.js';
+import { hitTest, HitIndex } from '../render/hittest.js';
+import { bar, bounds, positionOn, route, branchKeys } from '../render/geometry.js';
+import { SelectTool, PanTool } from './tools/select.js';
+import { BusTool, PortTool, ConnectTool } from './tools/place.js';
+import { PanGesture } from './tools/gestures.js';
 import { h, setHtml } from './dom.js';
 import { icon } from './icons.js';
 import { kbd } from './keys.js';
@@ -17,22 +19,9 @@ import { minOf, maxOf } from '../core/extent.js';
 /**
  * @typedef {import('../core/catalog.js').Element} Element
  * @typedef {import('../render/hittest.js').Hit} Hit
- * @typedef {'select' | 'pan' | 'bus' | 'line' | 'trafo' | 'gen' | 'extgrid' | 'load' | 'shunt'} Tool
- * @typedef {{ kind: 'pan', sx: number, sy: number, cx: number, cy: number }
- *   | { kind: 'move', start: { x: number, y: number }, orig: Map<string, { x: number, y: number }>, key: string, moved: boolean }
- *   | { kind: 'slide', id: string, key: string }
- *   | { kind: 'bus-end', id: string, end: 0 | 1, x0: number, x1: number, key: string }
- *   | { kind: 'bend', id: string, axis: 'x' | 'y', orig: number, start: { x: number, y: number }, key: string }
- *   | { kind: 'branch-end', id: string, end: 'A' | 'B', key: string }
- *   | { kind: 'marquee', x0: number, y0: number, x1: number, y1: number, additive: boolean }} Drag
+ * @typedef {'select' | 'pan' | 'bus' | 'line' | 'trafo' | 'gen' | 'extgrid' | 'load' | 'shunt'} ToolId
+ * @typedef {import('./tools/tool.js').Pointer} Pointer
  */
-
-const HINTS = /** @type {Record<Tool, string>} */ ({
-  select: '', pan: 'Drag to move the view',
-  bus: 'Click to place a busbar', line: 'Click the first busbar, then the second', trafo: 'Click the HV busbar, then the LV busbar',
-  gen: 'Click a busbar to connect a synchronous machine', extgrid: 'Click a busbar to connect an external grid',
-  load: 'Click a busbar to connect a load', shunt: 'Click a busbar to connect a shunt',
-});
 
 /** Milliseconds a frame may spend building the diagram, leaving the rest of the frame for input and drawing. */
 const BUILD_BUDGET_MS = 8;
@@ -54,10 +43,14 @@ export class Viewport {
     /** The diagram being built over several frames, if a build is under way. @type {Generator<void, void, void> | null} */
     this.job = null;
     this.frame = 0;
-    /** @type {Drag | null} */
-    this.drag = null;
-    /** @type {{ cls: 'line' | 'trafo', from: string, pos: number } | null} */
-    this.pending = null;
+    /** The tools, by the id the app's `tool` holds. @type {Record<ToolId, import('./tools/tool.js').Tool>} */
+    this.tools = {
+      select: new SelectTool(this), pan: new PanTool(this), bus: new BusTool(this),
+      line: new ConnectTool(this, 'line'), trafo: new ConnectTool(this, 'trafo'),
+      gen: new PortTool(this, 'gen'), extgrid: new PortTool(this, 'extgrid'), load: new PortTool(this, 'load'), shunt: new PortTool(this, 'shunt'),
+    };
+    /** The drag under way. @type {import('./tools/tool.js').Gesture | null} */
+    this.gesture = null;
     /** @type {{ x: number, y: number }} */
     this.pointer = { x: 0, y: 0 };
     this.pointerInside = false;
@@ -225,34 +218,21 @@ export class Viewport {
     };
   }
 
-  /** The preview for the current tool and pointer. @returns {import('../render/scene.js').Preview | null} */
+  /** The active tool. */
+  get tool() { return this.tools[/** @type {ToolId} */ (this.app.tool)]; }
+
+  /** What the drag under way, or else the tool under the pointer, draws. @returns {import('../render/scene.js').Preview | null} */
   preview() {
-    const d = this.drag, app = this.app;
-    if (d?.kind === 'marquee') return { kind: 'marquee', x0: d.x0, y0: d.y0, x1: d.x1, y1: d.y1 };
-    if (!this.pointerInside) return null;
-    const p = this.pointer, tool = app.tool;
-    if (tool === 'bus') return { kind: 'ghost-bus', x: snap(p.x), y: snap(p.y), len: 120 };
-    if ((tool === 'line' || tool === 'trafo') && this.pending) {
-      const bus = app.store.get(this.pending.from);
-      if (bus) {
-        const g = bar(bus), len = /** @type {number} */ (bus.len);
-        const from = g.horizontal ? { x: g.x0 + (this.pending.pos + 0.5) * len, y: g.y0 } : { x: g.x0, y: g.y0 + (this.pending.pos + 0.5) * len };
-        return { kind: 'rubber', from, to: p };
-      }
-    }
-    if (tool === 'gen' || tool === 'extgrid' || tool === 'load' || tool === 'shunt') {
-      const hit = this.busAt(p);
-      if (hit) return { kind: 'ghost-port', cls: tool, bus: hit.id, pos: this.snapPos(hit, p), side: this.sideOf(hit, p) };
-    }
-    return null;
+    if (this.gesture) return this.gesture.preview();
+    return this.pointerInside ? this.tool.preview(this.pointer) : null;
   }
 
-  /** @param {Tool} tool */
-  setHint(tool) {
-    const text = HINTS[tool];
-    setHtml(this.hint, text ? `${text}${tool === 'pan' ? '' : ` · ${kbd('Escape')} to finish`}` : '');
-    this.host.dataset.tool = tool === 'select' ? 'select' : tool === 'pan' ? 'pan' : 'place';
-    this.pending = null;
+  /** Switches the hint, the cursor and the half-finished actions to a newly chosen tool. @param {ToolId} id */
+  setHint(id) {
+    const tool = this.tools[id];
+    setHtml(this.hint, tool.hint ? `${tool.hint}${id === 'pan' ? '' : ` · ${kbd('Escape')} to finish`}` : '');
+    this.host.dataset.tool = tool.mode;
+    for (const t of Object.values(this.tools)) t.cancel();
     this.invalidate('overlay');
   }
 
@@ -363,23 +343,28 @@ export class Viewport {
     canvas.addEventListener('keyup', e => { if (e.code === 'Space') { this.spaceDown = false; this.host.classList.remove('panning-ready'); } });
   }
 
-  /** @param {PointerEvent} e */
+  /** @param {PointerEvent | MouseEvent} e */
   local(e) {
     const r = this.host.getBoundingClientRect();
     return { sx: e.clientX - r.left, sy: e.clientY - r.top };
+  }
+
+  /** A pointer event as the tools see it. @param {PointerEvent} e @returns {Pointer} */
+  pointerOf(e) {
+    const { sx, sy } = this.local(e);
+    return { p: this.camera.toWorld(sx, sy), sx, sy, shift: e.shiftKey, alt: e.altKey, mod: e.ctrlKey || e.metaKey, touch: e.pointerType === 'touch' };
   }
 
   /** @param {PointerEvent} e */
   onDown(e) {
     const canvas = /** @type {HTMLCanvasElement} */ (e.currentTarget);
     canvas.focus({ preventScroll: true });
-    const { sx, sy } = this.local(e);
-    const p = this.camera.toWorld(sx, sy);
-    this.pointer = p;
-    if (e.pointerType === 'touch') {
-      this.touches.set(e.pointerId, { x: sx, y: sy });
+    const ptr = this.pointerOf(e);
+    this.pointer = ptr.p;
+    if (ptr.touch) {
+      this.touches.set(e.pointerId, { x: ptr.sx, y: ptr.sy });
       if (this.touches.size === 2) {
-        this.drag = null;
+        this.gesture = null;
         const [a, b] = [...this.touches.values()];
         this.pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), zoom: this.camera.zoom, mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
         return;
@@ -387,67 +372,18 @@ export class Viewport {
     }
     if (e.button === 2) return;
     canvas.setPointerCapture(e.pointerId);
-    const app = this.app, tool = app.tool;
-    if (e.button === 1 || tool === 'pan' || this.spaceDown) {
-      this.drag = { kind: 'pan', sx, sy, cx: this.camera.cx, cy: this.camera.cy };
-      this.host.classList.add('panning');
-      return;
-    }
-    if (tool !== 'select') { this.place(p); return; }
-    const hit = hitTest(app.store.doc.elements, p, this.camera.zoom, app.selection, this.index());
-    const key = `drag-${++this.dragSeq}`;
-    if (!hit) {
-      if (e.pointerType === 'touch') { this.drag = { kind: 'pan', sx, sy, cx: this.camera.cx, cy: this.camera.cy }; if (!e.shiftKey) app.setSelection([]); return; }
-      this.drag = { kind: 'marquee', x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive: e.shiftKey || e.metaKey || e.ctrlKey };
-      if (!this.drag.additive) app.setSelection([]);
-      return;
-    }
-    const additive = e.shiftKey || e.metaKey || e.ctrlKey;
-    if (hit.part === 'body') {
-      if (additive) { app.toggleSelection(hit.id); return; }
-      if (!app.selection.has(hit.id)) app.setSelection([hit.id]);
-    }
-    const el = /** @type {Element} */ (app.store.get(hit.id));
-    if (hit.part === 'end0' || hit.part === 'end1') {
-      const g = bar(el);
-      this.drag = { kind: 'bus-end', id: el.id, end: hit.part === 'end0' ? 0 : 1, x0: g.horizontal ? g.x0 : g.y0, x1: g.horizontal ? g.x1 : g.y1, key };
-    } else if (hit.part === 'bend') {
-      const k = branchKeys(el), a = app.store.get(/** @type {string} */ (el[k.a])), b = app.store.get(/** @type {string} */ (el[k.b]));
-      const hb = a && b ? bendHandle(route(el, a, b)) : null;
-      this.drag = { kind: 'bend', id: el.id, axis: /** @type {'x' | 'y'} */ (hb?.axis ?? 'y'), orig: /** @type {number} */ (el.bend) || 0, start: p, key };
-    } else if (hit.part === 'endA' || hit.part === 'endB') {
-      this.drag = { kind: 'branch-end', id: el.id, end: hit.part === 'endA' ? 'A' : 'B', key };
-    } else if (el.cls === 'gen' || el.cls === 'extgrid' || el.cls === 'load' || el.cls === 'shunt') {
-      this.drag = app.selection.size === 1 ? { kind: 'slide', id: el.id, key } : this.moveDrag(p, key);
-    } else if (el.cls === 'line' || el.cls === 'trafo') {
-      const k = branchKeys(el), a = app.store.get(/** @type {string} */ (el[k.a])), b = app.store.get(/** @type {string} */ (el[k.b]));
-      const hb = a && b ? bendHandle(route(el, a, b)) : null;
-      this.drag = app.selection.size === 1 && hb ? { kind: 'bend', id: el.id, axis: /** @type {'x' | 'y'} */ (hb.axis), orig: /** @type {number} */ (el.bend) || 0, start: p, key } : this.moveDrag(p, key);
-    } else {
-      this.drag = this.moveDrag(p, key);
-    }
-  }
-
-  /** A drag that moves every selected busbar (connections follow). @param {{ x: number, y: number }} p @param {string} key @returns {Drag} */
-  moveDrag(p, key) {
-    /** @type {Map<string, { x: number, y: number }>} */
-    const orig = new Map();
-    for (const id of this.app.selection) {
-      const el = this.app.store.get(id);
-      if (el?.cls === 'bus') orig.set(id, { x: /** @type {number} */ (el.x), y: /** @type {number} */ (el.y) });
-    }
-    return { kind: 'move', start: p, orig, key, moved: false };
+    // The middle button and Space pan in every tool.
+    this.gesture = e.button === 1 || this.spaceDown ? new PanGesture(this, ptr) : this.tool.down(ptr);
   }
 
   /** @param {PointerEvent} e */
   onMove(e) {
-    const { sx, sy } = this.local(e);
-    const p = this.camera.toWorld(sx, sy);
-    this.pointer = p;
+    const ptr = this.pointerOf(e);
+    this.pointer = ptr.p;
     this.pointerInside = true;
-    this.app.statusPointer(p);
-    if (e.pointerType === 'touch' && this.touches.has(e.pointerId)) {
-      this.touches.set(e.pointerId, { x: sx, y: sy });
+    this.app.statusPointer(ptr.p);
+    if (ptr.touch && this.touches.has(e.pointerId)) {
+      this.touches.set(e.pointerId, { x: ptr.sx, y: ptr.sy });
       if (this.pinch && this.touches.size === 2) {
         const [a, b] = [...this.touches.values()];
         const d = Math.hypot(a.x - b.x, a.y - b.y), mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
@@ -460,55 +396,13 @@ export class Viewport {
         return;
       }
     }
-    const d = this.drag, app = this.app;
-    if (!d) {
-      if (app.tool === 'select') {
-        const hit = hitTest(app.store.doc.elements, p, this.camera.zoom, app.selection, this.index());
-        this.host.dataset.hover = !hit ? '' : hit.part === 'body' ? 'element' : 'handle';
-        if ((hit?.id ?? '') !== app.hover) app.setHover(hit?.id ?? '');
-      } else {
-        this.invalidate('overlay');
-      }
-      return;
-    }
-    if (d.kind === 'pan') {
-      this.camera.cx = d.cx - (sx - d.sx) / this.camera.zoom;
-      this.camera.cy = d.cy - (sy - d.sy) / this.camera.zoom;
-      this.invalidate('view');
-      return;
-    }
-    if (d.kind === 'marquee') { d.x1 = p.x; d.y1 = p.y; this.invalidate('overlay'); return; }
-    const store = app.store;
+    if (!this.gesture) { this.tool.hover(ptr); return; }
     try {
-      if (d.kind === 'move') {
-        const dx = p.x - d.start.x, dy = p.y - d.start.y;
-        if (!d.moved && Math.hypot(dx, dy) * this.camera.zoom < 3) return;
-        d.moved = true;
-        store.transact(d.orig.size > 1 ? 'Move busbars' : 'Move busbar', tx => {
-          for (const [id, o] of d.orig) { tx.set(id, 'x', snap(o.x + dx)); tx.set(id, 'y', snap(o.y + dy)); }
-        }, { coalesce: d.key });
-      } else if (d.kind === 'slide') {
-        const el = /** @type {Element} */ (store.get(d.id)), bus = store.get(/** @type {string} */ (el.bus));
-        if (!bus) return;
-        store.transact('Move connection', tx => { tx.set(d.id, 'pos', this.snapPos(bus, p)); tx.set(d.id, 'side', this.sideOf(bus, p)); }, { coalesce: d.key });
-      } else if (d.kind === 'bus-end') {
-        const el = /** @type {Element} */ (store.get(d.id)), horizontal = el.orient !== 'v';
-        const v = snap(horizontal ? p.x : p.y);
-        const lo = d.end === 0 ? Math.min(v, d.x1 - 40) : d.x0, hi = d.end === 1 ? Math.max(v, d.x0 + 40) : d.x1;
-        store.transact('Resize busbar', tx => { tx.set(d.id, 'len', hi - lo); tx.set(d.id, horizontal ? 'x' : 'y', (lo + hi) / 2); }, { coalesce: d.key });
-      } else if (d.kind === 'bend') {
-        const delta = d.axis === 'y' ? p.y - d.start.y : p.x - d.start.x;
-        store.transact('Reroute', tx => tx.set(d.id, 'bend', Math.round((d.orig + delta) / 10) * 10), { coalesce: d.key });
-      } else if (d.kind === 'branch-end') {
-        const el = /** @type {Element} */ (store.get(d.id)), k = branchKeys(el);
-        const bus = this.busAt(p);
-        const [busKey, posKey] = d.end === 'A' ? [k.a, k.pa] : [k.b, k.pb];
-        if (bus && bus.id === el[busKey]) store.transact('Move connection', tx => tx.set(d.id, posKey, this.snapPos(bus, p)), { coalesce: d.key });
-        this.invalidate();
-      }
+      this.gesture.move(ptr);
     } catch (error) {
-      app.toast('warn', error instanceof Error ? error.message : String(error));
-      this.drag = null;
+      // An edit the store refuses ends the drag; what it had done stays, as one step.
+      this.app.toast('warn', error instanceof Error ? error.message : String(error));
+      this.gesture = null;
     }
   }
 
@@ -516,28 +410,10 @@ export class Viewport {
   onUp(e) {
     this.touches.delete(e.pointerId);
     if (this.touches.size < 2) this.pinch = null;
-    const d = this.drag;
-    this.drag = null;
+    const g = this.gesture;
+    this.gesture = null;
     this.host.classList.remove('panning');
-    if (!d) return;
-    const app = this.app;
-    if (d.kind === 'marquee') {
-      const ids = inRect(app.store.doc.elements, d);
-      if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) * this.camera.zoom > 3) app.setSelection(d.additive ? [...app.selection, ...ids] : ids);
-      this.invalidate('overlay');
-    } else if (d.kind === 'branch-end') {
-      const { p } = { p: this.pointer };
-      const el = app.store.get(d.id);
-      const bus = this.busAt(p);
-      if (el && bus) {
-        const k = branchKeys(el);
-        const [busKey, posKey] = d.end === 'A' ? [k.a, k.pa] : [k.b, k.pb];
-        if (bus.id !== el[busKey]) {
-          try { app.store.transact('Reconnect', tx => { tx.set(d.id, busKey, bus.id); tx.set(d.id, posKey, this.snapPos(bus, p)); }); app.log('info', `${el.name || el.id} now connects to ${bus.name || bus.id}.`); }
-          catch (error) { app.toast('warn', error instanceof Error ? error.message : String(error)); }
-        }
-      }
-    }
+    g?.end(this.pointerOf(e));
   }
 
   /** The hit index of the document as it is now, built again after an edit. */
@@ -576,30 +452,8 @@ export class Viewport {
     return bus.orient === 'v' ? (p.x < /** @type {number} */ (bus.x) ? 'above' : 'below') : (p.y < /** @type {number} */ (bus.y) ? 'above' : 'below');
   }
 
-  /** Placement tools. @param {{ x: number, y: number }} p */
-  place(p) {
-    const app = this.app, tool = app.tool;
-    if (tool === 'bus') { app.addBus(snap(p.x), snap(p.y)); return; }
-    const bus = this.busAt(p);
-    if (!bus) { if (tool !== 'line' && tool !== 'trafo') app.toast('info', 'Click on a busbar to connect to it.'); return; }
-    if (tool === 'line' || tool === 'trafo') {
-      if (!this.pending) { this.pending = { cls: tool, from: bus.id, pos: this.snapPos(bus, p) }; this.invalidate('overlay'); return; }
-      if (this.pending.from === bus.id) { app.toast('info', 'Pick a different busbar for the other end.'); return; }
-      const from = this.pending;
-      this.pending = null;
-      app.addBranch(tool, from.from, from.pos, bus.id, this.snapPos(bus, p));
-      this.invalidate('overlay');
-      return;
-    }
-    app.addPort(/** @type {'gen' | 'extgrid' | 'load' | 'shunt'} */ (tool), bus.id, this.snapPos(bus, p), this.sideOf(bus, p));
-  }
-
-  cancelPending() {
-    if (!this.pending) return false;
-    this.pending = null;
-    this.invalidate('overlay');
-    return true;
-  }
+  /** Escape: drops the active tool's half-finished action; true if there was one. */
+  cancelPending() { return this.tool.cancel(); }
 
   /** @param {WheelEvent} e */
   onWheel(e) {
