@@ -48,14 +48,15 @@ export function buildOverlay(kind, result, doc, P, opt) {
     const r = result;
     for (const b of r.buses) {
       const bus = byId.get(b.id);
-      elements.set(b.id, { box: [`${fixed(b.vm, 3)} p.u.  ${fixed(b.va, 2)}°`],
-        color: colour && bus ? voltageColor(P, b.vm, /** @type {number} */ (bus.vmin), /** @type {number} */ (bus.vmax)) : undefined });
+      const off = bus ? voltageColor(P, b.vm, /** @type {number} */ (bus.vmin), /** @type {number} */ (bus.vmax)) : undefined;
+      elements.set(b.id, { box: [`${fixed(b.vm, 3)} p.u.  ${fixed(b.va, 2)}°`], color: colour ? off : undefined, alert: !!off });
     }
     for (const br of r.branches) {
       elements.set(br.id, {
         color: colour ? loadingColor(P, br.loading) : undefined,
         ends: [`${fixed(br.pFrom, 1)} MW\n${fixed(br.qFrom, 1)} Mvar`, `${fixed(br.pTo, 1)} MW\n${fixed(br.qTo, 1)} Mvar`],
         mid: Number.isFinite(br.loading) ? `${fixed(br.loading, 1)} %` : undefined,
+        alert: br.loading > 100,
       });
     }
     for (const u of [...r.gens, ...r.grids]) elements.set(u.id, { box: [`P ${fixed(u.p, 1)} MW`, `Q ${fixed(u.q, 1)} Mvar`] });
@@ -83,12 +84,12 @@ export function buildOverlay(kind, result, doc, P, opt) {
     const r = result;
     for (const [id, w] of Object.entries(r.worstLoading)) {
       const out = byId.get(w.outage);
-      elements.set(id, { mid: `${fixed(w.value, 0)} % (${out?.name || w.outage})`, color: colour ? loadingColor(P, w.value) : undefined });
+      elements.set(id, { mid: `${fixed(w.value, 0)} % (${out?.name || w.outage})`, color: colour ? loadingColor(P, w.value) : undefined, alert: w.value > 100 });
     }
     for (const [id, w] of Object.entries(r.worstVoltage)) {
       const bus = byId.get(id);
       const low = bus && w.min < /** @type {number} */ (bus.vmin), high = bus && w.max > /** @type {number} */ (bus.vmax);
-      elements.set(id, { box: [`min ${fixed(w.min, 3)} p.u.`, `max ${fixed(w.max, 3)} p.u.`], color: colour ? (low ? P.res.low : high ? P.res.high : undefined) : undefined });
+      elements.set(id, { box: [`min ${fixed(w.min, 3)} p.u.`, `max ${fixed(w.max, 3)} p.u.`], color: colour ? (low ? P.res.low : high ? P.res.high : undefined) : undefined, alert: !!(low || high) });
     }
     if (colour) legend = { kind: 'ramp', title: 'Worst N-1 loading', stops: [P.res.ok, P.res.ok, P.res.warn, P.res.high], from: '0 %', to: '≥ 100 %' };
   } else if (kind === 'rms') {
@@ -97,7 +98,8 @@ export function buildOverlay(kind, result, doc, P, opt) {
     const i = Math.max(0, Math.min(r.t.length - 1, opt.rmsIndex ?? r.t.length - 1));
     r.busIds.forEach((id, k) => {
       const v = r.voltages[k][i], bus = byId.get(id);
-      elements.set(id, { box: [`${fixed(v, 3)} p.u.`], color: colour ? (v < 0.8 ? P.res.high : v < /** @type {number} */ (bus?.vmin ?? 0.9) ? P.res.warn : undefined) : undefined });
+      const below = v < /** @type {number} */ (bus?.vmin ?? 0.9);
+      elements.set(id, { box: [`${fixed(v, 3)} p.u.`], color: colour ? (v < 0.8 ? P.res.high : below ? P.res.warn : undefined) : undefined, alert: below });
     });
     for (const m of r.machines) elements.set(m.id, { box: [`δ ${fixed(m.delta[i], 1)}°`, `P ${fixed(m.pe[i], 1)} MW`] });
     if (colour) legend = { kind: 'swatches', title: `t = ${fixed(r.t[i], 3)} s`, items: [{ label: 'Voltage below 0.8 p.u.', color: P.res.high }, { label: 'Below band', color: P.res.warn }] };

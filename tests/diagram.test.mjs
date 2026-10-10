@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildScene } from '../src/render/scene.js';
-import { SHAPE_STRIDE } from '../src/render/displaylist.js';
+import { buildScene, levelZooms } from '../src/render/scene.js';
+import { SHAPE_STRIDE, SHAPE_MIN_ZOOM } from '../src/render/displaylist.js';
 import { hitTest, inRect, HitIndex } from '../src/render/hittest.js';
 import { route, bar } from '../src/render/geometry.js';
 import { ieee14 } from '../src/samples/ieee14.js';
@@ -18,6 +18,31 @@ test('the scene has a bar for every busbar and a label for every name', () => {
   const busLayer = list.layers[2];
   assert.equal(busLayer.shapes.filter((_, i) => i % SHAPE_STRIDE === 0 && busLayer.shapes[i] === 0).length, 14);
   for (let n = 1; n <= 14; n++) assert.ok(busLayer.texts.some(t => t.text === `Bus ${n}`));
+});
+
+test('a large diagram brings its voltage levels in from the highest, and shows violations at every zoom', () => {
+  // A 60 × 60 grid of 33 kV busbars under a 400 kV row: large enough for levels of detail.
+  /** @type {import('../src/core/catalog.js').Element[]} */
+  const elements = [];
+  for (let r = 0; r < 60; r++) for (let c = 0; c < 60; c++) {
+    elements.push({ id: `B${r}-${c}`, cls: 'bus', name: '', vn: r ? 33 : 400, x: c * 300, y: r * 240, len: 120, orient: 'h' });
+    if (c) elements.push({ id: `L${r}-${c}`, cls: 'line', name: '', from: `B${r}-${c - 1}`, to: `B${r}-${c}`, fromPos: 0, toPos: 0 });
+  }
+  const buses = new Map(elements.filter(e => e.cls === 'bus').map(b => [b.id, b]));
+  const zooms = /** @type {Map<number, number>} */ (levelZooms(elements, buses));
+  assert.equal(zooms.get(400), 0);
+  assert.ok(/** @type {number} */ (zooms.get(33)) > 0, 'the lower level waits for room');
+  assert.equal(levelZooms(ieee14().elements, new Map()), null, 'a small diagram is drawn whole');
+  const overlay = { elements: new Map([['L5-5', { alert: true }]]), faultAt: '', deenergized: new Set() };
+  const list = buildScene({ elements, palette, selection: new Set(), hover: '', overlay, preview: null, labels: { names: false, branchNames: false, boxes: false } });
+  const branches = list.layers[1].shapes, count = branches.length / SHAPE_STRIDE;
+  const from = Array.from({ length: count }, (_, k) => branches[k * SHAPE_STRIDE + SHAPE_MIN_ZOOM]);
+  // Branch shapes follow the document, each route the same number of segments: the 400 kV row's 59 lines first.
+  const per = count / elements.filter(e => e.cls === 'line').length, top = 59 * per;
+  assert.ok(from.slice(0, top).every(z => z === 0));
+  const lower = from.slice(top);
+  assert.equal(lower.filter(z => z === 0).length, per, 'only the overloaded line shows at every zoom');
+  assert.ok(lower.filter(z => z > 0).every(z => z === Math.fround(/** @type {number} */ (zooms.get(33)))));
 });
 
 test('every route is orthogonal and ends on its busbars', () => {

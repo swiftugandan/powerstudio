@@ -2,7 +2,7 @@
  * come from signed distance functions in WGSL; filled polygons are plain triangles; text is drawn from a signed
  * distance field glyph atlas. Everything renders into a 4× multisampled target. */
 
-import { SHAPE_STRIDE, Floats } from './displaylist.js';
+import { SHAPE_STRIDE, TRI_VERTEX, Floats } from './displaylist.js';
 import { GlyphAtlas } from './glyphs.js';
 
 /** @typedef {import('./displaylist.js').DisplayList} DisplayList @typedef {import('./camera.js').Camera} Camera
@@ -110,9 +110,11 @@ struct ShapeOut {
 }
 
 struct TriOut { @builtin(position) pos: vec4f, @location(0) color: vec4f };
-@vertex fn vsTri(@location(0) p: vec2f, @location(1) color: vec4f) -> TriOut {
+@vertex fn vsTri(@location(0) p: vec2f, @location(1) color: vec4f, @location(2) minZoom: f32) -> TriOut {
   var o: TriOut;
   o.pos = toClip(p);
+  // A triangle below its minimum zoom is moved outside the clip volume, as shapes are.
+  if (minZoom > 0.0 && u.scale / u.dpr < minZoom) { o.pos = vec4f(2.0, 2.0, 2.0, 1.0); }
   o.color = color;
   return o;
 }
@@ -247,7 +249,7 @@ export class WebGPURenderer {
     const vec4s = count => Array.from({ length: count }, (_, k) => ({ shaderLocation: k, offset: k * 16, format: /** @type {GPUVertexFormat} */ ('float32x4') }));
     this.gridPipeline = pipeline('vsFull', 'fsGrid', [], false);
     this.shapePipeline = pipeline('vsShape', 'fsShape', [{ arrayStride: SHAPE_STRIDE * 4, stepMode: 'instance', attributes: vec4s(5) }], true);
-    this.triPipeline = pipeline('vsTri', 'fsTri', [{ arrayStride: 24, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }, { shaderLocation: 1, offset: 8, format: 'float32x4' }] }], true);
+    this.triPipeline = pipeline('vsTri', 'fsTri', [{ arrayStride: 4 * TRI_VERTEX, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }, { shaderLocation: 1, offset: 8, format: 'float32x4' }, { shaderLocation: 2, offset: 24, format: 'float32' }] }], true);
     this.textPipeline = pipeline('vsText', 'fsText', [{ arrayStride: 64, stepMode: 'instance', attributes: vec4s(4) }], true);
     /** The diagram (uploaded when it changes) and the overlay of selection, hover and previews (small, uploaded on
      * every change of the editor's state). @type {{ base: Packed, overlay: Packed }} */
@@ -284,14 +286,14 @@ export class WebGPURenderer {
     /** @type {Prepared['ranges']} */
     const ranges = [];
     for (const layer of list.layers) {
-      const s0 = so / SHAPE_STRIDE, t0 = to / 6, x0 = texts.n / 16;
+      const s0 = so / SHAPE_STRIDE, t0 = to / TRI_VERTEX, x0 = texts.n / 16;
       shapes.set(layer.shapes, so); so += layer.shapes.length;
       tris.set(layer.tris, to); to += layer.tris.length;
       for (const t of layer.texts) {
         this.layoutText(t, texts);
         if (++laid % 4096 === 0) yield;
       }
-      ranges.push({ shapes: [s0, so / SHAPE_STRIDE - s0], tris: [t0, to / 6 - t0], texts: [x0, texts.n / 16 - x0] });
+      ranges.push({ shapes: [s0, so / SHAPE_STRIDE - s0], tris: [t0, to / TRI_VERTEX - t0], texts: [x0, texts.n / 16 - x0] });
     }
     return { shapes, tris, texts: texts.view(), ranges };
   }

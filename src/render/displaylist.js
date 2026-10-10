@@ -13,6 +13,8 @@ export const SHAPE_STRIDE = 20;
 export const SHAPE_SEGMENT = 0, SHAPE_CIRCLE = 1, SHAPE_RECT = 2;
 /** Offset of a shape's minimum zoom within its stride. */
 export const SHAPE_MIN_ZOOM = 18;
+/** Floats per triangle vertex: x, y, RGBA, and the smallest zoom at which the triangle shows (as for shapes). */
+export const TRI_VERTEX = 7;
 
 /** A growable array of 32-bit floats: a national diagram holds millions, which plain arrays filled by spreading build
  * and copy slowly. */
@@ -39,7 +41,7 @@ export class Floats {
 export class Layer {
   constructor() {
     this.shapeData = new Floats();
-    /** x, y, r, g, b, a per vertex */
+    /** TRI_VERTEX floats per vertex */
     this.triData = new Floats(256);
     /** @type {TextItem[]} */
     this.texts = [];
@@ -48,7 +50,7 @@ export class Layer {
   /** Shape instances, SHAPE_STRIDE floats each. */
   get shapes() { return this.shapeData.view(); }
 
-  /** Triangle vertices, 6 floats each. */
+  /** Triangle vertices, TRI_VERTEX floats each. */
   get tris() { return this.triData.view(); }
 }
 
@@ -59,6 +61,8 @@ export class DisplayList {
     this.current = this.layers[0];
     /** The smallest zoom at which the shapes written next show; texts use their own minimum size instead. */
     this.minZoom = 0;
+    /** For a large diagram, the zoom from which each voltage level shows (see `levelZooms` in scene.js). @type {Map<number, number> | null} */
+    this.levels = null;
   }
 
   /** @param {number} i */
@@ -102,12 +106,12 @@ export class DisplayList {
   /** @param {number} x0 @param {number} y0 @param {number} x1 @param {number} y1 @param {number} x2 @param {number} y2 @param {RGBA} c */
   triangle(x0, y0, x1, y1, x2, y2, c) {
     const f = this.current.triData;
-    f.reserve(18);
+    f.reserve(3 * TRI_VERTEX);
     const a = f.a;
     let i = f.n;
     for (const [x, y] of [[x0, y0], [x1, y1], [x2, y2]]) {
-      a[i] = x; a[i + 1] = y; a[i + 2] = c[0]; a[i + 3] = c[1]; a[i + 4] = c[2]; a[i + 5] = c[3];
-      i += 6;
+      a[i] = x; a[i + 1] = y; a[i + 2] = c[0]; a[i + 3] = c[1]; a[i + 4] = c[2]; a[i + 5] = c[3]; a[i + 6] = this.minZoom;
+      i += TRI_VERTEX;
     }
     f.n = i;
   }
@@ -120,7 +124,9 @@ export class DisplayList {
    */
   text(x, y, text, size, color, opt = {}) {
     if (!text) return;
-    this.current.texts.push({ x, y, text, size, color, align: opt.align ?? 0, font: opt.font ?? 'sans', weight: opt.weight ?? 400, minPx: opt.minPx ?? 5 });
+    // Text written while a minimum zoom is set shows no sooner than the shapes around it.
+    const minPx = Math.max(opt.minPx ?? 5, this.minZoom * size);
+    this.current.texts.push({ x, y, text, size, color, align: opt.align ?? 0, font: opt.font ?? 'sans', weight: opt.weight ?? 400, minPx });
   }
 }
 

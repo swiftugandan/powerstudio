@@ -8,7 +8,8 @@ import { bar, route, longestSegment, stub, bendHandle, branchKeys, BAR_WIDTH, SY
  * @typedef {import('../core/catalog.js').Element} Element
  * @typedef {{ bg: RGBA, grid: RGBA, ink: RGBA, muted: RGBA, select: RGBA, hover: RGBA, label: RGBA, labelMuted: RGBA,
  *   boxBg: RGBA, boxBorder: RGBA, boxText: RGBA, kv: { ehv: RGBA, hv: RGBA, mv: RGBA, lv: RGBA }, fault: RGBA, preview: RGBA }} Palette
- * @typedef {{ color?: RGBA, box?: string[], ends?: [string, string], mid?: string, dim?: boolean }} Annotation
+ * @typedef {{ color?: RGBA, box?: string[], ends?: [string, string], mid?: string, dim?: boolean, alert?: boolean }} Annotation
+ *   `alert` marks a violation (an overload, a voltage outside its band), which shows at every zoom
  * @typedef {{ elements: Map<string, Annotation>, faultAt: string, deenergized: Set<string> }} Overlay
  * @typedef {{ kind: 'rubber', from: { x: number, y: number }, to: { x: number, y: number } }
  *   | { kind: 'marquee', x0: number, y0: number, x1: number, y1: number }
@@ -20,6 +21,48 @@ import { bar, route, longestSegment, stub, bendHandle, branchKeys, BAR_WIDTH, SY
 
 const BRANCH_W = 2.2, STUB_W = 2;
 const MONO = 11;
+/** Elements from which a diagram draws its lower voltage levels only as the view comes closer. */
+const LOD_FROM = 5000;
+/** Screen pixels of line per pixel of drawing at which the next voltage level comes in. */
+const LOD_DENSITY = 0.1;
+/** On-screen radius in pixels from which symbols of a large diagram show. */
+const SYMBOL_MIN_PX = 3;
+
+/**
+ * The zoom from which each voltage level of a large diagram shows, or null for a diagram drawn whole at every zoom.
+ * Levels come in from the highest down: a level shows once the lines and busbars of it and every higher level would
+ * cover no more than LOD_DENSITY of the drawing on screen. A branch belongs to the lower voltage of its ends, so it
+ * never shows without both its busbars. The highest level shows at every zoom.
+ * @param {Element[]} elements @param {Map<string, Element>} buses @returns {Map<number, number> | null}
+ */
+export function levelZooms(elements, buses) {
+  if (elements.length < LOD_FROM) return null;
+  /** @type {Map<number, number>} line length per voltage level */
+  const ink = new Map();
+  const add = (/** @type {number} */ kv, /** @type {number} */ len) => ink.set(kv, (ink.get(kv) ?? 0) + len);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (const b of buses.values()) {
+    const x = /** @type {number} */ (b.x), y = /** @type {number} */ (b.y);
+    x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    add(/** @type {number} */ (b.vn), /** @type {number} */ (b.len) || 0);
+  }
+  for (const el of elements) {
+    if (el.cls !== 'line' && el.cls !== 'trafo') continue;
+    const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
+    if (!a || !b) continue;
+    // Routes are orthogonal, so their length is close to the distance along the axes.
+    add(Math.min(/** @type {number} */ (a.vn), /** @type {number} */ (b.vn)), Math.abs(/** @type {number} */ (a.x) - /** @type {number} */ (b.x)) + Math.abs(/** @type {number} */ (a.y) - /** @type {number} */ (b.y)));
+  }
+  const area = Math.max(x1 - x0, 1) * Math.max(y1 - y0, 1);
+  /** @type {Map<number, number>} */
+  const zooms = new Map();
+  let total = 0;
+  for (const kv of [...ink.keys()].sort((p, q) => q - p)) {
+    total += /** @type {number} */ (ink.get(kv));
+    zooms.set(kv, zooms.size ? total / (area * LOD_DENSITY) : 0);
+  }
+  return zooms;
+}
 
 /** Colour for a nominal voltage. @param {Palette} p @param {number} kv */
 export function kvColor(p, kv) {
@@ -62,6 +105,13 @@ export function* sceneSteps(input) {
     return a?.color ?? base;
   };
   const dash = (/** @type {Element} */ el) => (el.inService === false ? 6 : 0);
+  // A large diagram draws its lower voltage levels, and its symbols, only once there is room for them; violations
+  // show at every zoom.
+  const lod = levelZooms(elements, buses);
+  list.levels = lod;
+  /** @param {Element} el @param {number} kv @param {number} [floor] */
+  const showFrom = (el, kv, floor = 0) => (!lod || ann.get(el.id)?.alert ? 0 : Math.max(lod.get(kv) ?? 0, floor));
+  const symbolFloor = SYMBOL_MIN_PX / SYMBOL;
 
   // Branches.
   list.layer(1);
@@ -71,6 +121,7 @@ export function* sceneSteps(input) {
     const k = branchKeys(el), a = buses.get(/** @type {string} */ (el[k.a])), b = buses.get(/** @type {string} */ (el[k.b]));
     if (!a || !b) continue;
     const pts = route(el, a, b);
+    list.minZoom = showFrom(el, Math.min(/** @type {number} */ (a.vn), /** @type {number} */ (b.vn)));
     const ca = colorOf(el, kvColor(P, /** @type {number} */ (a.vn))), cb = colorOf(el, kvColor(P, /** @type {number} */ (b.vn)));
     const seg = longestSegment(pts);
     if (el.cls === 'line') {
@@ -111,6 +162,7 @@ export function* sceneSteps(input) {
       }
       list.layer(1);
     }
+    list.minZoom = 0;
   }
 
   // Single-port elements.
@@ -121,6 +173,7 @@ export function* sceneSteps(input) {
     if (!b) continue;
     const s = stub(el, b);
     const c = colorOf(el, el.cls === 'gen' || el.cls === 'extgrid' ? P.ink : kvColor(P, /** @type {number} */ (b.vn)));
+    list.minZoom = showFrom(el, /** @type {number} */ (b.vn), symbolFloor);
     list.segment(s.from.x, s.from.y, s.to.x, s.to.y, STUB_W, c, dash(el));
     drawSymbol(list, P, el.cls, s.centre, s.dir, c, /** @type {number} */ (el.q));
     const lx = s.centre.x + (b.orient === 'v' ? 0 : SYMBOL + 8), ly = s.centre.y + (b.orient === 'v' ? SYMBOL + 12 : 0);
@@ -132,6 +185,7 @@ export function* sceneSteps(input) {
       box(list, P, lx, ly + 9 + hb / 2, a.box, 0, undefined);
       list.layer(1);
     }
+    list.minZoom = 0;
   }
 
   // Busbars on top of the connections that end on them.
@@ -141,6 +195,7 @@ export function* sceneSteps(input) {
     if (el.cls !== 'bus') continue;
     const g = bar(el);
     const c = dead.has(el.id) ? P.muted : colorOf(el, kvColor(P, /** @type {number} */ (el.vn)));
+    list.minZoom = showFrom(el, /** @type {number} */ (el.vn));
     list.segment(g.x0, g.y0, g.x1, g.y1, BAR_WIDTH, c);
     if (labels.names) {
       // Names sit above the start of the bar on a soft halo, clear of connections that leave the bar ends.
@@ -155,6 +210,7 @@ export function* sceneSteps(input) {
       else box(list, P, g.x1 + 10, g.y1 - hBox / 2, a.box, 0, a.color);
       list.layer(2);
     }
+    list.minZoom = 0;
     if (overlay?.faultAt === el.id) bolt(list, g.horizontal ? (g.x0 + g.x1) / 2 : g.x0 + 18, g.horizontal ? g.y0 - 20 : (g.y0 + g.y1) / 2, P.fault);
   }
 
@@ -214,10 +270,10 @@ export function buildOverlay(input) {
  */
 function halo(list, P, x, y, text, size, align) {
   // It shows once its text is 4 px on screen, as the text itself does.
-  const w = text.length * size * 0.56 + 6, h = size * 1.3;
-  list.minZoom = 4 / size;
+  const w = text.length * size * 0.56 + 6, h = size * 1.3, from = list.minZoom;
+  list.minZoom = Math.max(from, 4 / size);
   list.rect(x - align * w - 3, y - h / 2, w, h, withAlpha(P.bg, 0.86), withAlpha(P.bg, 0), 0, 3);
-  list.minZoom = 0;
+  list.minZoom = from;
   list.text(x - align * (w - 6), y, text, size, P.label, { align, weight: 600, minPx: 4 });
 }
 
@@ -229,10 +285,10 @@ function halo(list, P, x, y, text, size, align) {
 function box(list, P, x, y, lines, align, accent, size = MONO) {
   // It shows once its text is 6.5 px on screen, readable.
   const lh = size * 1.24, w = Math.max(...lines.map(l => l.length)) * size * 0.6 + 8, h = lines.length * lh + 4;
-  const x0 = x - align * w, y0 = y - h / 2;
-  list.minZoom = 6.5 / size;
+  const x0 = x - align * w, y0 = y - h / 2, from = list.minZoom;
+  list.minZoom = Math.max(from, 6.5 / size);
   list.rect(x0, y0, w, h, P.boxBg, accent ? withAlpha(accent, 0.9) : P.boxBorder, accent ? 1.2 : 0.8, 3);
-  list.minZoom = 0;
+  list.minZoom = from;
   lines.forEach((t, i) => list.text(x0 + 4, y0 + 2 + lh * (i + 0.5), t, size, P.boxText, { font: 'mono', minPx: 6.5 }));
 }
 

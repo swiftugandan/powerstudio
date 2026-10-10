@@ -1,6 +1,6 @@
 /** SVG export of a display list: the same primitives the renderers draw, as vector graphics. */
 
-import { SHAPE_STRIDE, SHAPE_SEGMENT, SHAPE_CIRCLE, SHAPE_MIN_ZOOM } from './displaylist.js';
+import { SHAPE_STRIDE, SHAPE_SEGMENT, SHAPE_CIRCLE, SHAPE_MIN_ZOOM, TRI_VERTEX } from './displaylist.js';
 import { FONTS } from './glyphs.js';
 
 /** @typedef {import('./displaylist.js').RGBA} RGBA */
@@ -38,7 +38,11 @@ export function toSVG(list, box, background, title) {
       else out.push(`<rect x="${n(s[i + 1])}" y="${n(s[i + 2])}" width="${n(s[i + 3])}" height="${n(s[i + 4])}" rx="${n(s[i + 5])}" ${paint}/>`);
     }
     const t = layer.tris;
-    for (let i = 0; i < t.length; i += 18) out.push(`<polygon points="${n(t[i])},${n(t[i + 1])} ${n(t[i + 6])},${n(t[i + 7])} ${n(t[i + 12])},${n(t[i + 13])}" fill="${col(/** @type {RGBA} */ ([...t.subarray(i + 2, i + 6)]))}"/>`);
+    const V = TRI_VERTEX;
+    for (let i = 0; i < t.length; i += 3 * V) {
+      if (zoom < t[i + 6]) continue;
+      out.push(`<polygon points="${n(t[i])},${n(t[i + 1])} ${n(t[i + V])},${n(t[i + V + 1])} ${n(t[i + 2 * V])},${n(t[i + 2 * V + 1])}" fill="${col(/** @type {RGBA} */ ([...t.subarray(i + 2, i + 6)]))}"/>`);
+    }
     for (const tx of layer.texts) {
       if (tx.size * zoom < tx.minPx) continue;
       const anchor = tx.align === 0 ? 'start' : tx.align === 1 ? 'end' : 'middle';

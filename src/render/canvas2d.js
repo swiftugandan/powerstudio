@@ -6,7 +6,7 @@
  * blits that cache: moved while panning, scaled while zooming until the cache is drawn again at the new zoom. The
  * badge says so. */
 
-import { SHAPE_STRIDE, SHAPE_SEGMENT, SHAPE_CIRCLE, SHAPE_MIN_ZOOM } from './displaylist.js';
+import { SHAPE_STRIDE, SHAPE_SEGMENT, SHAPE_CIRCLE, SHAPE_MIN_ZOOM, TRI_VERTEX } from './displaylist.js';
 import { FONTS } from './glyphs.js';
 
 /** @typedef {import('./displaylist.js').DisplayList} DisplayList @typedef {import('./camera.js').Camera} Camera
@@ -66,7 +66,7 @@ export class Canvas2DRenderer {
   commit(which, list) {
     if (which === 'overlay') { this.overlay = list; return; }
     this.list = list;
-    const items = list.layers.reduce((n, l) => n + l.shapes.length / SHAPE_STRIDE + l.tris.length / 18 + l.texts.length, 0);
+    const items = list.layers.reduce((n, l) => n + l.shapes.length / SHAPE_STRIDE + l.tris.length / (3 * TRI_VERTEX) + l.texts.length, 0);
     this.cached = items >= CACHE_FROM;
     this.detail = this.cached ? 'large network: drawn from a cache' : '';
     // The cache shows the previous diagram until the new one is drawn into it.
@@ -186,10 +186,12 @@ export class Canvas2DRenderer {
       if (sw > 0 && stroke[3] > 0) { ctx.strokeStyle = css(stroke); ctx.lineWidth = Math.max(sw * scale, 1) / scale; ctx.stroke(); }
     }
     const t = layer.tris;
-    for (let i = 0; i < t.length; i += 18) {
-      if ((i / 18) % 512 === 511) yield;
+    const V = TRI_VERTEX;
+    for (let i = 0; i < t.length; i += 3 * V) {
+      if ((i / (3 * V)) % 512 === 511) yield;
+      if (zoom < t[i + 6]) continue;
       ctx.fillStyle = css(/** @type {RGBA} */ ([...t.subarray(i + 2, i + 6)]));
-      ctx.beginPath(); ctx.moveTo(t[i], t[i + 1]); ctx.lineTo(t[i + 6], t[i + 7]); ctx.lineTo(t[i + 12], t[i + 13]); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(t[i], t[i + 1]); ctx.lineTo(t[i + V], t[i + V + 1]); ctx.lineTo(t[i + 2 * V], t[i + 2 * V + 1]); ctx.closePath(); ctx.fill();
     }
     ctx.textBaseline = 'middle';
     let n = 0;

@@ -60,8 +60,8 @@ test('the engine writes only vector groups the catalogue lists', () => {
   assert.deepEqual([...list[1].matchAll(/"([^"]+)"/g)].map(m => m[1]), [...VECTOR_GROUPS]);
 });
 
-test('large networks are laid out in rows without overlaps', () => {
-  // A 30 × 20 grid network: above the size where the layout packs rows instead of pushing bars apart.
+test('large networks are laid out without overlaps, with neighbours near each other', () => {
+  // A 30 × 20 grid network: above the size where the layout turns multilevel and removes overlaps row by row.
   /** @type {import('../src/core/catalog.js').Element[]} */
   const elements = [];
   const id = (/** @type {number} */ r, /** @type {number} */ c) => `B${r}-${c}`;
@@ -78,4 +78,12 @@ test('large networks are laid out in rows without overlaps', () => {
     const apart = Math.abs(p.x - q.x) >= (p.len + q.len) / 2 + 60 || Math.abs(p.y - q.y) >= 120;
     assert.ok(apart, `${p.id} overlaps ${q.id}`);
   }
+  // The grid keeps its shape: no branch crosses more than a tenth of the drawing, and most are about one spacing.
+  const at = new Map(buses.map((/** @type {any} */ b) => [b.id, b]));
+  const lengths = doc.elements.filter((/** @type {any} */ e) => e.cls === 'line')
+    .map((/** @type {any} */ l) => Math.hypot(at.get(l.from).x - at.get(l.to).x, at.get(l.from).y - at.get(l.to).y)).sort((a, b) => a - b);
+  const xs = buses.map((/** @type {any} */ b) => b.x), ys = buses.map((/** @type {any} */ b) => b.y);
+  const diagonal = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  assert.ok(lengths[lengths.length - 1] < diagonal / 10, `longest branch ${lengths[lengths.length - 1]} of ${diagonal}`);
+  assert.ok(lengths[lengths.length >> 1] <= 480, `median branch ${lengths[lengths.length >> 1]}`);
 });

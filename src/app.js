@@ -721,7 +721,9 @@ export class App {
       if (!kvs.length) { el.innerHTML = ''; return; }
       const P = this.palette;
       const cls = (/** @type {number} */ kv) => (kv >= 200 ? P.kv.ehv : kv >= 60 ? P.kv.hv : kv >= 1 ? P.kv.mv : P.kv.lv);
-      el.innerHTML = `<span class="title">Voltage levels</span>${kvs.slice(0, 6).map(kv => `<span class="sw"><i style="background:${css(cls(kv))}"></i>${kv} kV</span>`).join('')}`;
+      el.innerHTML = `<span class="title">Voltage levels</span>${kvs.slice(0, 6).map(kv => `<span class="sw" data-kv="${kv}"><i style="background:${css(cls(kv))}"></i>${kv} kV</span>`).join('')}`
+        + '<span class="lod" hidden>Lower levels show as you zoom in</span>';
+      this.viewport.showLevels();
       return;
     }
     if (legend.kind === 'ramp') {

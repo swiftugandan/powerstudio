@@ -73,6 +73,10 @@ export class Viewport {
 
     this.badge = h('div', { class: 'vp-badge', role: 'status', 'aria-live': 'polite' });
     this.legend = h('div', { class: 'vp-legend', 'aria-label': 'Legend' });
+    /** The zoom from which each voltage level of a large diagram shows, and the zoom the legend last showed them for.
+     * @type {Map<number, number> | null} */
+    this.levels = null;
+    this.legendZoom = NaN;
     this.hint = h('div', { class: 'vp-hint', 'aria-live': 'polite' });
     this.zoomLabel = h('div', { class: 'vp-zoom', title: 'Zoom' });
     const tools = h('div', { class: 'vp-tools' },
@@ -173,6 +177,21 @@ export class Viewport {
     this.frames++;
     this.host.dataset.frames = String(this.frames);
     this.zoomLabel.textContent = `${Math.round(this.camera.zoom * 100)} %`;
+    if (this.camera.zoom !== this.legendZoom) this.showLevels();
+  }
+
+  /** Marks in the legend the voltage levels a large diagram leaves out at this zoom. */
+  showLevels() {
+    this.legendZoom = this.camera.zoom;
+    const levels = this.levels;
+    let hidden = false;
+    for (const sw of /** @type {NodeListOf<HTMLElement>} */ (this.legend.querySelectorAll('.sw[data-kv]'))) {
+      const off = !!levels && this.camera.zoom < (levels.get(Number(sw.dataset.kv)) ?? 0);
+      sw.classList.toggle('off', off);
+    }
+    if (levels) for (const z of levels.values()) if (this.camera.zoom < z) { hidden = true; break; }
+    const note = /** @type {HTMLElement | null} */ (this.legend.querySelector('.lod'));
+    if (note) note.hidden = !hidden;
   }
 
   /** The diagram's display list, without the selection and previews (exports draw it as it is). */
@@ -182,6 +201,8 @@ export class Viewport {
    * @returns {Generator<void, void, void>} */
   *sceneJob(r) {
     const list = yield* sceneSteps(this.sceneInput());
+    this.levels = list.levels;
+    this.showLevels();
     if (r instanceof Canvas2DRenderer) r.commit('base', yield* r.packSteps(list));
     else r.commit('base', yield* r.packSteps(list));
     // Canvas 2D says on the badge when it draws a large diagram from a cache.

@@ -40,10 +40,13 @@ actions, for documents and for the contingency file alike, so a rule can never e
 `store.js` is the only way to change a document: transactions record each
 operation with the value it replaced, so undo and redo are exact, and edits that share a coalescing key (a drag,
 typing in one field) merge into one step. `layout.js` draws a diagram for networks that arrive without one: an exact
-force-directed layout up to 400 busbars, and above that a cell-grid variant whose busbars are packed into rows, so
-2,000 busbars lay out in about 0.2 s, 10,000 and 25,000 in about 0.9 s, and 70,000 in about 3 s (the repulsion uses a
-counting-sorted grid of typed arrays, and above 20,000 busbars fewer iterations, since the force pass then only orders
-the packed rows).
+force-directed layout up to 400 busbars, and above that a multilevel one. It coarsens the network by matching
+neighbouring busbars level after level, lays out the coarsest graph in full and refines each finer level from its
+groups' positions, with repulsion found through a counting-sorted grid of typed arrays. Overlaps are then removed row
+by row with the least movement that keeps a margin between bars (pool-adjacent-violators), so regions stay together.
+On ACTIVSg70k the median branch spans 660 drawing units and none crosses a tenth of the drawing; the row packing it
+replaced left a median of 19,840 and 66,000 such branches. 2,000 busbars lay out in about 0.1 s, 10,000 in 0.4 s
+and 70,000 in 2.7 s, in the worker that imports them.
 
 **Engine (`engine/`).** A Cargo workspace; `docs/ENGINE.md` describes what it computes.
 
@@ -82,7 +85,16 @@ editor's state, the highlights of the selection and the hovered element under th
 tool's preview over it, and is cheap to rebuild on every pointer move. The viewport invalidates the diagram, the
 overlay or only the view, and rebuilds a diagram in steps (`sceneSteps`, then the backend's `packSteps`) of a few
 milliseconds per frame, keeping the previous one on screen until the new one is ready; at 70,000 busbars a rebuild
-spreads over a few dozen frames. Three backends draw the same lists:
+spreads over a few dozen frames.
+
+A national diagram (from 5,000 elements) has levels of detail. Each voltage level shows from the zoom at which the
+lines and busbars of it and every higher level would cover a tenth of the screen (`levelZooms`): ACTIVSg70k shows
+its 765 and 500 kV network when it fits the window and every level from 14 %. A branch belongs to the lower voltage
+of its ends, symbols show once they are 3 px across, and an element with a violation (an overload, a voltage outside
+its band) shows at every zoom. Shapes and triangles carry their minimum zoom, as result boxes do, and the legend
+dims the levels the view leaves out. Smaller diagrams draw everything at every zoom.
+
+Three backends draw the same lists:
 
 - `webgpu.js` renders shapes as instanced quads whose edges come from signed distance functions in WGSL, triangles
   as plain geometry, and text from a signed-distance-field glyph atlas (`glyphs.js`) built on demand from the
