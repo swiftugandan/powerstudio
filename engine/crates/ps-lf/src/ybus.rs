@@ -40,22 +40,46 @@ impl Ybus {
         for &(bus, y) in extra {
             entries.push((bus, bus, y));
         }
-        // A stable sort keeps duplicate entries in insertion order, so their sum is the same on every run.
-        entries.sort_by_key(|e| (e.0, e.1));
+        // Ordered as a stable sort by (row, column) orders them, so duplicate entries sum in insertion order and the
+        // matrix is the same on every run: a counting sort by row, then each row's few entries by column (an insertion
+        // sort, also stable). Linear in the entries; contingency analysis builds the matrix thousands of times.
+        let mut start = vec![0usize; n + 1];
+        for e in &entries {
+            start[e.0 + 1] += 1;
+        }
+        for r in 0..n {
+            start[r + 1] += start[r];
+        }
+        let mut next = start.clone();
+        let mut by_row: Vec<(usize, C64)> = vec![(0, C64::ZERO); entries.len()];
+        for &(r, c, y) in &entries {
+            by_row[next[r]] = (c, y);
+            next[r] += 1;
+        }
         let mut row_ptr = vec![0usize; n + 1];
         let mut col = Vec::with_capacity(entries.len());
         let mut val: Vec<C64> = Vec::with_capacity(entries.len());
-        let mut last = (usize::MAX, usize::MAX);
-        for (r, c, y) in entries {
-            if (r, c) == last {
-                if let Some(v) = val.last_mut() {
-                    *v += y;
+        for r in 0..n {
+            let row = &mut by_row[start[r]..start[r + 1]];
+            for i in 1..row.len() {
+                let mut j = i;
+                while j > 0 && row[j - 1].0 > row[j].0 {
+                    row.swap(j - 1, j);
+                    j -= 1;
                 }
-            } else {
-                col.push(c);
-                val.push(y);
-                row_ptr[r + 1] += 1;
-                last = (r, c);
+            }
+            let mut last = usize::MAX;
+            for &(c, y) in row.iter() {
+                if c == last {
+                    if let Some(v) = val.last_mut() {
+                        *v += y;
+                    }
+                } else {
+                    col.push(c);
+                    val.push(y);
+                    row_ptr[r + 1] += 1;
+                    last = c;
+                }
             }
         }
         for r in 0..n {

@@ -176,7 +176,9 @@ branch above 90 % in any contingency" is one click. The Project page's run log d
 **Workers (`src/worker/`, `src/ui/engine-client.js`).** Each worker holds one engine instance, created from the
 compiled module the page sends it, so the module is compiled once however many workers start. The engine client
 runs ordinary studies on the first worker and spreads contingency analysis across a pool (one worker per spare CPU
-core, up to eight), then has the engine merge the chunks. Workers need no SharedArrayBuffer, so the app works from
+core, up to eight): four chunks of outages per worker, handed out as workers come free, so the slow stretch at the
+end of the list (machines, network splits) does not hold one worker while the rest wait; the engine then merges the
+chunks from their bytes, in chunk order, so the result is the sequential one. Workers need no SharedArrayBuffer, so the app works from
 GitHub Pages and from a file on disk. Cancelling terminates the busy workers. If workers cannot start, one engine
 runs on the main thread.
 

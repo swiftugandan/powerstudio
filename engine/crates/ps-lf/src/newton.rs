@@ -10,7 +10,7 @@ use ps_sparse::{FaerLu, SparseSolver};
 
 use crate::control::{self, Status};
 use crate::dc::dc_angles;
-use crate::equations::{Group, Layout, NONE, Schedule, Structure, jacobian, mismatch};
+use crate::equations::{Group, Layout, NONE, Schedule, Shape, Structure, jacobian, mismatch};
 use crate::flows::bus_injections;
 use crate::network::nominal_angles;
 use crate::{BusKind, MachineMode, PuNetwork, UnitKind, Ybus};
@@ -211,6 +211,8 @@ pub(crate) struct Work {
     pub load_p: Vec<f64>,
     /// Reactive output of each controller bus held at a limit: (total of its voltage-controlling units, −1/+1).
     pub frozen: Vec<Option<(f64, i8)>>,
+    /// Whether a control changed an admittance (a tap or a shunt section) since the matrix was last built.
+    pub admittances_changed: bool,
     /// Times each bus went from voltage control to a reactive limit.
     pub switches: Vec<u8>,
     /// Whether each machine may take part in a distributed slack.
@@ -237,6 +239,8 @@ pub(crate) struct Work {
 /// The present state of the network: voltages and the solver's last factorisation.
 pub(crate) struct Solver {
     pub y: Ybus,
+    /// The Jacobian's shape, fixed for the solve unless a state falls outside it.
+    pub shape: Shape,
     pub st: Structure,
     pub lay: Layout,
     pub lu: FaerLu,
@@ -247,7 +251,7 @@ pub(crate) struct Solver {
     pub factored: bool,
 }
 
-/// Patterns a [`Cache`] keeps.
+/// Patterns a [`Cache`] keeps by default.
 const CACHE_ENTRIES: usize = 3;
 
 /// What a solve can lend later solves of a network with the same equations and admittance pattern: the Jacobian's
@@ -256,17 +260,23 @@ const CACHE_ENTRIES: usize = 3;
 /// editing session re-solves a network whose pattern an edit of values does not change. A few patterns are kept,
 /// most recently used first, since the reactive limit loop moves between the equations with and without the held
 /// machines' voltages.
-#[derive(Default)]
 pub struct Cache {
     entries: Vec<CacheEntry>,
+    capacity: usize,
     /// Solves that reused the analysis.
     pub hits: usize,
     /// Solves that analysed afresh.
     pub misses: usize,
 }
 
+impl Default for Cache {
+    fn default() -> Self {
+        Self::with_capacity(CACHE_ENTRIES)
+    }
+}
+
 struct CacheEntry {
-    st: Structure,
+    shape: Shape,
     row_ptr: Vec<usize>,
     col: Vec<usize>,
     lay: Layout,
@@ -274,13 +284,23 @@ struct CacheEntry {
 }
 
 impl Cache {
+    /// A cache keeping up to `capacity` patterns.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            capacity: capacity.max(1),
+            hits: 0,
+            misses: 0,
+        }
+    }
+
     /// The layout and an analysed solver for these equations, from the cache when they match, otherwise analysed and
     /// kept.
-    fn get(&mut self, y: &Ybus, st: &Structure) -> (Layout, FaerLu, Result<(), ps_sparse::SolveError>) {
+    fn get(&mut self, y: &Ybus, shape: &Shape) -> (Layout, FaerLu, Result<(), ps_sparse::SolveError>) {
         if let Some(k) = self
             .entries
             .iter()
-            .position(|e| e.st.same_pattern(st) && e.row_ptr == y.row_ptr && e.col == y.col)
+            .position(|e| e.shape == *shape && e.row_ptr == y.row_ptr && e.col == y.col)
         {
             self.hits += 1;
             let e = self.entries.remove(k);
@@ -289,21 +309,21 @@ impl Cache {
             return found;
         }
         self.misses += 1;
-        let lay = Layout::new(y, st);
+        let lay = Layout::new(y, shape);
         let mut lu = FaerLu::new();
         let analysed = lu.analyse(&lay.pattern);
         if analysed.is_ok() {
             self.entries.insert(
                 0,
                 CacheEntry {
-                    st: st.clone(),
+                    shape: shape.clone(),
                     row_ptr: y.row_ptr.clone(),
                     col: y.col.clone(),
                     lay: lay.clone(),
                     lu: lu.analysed_copy(),
                 },
             );
-            self.entries.truncate(CACHE_ENTRIES);
+            self.entries.truncate(self.capacity);
         }
         (lay, lu, analysed)
     }
@@ -383,8 +403,14 @@ pub fn solve_cached(net: &PuNetwork, opt: &Options, cache: &mut Cache) -> Soluti
         }
         timing.analyse_ms += clock::now_ms() - ta;
     }
+    // The Jacobian's shape provides for every state the voltage controls can reach, so the reactive limit loop never
+    // needs a new ordering.
     let groups = work.groups(opt, &vm);
-    let st = Structure::new(n, &reference, &groups);
+    let mut shape = Shape::new(n, &reference, &work.potential_groups(opt));
+    let st = Structure::new(&shape, &groups);
+    if !shape.covers(&st) {
+        shape = shape.widened(&st);
+    }
     // A cold start takes its magnitudes from the no-load voltage profile the controls and transformer ratios set.
     let mut vm = vm;
     if !opt.warm_start
@@ -394,10 +420,11 @@ pub fn solve_cached(net: &PuNetwork, opt: &Options, cache: &mut Cache) -> Soluti
     }
     let y = Ybus::build(&work.net, &[]);
     let ta = clock::now_ms();
-    let (lay, lu, analysed) = cache.get(&y, &st);
+    let (lay, lu, analysed) = cache.get(&y, &shape);
     timing.analyse_ms += clock::now_ms() - ta;
     let mut s = Solver {
         y,
+        shape,
         st,
         lay,
         lu,
@@ -520,6 +547,7 @@ impl Work {
             load_p: net.loads.iter().map(|l| l.p).collect(),
             net: net.clone(),
             frozen: vec![None; n],
+            admittances_changed: false,
             switches: vec![0; n],
             participating,
             island,
@@ -631,6 +659,16 @@ impl Work {
     /// ranges of every machine at the bus, or, when any machine of the group has a range under 1 Mvar or over
     /// 10,000 Mvar, the number of voltage-controlling machines at the bus. The first controller bus sets the target.
     pub(crate) fn groups(&self, opt: &Options, _vm: &[f64]) -> Vec<Group> {
+        self.groups_of(opt, |m| self.controls_voltage(m))
+    }
+
+    /// The groups if every machine that may control voltage did (none held at a limit): the most a state of the
+    /// controls can use, which the Jacobian's shape provides for.
+    pub(crate) fn potential_groups(&self, opt: &Options) -> Vec<Group> {
+        self.groups_of(opt, |m| self.net.machines[m].mode != MachineMode::Pq)
+    }
+
+    fn groups_of(&self, opt: &Options, controls: impl Fn(usize) -> bool) -> Vec<Group> {
         let n = self.net.buses.len();
         let sb = self.net.base_mva.max(1e-9);
         // Per controller bus: regulated bus, target, range key and count of controlling units.
@@ -648,7 +686,7 @@ impl Work {
             ctl[g.bus] = Some((g.bus, g.v_set, 1.0, 1.0));
         }
         for (m, g) in self.net.machines.iter().enumerate() {
-            if !self.controls_voltage(m) {
+            if !controls(m) {
                 continue;
             }
             let reg = self.reg_bus(m, opt);
@@ -968,18 +1006,35 @@ impl Solver {
     /// Rebuilds what the outer loops changed: the admittances, the schedule and, when the voltage controls changed,
     /// the equations and their ordering.
     pub(crate) fn refresh(&mut self, work: &mut Work, opt: &Options, cache: &mut Cache, timing: &mut Timing) {
-        self.y = Ybus::build(&work.net, &[]);
+        // Holding machines at their limits changes the schedule only; taps and shunt sections change admittances.
+        if work.admittances_changed {
+            self.y = Ybus::build(&work.net, &[]);
+            work.admittances_changed = false;
+        }
         self.sch = work.schedule(opt);
         let groups = work.groups(opt, &self.vm);
-        let st = Structure::new(work.net.buses.len(), &work.reference(), &groups);
+        let st = Structure::new(&self.shape, &groups);
         let ta = clock::now_ms();
-        if !st.same_pattern(&self.st) || self.lay.pattern.nnz() == 0 {
+        // The shape holds every state the potential groups allow; a reference that moved, or a control outside them,
+        // needs a wider one and a new ordering.
+        let reference = work.reference();
+        if st.col_a != self.shape.col_a || !self.shape.covers(&st) || self.lay.pattern.nnz() == 0 {
+            let n = work.net.buses.len();
+            let mut shape = Shape::new(n, &reference, &work.potential_groups(opt));
+            let mut st2 = Structure::new(&shape, &groups);
+            if !shape.covers(&st2) {
+                shape = shape.widened(&st2);
+                st2 = Structure::new(&shape, &groups);
+            }
             // An ordering failure shows up as a failed factorisation in the next solve.
-            let (lay, lu, _) = cache.get(&self.y, &st);
+            let (lay, lu, _) = cache.get(&self.y, &shape);
             self.lay = lay;
             self.lu = lu;
+            self.shape = shape;
+            self.st = st2;
+        } else {
+            self.st = st;
         }
-        self.st = st;
         timing.analyse_ms += clock::now_ms() - ta;
         self.factored = false;
         self.apply_fixed();

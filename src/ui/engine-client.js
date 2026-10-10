@@ -32,6 +32,10 @@ import { yieldToBrowser } from './dom.js';
 const PARALLEL_FROM = 16;
 /** Fewest outages per chunk. */
 const MIN_CHUNK = 8;
+/** Chunks per worker: more chunks than workers, handed out as workers come free, so one slow stretch of outages (the
+ * machines and network splits at the end of the list) does not hold the whole run. Each chunk solves the base case
+ * again, a fraction of a second on a national network. */
+const CHUNKS_PER_WORKER = 4;
 
 /** A worker's engine did not hold the document state a study named; the message says why when opening or editing
  * the document failed. */
@@ -66,6 +70,11 @@ export class EngineClient {
     this.active = 0;
     /** Identifies the current run; cancelling or starting a run moves it on, and older runs stop at their next step. */
     this.token = 0;
+    /** How long each worker took over the last parallel contingency analysis, ms (for support and benchmarks). */
+    /** @type {number[]} */
+    this.lastChunks = [];
+    /** The last parallel analysis's phases, ms: planning, the chunks, and merging. */
+    this.lastPhases = { plan: 0, chunks: 0, merge: 0 };
   }
 
   get busy() { return this.active > 0; }
@@ -310,19 +319,42 @@ export class EngineClient {
    * @returns {Promise<Reply>}
    */
   async contingency(token, module, doc, onProgress, record = false) {
+    const t0 = performance.now();
     const planned = await this.exec(0, module, 'contingency_plan', doc, {}, undefined, record);
+    const t1 = performance.now();
     const plan = jsonPayload(planned.bytes);
     this.check(token);
     const count = /** @type {number} */ (plan.count);
     const parts = this.inThread || count < PARALLEL_FROM ? 1 : Math.min(this.poolSize, Math.ceil(count / MIN_CHUNK));
     if (parts <= 1) return this.exec(0, module, 'contingency', doc, {}, onProgress, record);
-    const size = Math.ceil(count / parts);
-    const done = new Array(parts).fill(0);
+    const pieces = Math.min(parts * CHUNKS_PER_WORKER, Math.ceil(count / MIN_CHUNK));
+    const size = Math.ceil(count / pieces);
+    const done = new Array(pieces).fill(0);
+    /** @type {Reply[]} */
+    const chunks = new Array(pieces);
+    const busy = new Array(parts).fill(0);
+    let next = 0;
     try {
-      const chunks = await Promise.all(Array.from({ length: parts }, (_, k) => this.exec(k, module, 'contingency_chunk', doc, { from: k * size, to: (k + 1) * size },
-        d => { done[k] = d; onProgress?.(done.reduce((a, b) => a + b, 0), count); })));
+      // Each worker takes the next chunk when it finishes one; the engine merges them in chunk order.
+      await Promise.all(Array.from({ length: parts }, async (_, k) => {
+        while (next < pieces) {
+          const p = next++;
+          chunks[p] = await this.exec(k, module, 'contingency_chunk', doc, { from: p * size, to: (p + 1) * size },
+            d => { done[p] = d; onProgress?.(done.reduce((a, b) => a + b, 0), count); });
+          busy[k] += chunks[p].ms;
+          this.check(token);
+        }
+      }));
       this.check(token);
-      const merged = await this.exec(0, module, 'contingency_merge', null, chunks.map(c => jsonPayload(c.bytes)), undefined, record);
+      this.lastChunks = busy.map(Math.round);
+      const t2 = performance.now();
+      // The chunks go to the engine as the workers wrote them, so the page parses none of them.
+      const payload = new Uint8Array(chunks.reduce((n, c) => n + c.bytes.length, 0));
+      let at = 0;
+      for (const c of chunks) { payload.set(c.bytes, at); at += c.bytes.length; }
+      const reply = await this.call({ op: 'study', kind: 'contingency_merge', options: null, chunks: chunks.map(c => c.bytes.length), record }, payload);
+      const merged = { bytes: reply.payload, ms: 0, record: reply.header.record };
+      this.lastPhases = { plan: Math.round(t1 - t0), chunks: Math.round(t2 - t1), merge: Math.round(performance.now() - t2) };
       return { ...merged, record: merged.record && planned.record ? { ...planned.record, results: merged.record.results } : undefined };
     } finally {
       this.releasePool();

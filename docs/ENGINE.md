@@ -517,9 +517,19 @@ the pattern skips that step.
 **Re-solving after an edit.** The app starts every load flow from the last converged one: its voltages and the
 machines it held at a reactive limit, which start held. Without the held machines a re-solve with reactive limits
 finds every limit again: ACTIVSg70k took 16 to 18 iterations from the previous voltages alone and takes 1 to 4 with
-them. A start that does not converge is tried once more from the usual start. Two costs remain at that scale: the
-reactive limit loop moves to held sets no earlier solve analysed, so each pass of it orders a new pattern (about
-85 ms natively at 70,000 buses), and the report travels as about 39 MB of JSON.
+them. A start that does not converge is tried once more from the usual start. The report still travels as about
+39 MB of JSON at that scale.
+
+**A Jacobian whose shape does not change.** Every bus has a magnitude unknown and a reactive row, whatever the
+controls are doing: a bus whose voltage a control holds gets the equation `V = target` in its first controller's row,
+and the other controllers of a group get its sharing equations (`ps-lf` `equations.rs`, `Shape`). The pattern provides
+for every state the potential groups allow (each machine that may control voltage), so a machine reaching or leaving
+its reactive limit changes values only, and one ordering and symbolic factorisation serves the whole solve, and every
+outage of a contingency analysis that keeps the network's admittance pattern. The equations solved are the same: a
+voltage equation's identity row gives a zero step to its magnitude, so the other rows see the reduced system. On
+ACTIVSg10k's N-1 with reactive limits this cut the time spent ordering from 16.5 s to 1.8 s on a 600-outage sample,
+with the same 2,830 Newton iterations. The admittance matrix is built with a counting sort by row (the same order as
+a stable sort, so sums of parallel entries are unchanged), and only again when a tap or shunt section moved.
 
 ## Numerical methods and scale
 

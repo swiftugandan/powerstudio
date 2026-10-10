@@ -250,6 +250,7 @@ impl Work {
         br.ytt = tp.ytt;
         br.shift = tp.shift;
         br.ratio = tp.ratio;
+        self.admittances_changed = true;
     }
 }
 
@@ -524,6 +525,7 @@ pub(crate) fn shunts(work: &mut Work, s: &mut Solver, opt: &Options) -> Status {
                         let y = sc.steps[new];
                         let k = sc.shunt;
                         work.net.shunts[k].y = y;
+                        work.admittances_changed = true;
                         changed = true;
                         moved = true;
                     }

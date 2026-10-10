@@ -6,7 +6,7 @@
 //! | `op` | Header fields | Payload | Reply |
 //! | --- | --- | --- | --- |
 //! | `version` | | | `engine` version |
-//! | `study` | `kind`, `options`, `resident` (use the open document), `record` (hash the inputs and the report) | PowerStudio document (JSON text); none for `contingency_merge` or with `resident` | the report as JSON text; with `record`, the header's `record` holds the `engine` version and the SHA-256 of the `model`, the `study` case and the `results` |
+//! | `study` | `kind`, `options`, `resident` (use the open document), `record` (hash the inputs and the report), `chunks` (for `contingency_merge`: the sizes of the chunks in the payload) | PowerStudio document (JSON text); for `contingency_merge` with `chunks`, the chunk reports one after another; none with `resident` | the report as JSON text; with `record`, the header's `record` holds the `engine` version and the SHA-256 of the `model`, the `study` case and the `results` |
 //! | `doc_open` | | PowerStudio document (JSON text) | `elements` |
 //! | `doc_edit` | `ops`: the editor's operations (see `ps_io::powerstudio_edit`) | | `elements` |
 //! | `load_matpower` | | MATPOWER case text | model size and conversion issues |
@@ -204,7 +204,27 @@ impl Engine {
                     let (_, doc, issues) = self.document.as_ref().ok_or("no document")?;
                     (Some(doc), issues.clone())
                 };
-                let value = api::handle(kind, &opts, loaded, &mut self.session, progress)?;
+                let value = match req.header.get("chunks").and_then(Value::as_array) {
+                    // The chunks to merge as the workers wrote them, one after another in the payload: read here
+                    // rather than parsed by the page and sent back in the header.
+                    Some(sizes) if kind == "contingency_merge" => {
+                        let mut chunks = Vec::with_capacity(sizes.len());
+                        let mut at = 0usize;
+                        for size in sizes {
+                            let size = size.as_u64().ok_or("a chunk has no size")? as usize;
+                            let end = at
+                                .checked_add(size)
+                                .filter(|&e| e <= req.payload.len())
+                                .ok_or("the chunks exceed the payload")?;
+                            let chunk: ps_study::contingency::Chunk = serde_json::from_slice(&req.payload[at..end])
+                                .map_err(|e| format!("invalid contingency chunk: {e}"))?;
+                            chunks.push(chunk);
+                            at = end;
+                        }
+                        serde_json::to_value(ps_study::contingency::merge(chunks)?).map_err(|e| e.to_string())?
+                    }
+                    _ => api::handle(kind, &opts, loaded, &mut self.session, progress)?,
+                };
                 let report = value.to_string().into_bytes();
                 let mut header = json!({ "issues": issues });
                 if record {

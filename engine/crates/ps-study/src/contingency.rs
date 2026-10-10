@@ -105,6 +105,10 @@ pub struct WorstVoltage {
     pub max_outage: String,
 }
 
+/// Jacobian patterns a chunk keeps analysed: an outage's reactive limit loop moves through a few held sets, and
+/// outages near each other in the list (and machine outages, which keep the admittance pattern) meet the same ones.
+const ANALYSES_KEPT: usize = 16;
+
 /// How the cases were solved.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +119,9 @@ pub struct Effort {
     pub rebuilt: usize,
     /// Outages screening judged safe without a full load flow.
     pub screened: usize,
+    /// Newton iterations, over every outage solved in full.
+    #[serde(default)]
+    pub iterations: usize,
 }
 
 /// Where the time went.
@@ -123,6 +130,23 @@ pub struct Effort {
 pub struct Timing {
     /// The longest chunk, ms (the whole run when run in one).
     pub total_ms: f64,
+    /// Time spent building calculation networks, ordering and analysing Jacobians, and factorising and solving,
+    /// over every chunk, ms.
+    #[serde(default)]
+    pub build_ms: f64,
+    /// See `build_ms`.
+    #[serde(default)]
+    pub analyse_ms: f64,
+    /// See `build_ms`.
+    #[serde(default)]
+    pub factor_ms: f64,
+    /// Solves that found their Jacobian's ordering already analysed, and that analysed afresh (they depend on how
+    /// the outages were split into chunks, so they sit with the timings).
+    #[serde(default)]
+    pub analyses_reused: usize,
+    /// See `analyses_reused`.
+    #[serde(default)]
+    pub analyses: usize,
 }
 
 /// The contingency report.
@@ -1055,7 +1079,8 @@ pub fn run_chunk(
         notes,
     } = prepare(model, study)?;
     let base_dead: HashSet<&str> = base_dead.iter().map(String::as_str).collect();
-    let mut cache = Cache::default();
+    let mut cache = Cache::with_capacity(ANALYSES_KEPT);
+    let mut timing = Timing::default();
     let list = definitions(model, study);
     let range = range.start.min(list.len())..range.end.min(list.len());
     let total = range.len();
@@ -1108,6 +1133,7 @@ pub fn run_chunk(
                 &base_dead,
                 post_duration,
                 &mut effort,
+                &mut timing,
                 true,
             )
         } else {
@@ -1151,6 +1177,7 @@ pub fn run_chunk(
                 &base_dead,
                 post_duration,
                 &mut effort,
+                &mut timing,
                 // The actions changed the model, so the base network no longer applies.
                 false,
             );
@@ -1183,6 +1210,8 @@ pub fn run_chunk(
         cases.push(case);
         progress.report((done + 1) as f64, total as f64);
     }
+    timing.analyses_reused = cache.hits;
+    timing.analyses = cache.misses;
     Ok(Chunk {
         base: base_case,
         cases,
@@ -1192,6 +1221,7 @@ pub fn run_chunk(
         effort,
         timing: Timing {
             total_ms: ps_num::clock::now_ms() - t0,
+            ..timing
         },
         notes,
     })
@@ -1306,6 +1336,7 @@ fn solve_case(
     base_dead: &HashSet<&str>,
     post_duration: Option<f64>,
     effort: &mut Effort,
+    timing: &mut Timing,
     fast: bool,
 ) -> Solved {
     let branch = if fast { base.reusable_branch(found) } else { None };
@@ -1318,6 +1349,9 @@ fn solve_case(
         br.ytf = C64::ZERO;
         br.ytt = C64::ZERO;
         let sol = ps_lf::solve_cached(&net, &base.opt, cache);
+        effort.iterations += sol.iterations;
+        timing.analyse_ms += sol.timing.analyse_ms;
+        timing.factor_ms += sol.timing.factor_solve_ms;
         return Solved {
             status: Status {
                 converged: sol.converged,
@@ -1333,7 +1367,7 @@ fn solve_case(
     for &(k, row) in found {
         outages.insert(k, row);
     }
-    let (calc, sol, report) = loadflow::solve(
+    let (calc, sol, report) = loadflow::solve_cached(
         model,
         &LoadFlowRun {
             settings: study.loadflow,
@@ -1341,7 +1375,12 @@ fn solve_case(
             start: Some(start.voltages.clone()),
             held: Some(start.held.clone()),
         },
+        cache,
     );
+    effort.iterations += report.iterations;
+    timing.build_ms += report.timing.build_ms;
+    timing.analyse_ms += report.timing.analyse_ms;
+    timing.factor_ms += report.timing.factor_solve_ms;
     let lost = report
         .deenergized
         .iter()
@@ -1387,6 +1426,7 @@ pub fn detailed(model: &Model, study: &StudyCase, list: &[Contingency]) -> Resul
     let incidence = Incidence::new(model);
     let mut cache = Cache::default();
     let mut effort = Effort::default();
+    let mut timing = Timing::default();
     let mut out = Vec::with_capacity(list.len());
     for c in list {
         let (found, _, missing) = resolve(&index, &incidence, c);
@@ -1404,6 +1444,7 @@ pub fn detailed(model: &Model, study: &StudyCase, list: &[Contingency]) -> Resul
             &base_dead,
             p.post_duration,
             &mut effort,
+            &mut timing,
             true,
         );
         let mon = solved.monitor(&p.base);
@@ -1453,7 +1494,13 @@ pub fn merge(chunks: Vec<Chunk>) -> Result<ContingencyReport, String> {
         effort.reused += chunk.effort.reused;
         effort.rebuilt += chunk.effort.rebuilt;
         effort.screened += chunk.effort.screened;
+        effort.iterations += chunk.effort.iterations;
         timing.total_ms = timing.total_ms.max(chunk.timing.total_ms);
+        timing.build_ms += chunk.timing.build_ms;
+        timing.analyse_ms += chunk.timing.analyse_ms;
+        timing.factor_ms += chunk.timing.factor_ms;
+        timing.analyses_reused += chunk.timing.analyses_reused;
+        timing.analyses += chunk.timing.analyses;
         for (id, w) in chunk.worst_loading {
             match worst_loading.get_mut(&id) {
                 Some(cur) if w.value > cur.value => *cur = w,
