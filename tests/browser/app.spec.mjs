@@ -200,6 +200,31 @@ test('keeps work in the browser across a reload', async ({ page }) => {
   await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('9');
 });
 
+test('opens a network saved by version 0.1 after upgrading the browser storage', async ({ page }) => {
+  // Version 0.1 stored each document whole in one object store; the upgrade adds the list's metadata store.
+  const doc = JSON.parse(readFileSync(new URL('../oracle/inputs/ieee14.json', import.meta.url), 'utf8'));
+  doc.name = 'Saved by 0.1';
+  // A page of the same origin that does not start the app.
+  await page.goto('/not-the-app');
+  await page.evaluate(doc => new Promise((resolve, reject) => {
+    const req = indexedDB.open('powerstudio', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore('documents', { keyPath: 'id' }).createIndex('updated', 'updated');
+    req.onsuccess = () => {
+      const tx = req.result.transaction('documents', 'readwrite');
+      tx.objectStore('documents').put({ id: 'doc-v01', name: doc.name, updated: Date.now(), elements: doc.elements.length, doc });
+      tx.oncomplete = () => { req.result.close(); resolve(null); };
+      tx.onerror = () => reject(tx.error);
+    };
+    req.onerror = () => reject(req.error);
+  }), doc);
+  await page.goto('/PowerStudio.html');
+  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio?.ready === true);
+  await expect(page.locator('#doc-name')).toHaveValue('Saved by 0.1');
+  await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('14');
+  await page.keyboard.press('Alt+L');
+  await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('Converged');
+});
+
 test('short circuit, contingency and stability run from the palette and the ribbon', async ({ page }) => {
   await open(page);
   await palette(page, 'short circuit');
