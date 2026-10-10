@@ -207,7 +207,8 @@ test('keeps work in the browser across a reload', async ({ page }) => {
   const name = page.locator('#doc-name');
   await name.fill('Riverside after reload');
   await name.press('Enter');
-  await expect(page.locator('#save-state')).toContainText('Saved in this browser');
+  await expect(page.locator('#save-state')).toContainText('Saved');
+  await expect(page.locator('#save-state')).toHaveAttribute('title', /Saved in this browser/);
   await page.goto('/PowerStudio.html');
   await page.waitForFunction(() => /** @type {any} */ (window).powerstudio?.ready === true);
   await expect(page.locator('#doc-name')).toHaveValue('Riverside after reload');
@@ -237,6 +238,75 @@ test('opens a network saved by version 0.1 after upgrading the browser storage',
   await expect(page.locator('.tree-row[data-cls="bus"] .meta')).toHaveText('14');
   await page.keyboard.press('Alt+L');
   await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('Converged');
+  // It is now a project with one study case holding its settings.
+  await expect(page.locator('#case-chip')).toContainText('Base case');
+});
+
+test('records a planned change in a variant, turns it off and on, logs the run, and keeps it all after a reload', async ({ page }) => {
+  await open(page);
+  const lineLength = page.locator('table.sheet tbody tr[data-id="L1"] td[data-key="length"]');
+  const showLines = async () => {
+    await page.locator('.dock-tab[data-tab="data"]').click();
+    await page.locator('.sheet-toolbar select').selectOption('line');
+  };
+  await showLines();
+  const original = await lineLength.textContent();
+  // A new variant joins the active study case and records changes to the equipment.
+  await palette(page, 'Manage project');
+  await page.getByRole('button', { name: 'New variant' }).click();
+  await page.locator('.backstage nav .back').click();
+  await expect(page.locator('#case-chip')).toContainText('Variant 1');
+  await lineLength.dblclick();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.type('99');
+  await page.keyboard.press('Enter');
+  await expect(lineLength).toHaveText('99');
+  // Without the variant the line is as built; with it, as planned.
+  await palette(page, 'Manage project');
+  await expect(page.locator('.part-row')).toContainText('1 change');
+  const variant = page.locator('.case-card.active .case-variant input');
+  await variant.uncheck();
+  await page.locator('.backstage nav .back').click();
+  // A variant out of the case is no longer recorded in.
+  await expect(page.locator('#case-chip')).not.toContainText('Variant 1');
+  await showLines();
+  await expect(lineLength).toHaveText(/** @type {string} */ (original));
+  await palette(page, 'Manage project');
+  await variant.check();
+  await page.locator('.backstage nav .back').click();
+  await showLines();
+  await expect(lineLength).toHaveText('99');
+  // A load flow the user starts goes in the run log with the case and the variant.
+  await loadFlow(page);
+  await palette(page, 'Manage project');
+  await expect(page.locator('table.runs tbody tr').first()).toContainText('Load flow');
+  await expect(page.locator('table.runs tbody tr').first()).toContainText('Base case · Variant 1');
+  // Everything is stored: the variant, the case's choice of it, and the run.
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ControlOrMeta+S');
+  await expect(page.locator('#save-state')).toHaveAttribute('data-state', 'saved');
+  // The app reopens the last project (the sample address would open a fresh copy).
+  await page.goto('/PowerStudio.html');
+  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio?.ready === true);
+  await showLines();
+  await expect(lineLength).toHaveText('99');
+  await palette(page, 'Manage project');
+  await expect(variant).toBeChecked();
+  await expect(page.locator('table.runs tbody tr')).toHaveCount(1);
+  // The project file carries all of it to a new project.
+  await page.keyboard.press('Escape');
+  const download = page.waitForEvent('download');
+  await palette(page, 'Export project');
+  const file = await (await download).path();
+  const chooser = page.waitForEvent('filechooser');
+  await page.keyboard.press('ControlOrMeta+Shift+O');
+  await (await chooser).setFiles({ name: 'copy.powerstudio-project.json', mimeType: 'application/json', buffer: readFileSync(file) });
+  await expect(page.locator('#app')).toContainText('Imported');
+  await showLines();
+  await expect(lineLength).toHaveText('99');
+  await palette(page, 'Manage project');
+  await expect(page.locator('.part-row')).toContainText('1 change');
+  await expect(page.locator('table.runs tbody tr')).toHaveCount(1);
 });
 
 test('short circuit, contingency and stability run from the palette and the ribbon', async ({ page }) => {

@@ -19,7 +19,7 @@ flowchart LR
     app --> vp[ui/viewport.js]
     vp --> scene[render/scene.js] --> dl[render/displaylist.js]
     dl --> gpu[render/webgpu.js<br>WGSL] & c2d[render/canvas2d.js] & svg[render/svg.js]
-    app --> lib[ui/persistence.js<br>IndexedDB]
+    app --> lib[ui/persistence.js<br>IndexedDB] & proj[core/project.js<br>compose, route]
     app --> client[ui/engine-client.js<br>coordinator]
     client --> mod[engine/module.js<br>compile once]
   end
@@ -136,9 +136,37 @@ filters, sorts or changes class.
 Nothing a user does on a national network may hold the page for more than a frame or two, and the work that would is
 cut into steps: opening a document runs the import gate (`normalizeSteps`) in slices between frames; a calculation's
 result reaches the colours, the results table and the panels in separate tasks; the output log renders once per
-frame however many lines arrive. Autosave (`persistence.js`) serialises the document to JSON a few thousand elements
-at a time and starts again if the document changes meanwhile, so it only ever stores one consistent state; IndexedDB
-keeps the documents' JSON in one store and their names, sizes and dates in another, which is all a listing reads.
+frame however many lines arrive. Autosave (`persistence.js`) serialises the base document to JSON a few thousand
+elements at a time and starts again if the document changes meanwhile, so it only ever stores one consistent state.
+
+**Projects (`core/project.js`, `ui/project-page.js`).** What opens is a project: the network as built (the base
+document), variants (planned changes to the equipment, kept as the editor's operations), scenarios (values of the
+fields the catalogue marks `operating`: switching, setpoints, loads, generation, taps) and study cases (a scenario, the
+active variants and the calculation settings). The editor works on the active case's composition (`composeSteps`,
+in slices): the base, each active variant replayed in project order, then the scenario's values, with the case's
+settings as the document's study. Variants replay tolerantly over a base changed since they were recorded. Every
+store change is routed to its part (`route`), copying values as they are recorded:
+
+1. a calculation setting goes to the active study case;
+2. an operating value goes to the active scenario, when the case has one;
+3. a drawing field goes to wherever the element is kept (the base, or the variant that added it);
+4. anything else goes to the variant being recorded (the title bar's study case chip shows it), to the variant that
+   added the element, or to the base.
+
+Switching study case, or changing which variants or scenario a case uses, recomposes and reopens the editor: results
+and undo history clear, the view stays. So does changing where edits are recorded, which clears history so an undo
+never lands somewhere else than its edit did. A composition that applies variants or a scenario passes the import
+gate. IndexedDB (version 3) stores a project by part, so an edit rewrites only what it changed: the base document's
+JSON, its catalogue entry (all a listing reads), and its manifest, variants and scenarios as separate records; the
+run log has a store of its own. Documents saved before projects open as projects with one study case. A project
+exports to one file (`powerstudio-project`) with its run log and imports back as a new project.
+
+Every calculation the user starts appends a run record (`App.recordRun`, NATIONAL-GRADE.md section 9.2): the study
+case, scenario and variants by name, the engine's version and the SHA-256 of its WebAssembly (hashed when the module
+loads), the SHA-256 of the model as calculated (`Model::content_hash`, so moving or renaming on the diagram does not
+change it), of the study case and of the report without its timings, all computed in the engine, and the outcome. A
+load flow solved from a previous solution also names that start's hash, since its result depends on the start to
+within the tolerance. Recalculations on edit are not recorded.
 
 **Workers (`src/worker/`, `src/ui/engine-client.js`).** Each worker holds one engine instance, created from the
 compiled module the page sends it, so the module is compiled once however many workers start. The engine client

@@ -6,7 +6,7 @@ import { emptyDocument, nextId, normalizeSteps, validateForCalculation, busesOf 
 import { makeElement, CLASSES } from './core/catalog.js';
 import { snap } from './core/layout.js';
 import { SAMPLES } from './samples/index.js';
-import { projectFromDocument, projectFromParts, composeSteps, route, partTexts, allParts, activeCase } from './core/project.js';
+import { projectFromDocument, projectFromParts, composeSteps, route, partTexts, allParts, activeCase, PROJECT_FORMAT, projectFileHead, projectFromFile } from './core/project.js';
 import { Commands } from './ui/commands.js';
 import { Ribbon } from './ui/ribbon.js';
 import { ModelTree } from './ui/tree.js';
@@ -25,7 +25,7 @@ import { openContingencyDialog } from './ui/contingency-editor.js';
 import { importDialog } from './ui/import-dialog.js';
 import { IMPORT_TYPES } from './engine/exchange.js';
 import { toast, contextMenu } from './ui/feedback.js';
-import { h, byId, download, fileName, yieldToBrowser } from './ui/dom.js';
+import { h, esc, byId, download, fileName, yieldToBrowser } from './ui/dom.js';
 import { icon, logo } from './ui/icons.js';
 import { kbd, isMac } from './ui/keys.js';
 import { fixed, duration } from './ui/format.js';
@@ -174,7 +174,7 @@ export class App {
    */
   async open(project, id, opt = {}) {
     this.flushSave();
-    const doc = await this.sliced(composeSteps(project));
+    const doc = await this.composed(project);
     this.project = project;
     this.dirtyParts = new Set(opt.fresh ? allParts(project) : []);
     this.load(doc, id);
@@ -197,6 +197,7 @@ export class App {
     this.store.load(doc);
     this.start = null;
     if (!opt.keepView) this.viewport.fit();
+    this.updateProjectBar();
     this.refreshLegend();
     this.dock.render();
     if (!this.dirtyParts.size) this.markSaved();
@@ -224,9 +225,20 @@ export class App {
   /** Puts the active study case's composition in the editor again, after its scenario or variants changed: results and
    * undo history clear, the view stays. */
   async recompose() {
-    const doc = await this.sliced(composeSteps(this.project));
+    const doc = await this.composed(this.project);
     this.load(doc, this.docId, { keepView: true });
     this.scheduleSave();
+  }
+
+  /** The active study case's composition. One that applies variants or a scenario passes the import gate, which checks
+   * the elements and values they bring as it checks any document's. @param {import('./core/project.js').Project} p */
+  async composed(p) {
+    const doc = await this.sliced(composeSteps(p));
+    const c = activeCase(p);
+    if (!c.variants.length && !c.scenario) return doc;
+    const { doc: checked, issues } = await this.normalize(doc);
+    for (const i of issues) this.log('warn', `Study case “${c.name}”: ${i}`);
+    return checked;
   }
 
   /** Makes a study case active. @param {string} id */
@@ -261,8 +273,28 @@ export class App {
     this.updateProjectBar();
   }
 
-  /** Shows the active study case and where edits go in the title bar. */
-  updateProjectBar() {}
+  /** Shows the active study case, and the variant edits are recorded in, in the title bar. */
+  updateProjectBar() {
+    const p = this.project, c = activeCase(p), chip = byId('case-chip');
+    const recording = p.variants.find(v => v.id === p.recording);
+    chip.classList.toggle('recording', !!recording);
+    chip.title = `Study case: ${c.name}${recording ? `. Changes to the equipment go to the variant “${recording.name}”.` : ''}`;
+    chip.innerHTML = `${icon(recording ? 'record' : 'layers', 14)}<span class="case">${esc(c.name)}</span>${recording ? `<span class="rec">${esc(recording.name)}</span>` : ''}${icon('chevronDown', 12)}`;
+  }
+
+  /** The title bar's menu: the study cases, where edits go, and the project page. */
+  projectMenu() {
+    const p = this.project, c = activeCase(p), r = byId('case-chip').getBoundingClientRect();
+    /** @type {Array<'separator' | { label: string, icon?: string, hint?: string, run: () => void }>} */
+    const items = p.cases.map(sc => ({ label: sc.name, icon: sc.id === c.id ? 'check' : undefined, hint: sc.id === c.id ? 'Active' : '', run: () => { void this.switchCase(sc.id); } }));
+    const variants = p.variants.filter(v => c.variants.includes(v.id));
+    if (variants.length) {
+      items.push('separator', { label: 'Changes go to the base model', icon: p.recording ? undefined : 'check', run: () => this.setRecording('') },
+        ...variants.map(v => ({ label: `Changes go to “${v.name}”`, icon: p.recording === v.id ? 'check' : undefined, run: () => this.setRecording(v.id) })));
+    }
+    items.push('separator', { label: 'Manage project…', icon: 'layers', run: () => openBackstage(this, 'project') });
+    contextMenu(r.left, r.bottom + 4, items);
+  }
 
   /** The import gate (`normalizeDocument`), run in slices of about 25 ms so a national network does not hold the page.
    * @param {unknown} input @returns {Promise<{ doc: import('./core/document.js').PowerDocument, issues: string[] }>} */
@@ -341,12 +373,16 @@ export class App {
 
   flushSave() { if (this.saveTimer || this.dirtyParts.size) this.save({ now: true }); }
 
-  markSaved() { this.setSaveState('saved', this.library.persistent ? 'Saved in this browser' : 'Kept for this session'); }
+  markSaved() {
+    this.setSaveState('saved', this.library.persistent ? 'Saved' : 'This session only',
+      this.library.persistent ? 'Saved in this browser. Nothing is uploaded.' : 'This browser does not allow storage here, so the project lasts for this session. Export it to keep it.');
+  }
 
-  /** @param {'saved' | 'pending'} state @param {string} text */
-  setSaveState(state, text) {
+  /** @param {'saved' | 'pending'} state @param {string} text @param {string} [title] */
+  setSaveState(state, text, title = text) {
     const el = byId('save-state');
     el.dataset.state = state;
+    el.title = title;
     el.innerHTML = `<span class="dot"></span><span>${text}</span>`;
   }
 
@@ -372,9 +408,12 @@ export class App {
       if (files.length === 1 && (/\.json$/i.test(files[0].name) || head.startsWith('{'))) {
         let json;
         try { json = JSON.parse(await files[0].text()); } catch { throw new Error('The file is not valid JSON.'); }
-        const { doc, issues } = await this.normalize(json);
-        await this.open(projectFromDocument(doc), newDocId(), { fresh: true });
+        const isProject = json?.format === PROJECT_FORMAT;
+        const { doc, issues } = await this.normalize(isProject ? json.base : json);
+        const id = newDocId();
+        await this.open(isProject ? projectFromFile(json, doc) : projectFromDocument(doc), id, { fresh: true });
         await this.save();
+        if (isProject) for (const run of Array.isArray(json.runs) ? json.runs : []) if (run && typeof run.run === 'string') await this.library.addRun(id, run);
         this.log('ok', `Imported “${label}” as “${doc.name}” with ${doc.elements.length} elements.`);
         for (const i of issues) this.log('warn', i);
         toast(issues.length ? 'warn' : 'ok', issues.length ? `${issues.length} note${issues.length === 1 ? '' : 's'} in the Output panel.` : `${doc.elements.length} elements.`, { title: `Imported ${label}` });
@@ -413,6 +452,16 @@ export class App {
       e.preventDefault();
       this.importFiles(files);
     });
+  }
+
+  /** Exports the whole project, with its run log, as one file that imports back as a new project. */
+  async exportProject() {
+    const p = this.project, runs = await this.library.runs(this.docId);
+    const base = await serialise(p.base, () => this.project === p, yieldToBrowser);
+    if (base === null) return;
+    const head = JSON.stringify(projectFileHead(p, runs));
+    download(new Blob([head.slice(0, -1), ',"base":', base, '}\n'], { type: 'application/json' }), fileName(p.base.name, '.powerstudio-project.json'));
+    this.log('ok', `Exported the project “${p.base.name}”: ${p.cases.length} study case${p.cases.length === 1 ? '' : 's'}, ${p.scenarios.length} scenario${p.scenarios.length === 1 ? '' : 's'}, ${p.variants.length} variant${p.variants.length === 1 ? '' : 's'} and ${runs.length} run${runs.length === 1 ? '' : 's'}.`);
   }
 
   exportJSON() {
@@ -1033,6 +1082,7 @@ export class App {
     c.add({ id: 'file.open', label: 'Open saved network', icon: 'open', keys: ['Mod+O'], global: true, group: 'File', run: () => openBackstage(this, 'open') });
     c.add({ id: 'file.save', label: 'Save now', icon: 'save', keys: ['Mod+S'], global: true, group: 'File', hint: 'Networks save automatically; this saves immediately', run: async () => { await this.save(); toast('ok', this.library.persistent ? 'Saved in this browser.' : 'Kept for this session. Export to keep a copy.'); } });
     c.add({ id: 'file.import', label: 'Import file', icon: 'import', keys: ['Mod+Shift+O'], global: true, group: 'File', hint: 'Import a PowerStudio file, a CGMES model, a PSS/E RAW file or a MATPOWER case', run: () => this.importFile(`.json,${IMPORT_TYPES}`) });
+    c.add({ id: 'file.exportProject', label: 'Export project', keywords: 'backup archive variants scenarios runs', icon: 'layers', group: 'File', hint: 'The whole project with its run log, as one file', run: () => { void this.exportProject(); } });
     c.add({ id: 'file.export', label: 'Export PowerStudio file', icon: 'export', keys: ['Mod+Shift+S'], global: true, group: 'File', run: () => this.exportJSON() });
     c.add({ id: 'file.exportSvg', label: 'Export diagram as SVG', icon: 'image', group: 'File', run: () => { download(new Blob([this.viewport.exportSVG()], { type: 'image/svg+xml' }), fileName(this.store.doc.name, '.svg')); this.log('ok', 'Exported the diagram as SVG.'); } });
     c.add({ id: 'file.exportPng', label: 'Export diagram as PNG', icon: 'image', group: 'File', run: async () => { download(await this.viewport.exportPNG(), fileName(this.store.doc.name, '.png')); this.log('ok', 'Exported the diagram as PNG.'); } });
@@ -1058,6 +1108,8 @@ export class App {
       c.add({ id: `edit.nudge${key}`, label: `Move ${key.slice(5).toLowerCase()}`, group: 'Edit', keys: [key], palette: false, run: () => this.nudge(dx, dy) });
       c.add({ id: `edit.nudgeFar${key}`, label: `Move ${key.slice(5).toLowerCase()} far`, group: 'Edit', keys: [`Shift+${key}`], palette: false, run: () => this.nudge(dx * 5, dy * 5) });
     }
+    c.add({ id: 'project.menu', label: 'Study case', icon: 'layers', group: 'File', hint: 'Choose the study case and where changes go', run: () => this.projectMenu() });
+    c.add({ id: 'project.open', label: 'Manage project', keywords: 'study case scenario variant run log', icon: 'layers', group: 'File', run: () => openBackstage(this, 'project') });
     c.add({ id: 'layout.arrange', label: 'Arrange', icon: 'layout', group: 'Edit', hint: 'Lay the diagram out again from the network topology',
       enabled: () => !this.running && !this.arranging, run: () => { void this.arrange(); } });
     // Tools

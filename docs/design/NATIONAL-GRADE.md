@@ -313,8 +313,9 @@ opens.
 
 ### 6.4 Storage
 
-- **Projects live in OPFS** (Origin Private File System), one directory per project: the base model snapshot,
-  scenarios and variants as operation logs, diagrams, study cases, contingency lists, result files and the run log.
+- **Projects live in IndexedDB**, stored by part: the base document, the manifest (study cases, which hold the
+  settings and contingency lists), each variant's operation log and each scenario's values, and the run log. The
+  design first chose OPFS; phase 4 found Chromium refuses it to pages opened from a file, so ADR 6 records the change.
   OPFS handles hundreds of megabytes efficiently through synchronous access handles in workers.
 - **IndexedDB keeps the catalogue** (project list, metadata) and preferences.
 - The app requests persistent storage (`navigator.storage.persist()`), shows the quota and usage, and warns when the
@@ -454,7 +455,7 @@ writes a difference report. The design's own verification makes this comparison 
 | 3 | Worker pool of independent wasm instances; no SharedArrayBuffer | `coi-serviceworker`: reload on first visit, no `file://`, and a moving part in a sealed app |
 | 4 | Node-breaker model shaped after the CGMES profiles; bus-branch is a derived view | Bus-branch only: national models and switching studies are node-breaker |
 | 5 | Edits travel as typed operations; one log serves undo, workers, scenarios and audit | Re-sending documents: impossible at 70,000 buses |
-| 6 | Projects in OPFS, catalogue in IndexedDB, File System Access where available | IndexedDB only: poor for large binary files and streaming results |
+| 6 | Projects in IndexedDB, stored by part (base document, manifest, each variant and scenario, run log); a folder through File System Access is a later option. Revised in phase 4: the design chose OPFS, but Chromium refuses OPFS to a page opened from a file (`SecurityError`), which PowerStudio supports, while IndexedDB keeps large values as files and works from both | OPFS with an IndexedDB fallback: two storage paths to keep equal, for no gain the measurements showed |
 | 7 | UI stays plain ES modules with strict `checkJs`; engine report types reach the UI as JSDoc typedefs in `src/engine/reports.js`, kept beside the Rust reports, with the native-versus-WebAssembly test comparing every field | A framework or a TypeScript build step: no benefit that outweighs the dependency and the break with the current codebase |
 | 8 | Dynamic models in Rust behind a `DynModel` trait, delivered in validated waves | A model description language interpreted at run time: slower, and harder to verify than compiled, tested models |
 | 9 | Short circuit validated against open references only (pandapower's encoding of the TR 60909-4 and VDE examples); it stays "IEC 60909-style" | Buying the standard to claim conformance: the project makes no purchases. Claiming conformance from formulas alone: not evidence |

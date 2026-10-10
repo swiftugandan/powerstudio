@@ -249,3 +249,45 @@ export function projectFromParts(base, parts) {
 export function allParts(p) {
   return ['base', 'manifest', ...p.variants.map(v => /** @type {Part} */ (`variant:${v.id}`)), ...p.scenarios.map(s => /** @type {Part} */ (`scenario:${s.id}`))];
 }
+
+/** The format name of a project file: a whole project, with its run log, in one JSON file. */
+export const PROJECT_FORMAT = 'powerstudio-project';
+
+/**
+ * A project file's contents other than the base document, which the caller adds as JSON text (a national network's is
+ * built in slices). @param {Project} p @param {unknown[]} runs
+ */
+export function projectFileHead(p, runs) {
+  return {
+    format: PROJECT_FORMAT, version: 1, manifest: manifestOf(p),
+    variants: Object.fromEntries(p.variants.map(v => [v.id, v.ops])),
+    scenarios: Object.fromEntries(p.scenarios.map(s => [s.id, s.values])),
+    runs,
+  };
+}
+
+/**
+ * A project from a project file whose base document has passed the import gate. Throws a plain message when the file
+ * is not a project PowerStudio can read.
+ * @param {Record<string, any>} file @param {PowerDocument} base @returns {Project}
+ */
+export function projectFromFile(file, base) {
+  if (file.format !== PROJECT_FORMAT) throw new Error('The file is not a PowerStudio project.');
+  if (file.version !== 1) throw new Error(`The project file is version ${file.version}; this version of PowerStudio reads version 1.`);
+  const m = file.manifest;
+  const list = (/** @type {unknown} */ x) => Array.isArray(x) && x.every(i => i && typeof i === 'object' && typeof i.id === 'string');
+  if (!m || !list(m.variants) || !list(m.scenarios) || !list(m.cases)) throw new Error('The project file has no readable list of study cases, scenarios and variants.');
+  /** @type {Map<string, string>} */
+  const parts = new Map([['manifest', JSON.stringify(m)]]);
+  for (const v of m.variants) {
+    const ops = file.variants?.[v.id];
+    if (!Array.isArray(ops)) throw new Error(`The project file has no changes for the variant “${v.name}”.`);
+    parts.set(`variant/${v.id}`, JSON.stringify(ops));
+  }
+  for (const s of m.scenarios) {
+    const values = file.scenarios?.[s.id];
+    if (!values || typeof values !== 'object') throw new Error(`The project file has no values for the scenario “${s.name}”.`);
+    parts.set(`scenario/${s.id}`, JSON.stringify(values));
+  }
+  return projectFromParts(base, parts);
+}

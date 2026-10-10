@@ -1,4 +1,5 @@
-/** The File view: documents stored in this browser, samples, import and export, shortcuts and the about page. */
+/** The File view: projects stored in this browser, samples, the open project, import and export, shortcuts and the
+ * about page. */
 
 import { h, esc } from './dom.js';
 import { icon, logo } from './icons.js';
@@ -7,10 +8,11 @@ import { SAMPLES } from '../samples/index.js';
 import { kbd } from './keys.js';
 import { confirm } from './feedback.js';
 import { APP_VERSION, REPO_URL, SITE_URL } from '../core/version.js';
+import { projectPage } from './project-page.js';
 
 const VERSION = APP_VERSION, REPO = REPO_URL;
 
-/** @typedef {'home' | 'open' | 'import' | 'export' | 'shortcuts' | 'about'} Page */
+/** @typedef {'home' | 'open' | 'project' | 'import' | 'export' | 'shortcuts' | 'about'} Page */
 
 /** @param {import('../app.js').App} app @param {Page} [page] */
 export async function openBackstage(app, page = 'home') {
@@ -24,7 +26,7 @@ export async function openBackstage(app, page = 'home') {
   const onKey = e => { if (e.key === 'Escape' && !document.querySelector('.scrim')) { e.preventDefault(); e.stopPropagation(); close(); } };
   document.addEventListener('keydown', onKey, true);
   /** @type {Array<[Page | 'back', string, string]>} */
-  const pages = [['back', 'Back to diagram', 'chevronRight'], ['home', 'New', 'new'], ['open', 'Open', 'open'], ['import', 'Import', 'import'], ['export', 'Export', 'export'], ['shortcuts', 'Shortcuts', 'keyboard'], ['about', 'About', 'info']];
+  const pages = [['back', 'Back to diagram', 'chevronRight'], ['home', 'New', 'new'], ['open', 'Open', 'open'], ['project', 'Project', 'layers'], ['import', 'Import', 'import'], ['export', 'Export', 'export'], ['shortcuts', 'Shortcuts', 'keyboard'], ['about', 'About', 'info']];
   for (const [id, label, ic] of pages) {
     const b = h('button', { type: 'button', class: id === 'back' ? 'back' : '', 'data-page': id, html: `${id === 'back' ? icon('chevronRight', 16).replace('<svg', '<svg style="transform:rotate(180deg)"') : icon(ic, 16)}<span>${label}</span>` });
     b.addEventListener('click', () => { if (id === 'back') close(); else show(id); });
@@ -55,10 +57,11 @@ async function render(app, page, close) {
       h('h2', { text: 'Recent' }), await docList(app, close, 4)];
   }
   if (page === 'open') return [h('h1', { text: 'Open' }), h('p', { class: 'lead', text: app.library.persistent ? 'Networks saved in this browser. They stay on this device and are not uploaded anywhere.' : 'This browser does not allow local storage here, so networks last only for this session. Export them to keep them.' }), await docList(app, close, 200)];
+  if (page === 'project') return projectPage(app);
   if (page === 'import') {
     return [h('h1', { text: 'Import' }), h('p', { class: 'lead', text: 'Bring in a network from PowerStudio or another tool. Imported networks open as new documents; nothing is overwritten. You can also drop files anywhere on the window.' }),
       h('div', { class: 'cards' },
-        card('PowerStudio file', 'A .powerstudio.json file exported from this app.', 'open', () => app.importFile('.json,.powerstudio.json,application/json')),
+        card('PowerStudio file or project', 'A .powerstudio.json network or a .powerstudio-project.json project exported from this app.', 'open', () => app.importFile('.json,application/json')),
         card('CGMES model', 'CGMES 2.4.15 or 3.0: the EQ, TP, SSH and SV files with the boundary set, as XML files or ZIP archives. Select them together.', 'import', () => app.importFile('.xml,.zip')),
         card('PSS/E RAW file', 'A RAW file of version 33 or 35, bus-branch or node-breaker.', 'import', () => app.importFile('.raw')),
         card('MATPOWER case', 'A MATPOWER version 2 .m case file.', 'import', () => app.importFile('.m,text/plain'))),
@@ -67,7 +70,8 @@ async function render(app, page, close) {
   if (page === 'export') {
     return [h('h1', { text: 'Export' }), h('p', { class: 'lead', text: 'Save copies outside the browser.' }),
       h('div', { class: 'cards' },
-        card('PowerStudio file', 'The whole network and study case as JSON. Opens in PowerStudio on any machine.', 'save', () => app.commands.run('file.export')),
+        card('Project', 'Every study case, scenario and variant with the run log, in one file. Imports back as a new project.', 'layers', () => app.commands.run('file.exportProject')),
+        card('PowerStudio file', 'The network as the active study case composes it, with its settings, as JSON. Opens in PowerStudio on any machine.', 'save', () => app.commands.run('file.export')),
         card('Diagram as SVG', 'Vector drawing of the single-line diagram with the current annotations.', 'image', () => app.commands.run('file.exportSvg')),
         card('Diagram as PNG', 'Bitmap of the whole diagram at twice screen resolution.', 'image', () => app.commands.run('file.exportPng')),
         card('Results table as CSV', 'The table currently shown in the results panel.', 'csv', () => app.commands.run('results.csv')))];
