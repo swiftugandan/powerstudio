@@ -582,8 +582,9 @@ test('load-flow, short-circuit and contingency results show as charts of the tab
   await as.getByRole('button', { name: 'Chart' }).click();
   await page.locator('.dock .seg button', { hasText: 'Branches' }).click();
   await expect(chart).toHaveAttribute('aria-label', /^Loading of 20 branches: highest Transformer 5-6 at 76\.4 %/);
+  // Through the locator, which scrolls the chart into view first: the panel scrolls when the chart does not fit.
   const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await chart.boundingBox());
-  await page.mouse.click(box.x + 70, box.y + box.height / 3);
+  await chart.click({ position: { x: 70, y: box.height / 3 } });
   await expect(page.locator('#inspector-panel')).toContainText('Transformer 5-6');
   const download = page.waitForEvent('download');
   await page.locator('.dock-tabs [data-cmd="results.csv"]').click();
