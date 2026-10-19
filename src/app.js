@@ -42,11 +42,11 @@ import { REPO_URL } from './core/version.js';
  * @typedef {import('./core/catalog.js').Element} Element
  * @typedef {import('./core/document.js').PowerDocument} PowerDocument
  * @typedef {import('./ui/viewport.js').ToolId} Tool
- * @typedef {'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} CalcKind
+ * @typedef {'loadflow' | 'shortcircuit' | 'contingency' | 'rms' | 'emt'} CalcKind
  * @typedef {{ result: any, ms: number, revision: number, run?: string }} StoredResult `run`: its record in the run log
  */
 
-const CALC_LABEL = /** @type {Record<CalcKind, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'N-1 contingency analysis', rms: 'Stability simulation' });
+const CALC_LABEL = /** @type {Record<CalcKind, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'N-1 contingency analysis', rms: 'Stability simulation', emt: 'EMT simulation' });
 
 /** The panels' size limits in pixels: the side panels' widths, and the results panel's least height with its largest
  * share of the window's height. */
@@ -635,6 +635,7 @@ export class App {
     this.inspector.schedule();
     this.viewport.invalidate('overlay');
     if (this.dock.tab === 'data') this.dock.sheet.selectionChanged();
+    else if (this.dock.tab === 'emt') this.dock.emtSelectionChanged();
     else if (this.dock.tab !== 'output' && this.dock.tab !== 'rms') this.dock.render();
     this.updateStatus();
     this.commands.changed();
@@ -1033,7 +1034,8 @@ export class App {
       const outcome = kind === 'loadflow' ? { converged: r.converged, iterations: r.iterations, lossesMw: r.totals.losses, warnings: r.warnings.length }
         : kind === 'shortcircuit' ? { buses: r.buses.length, maxIkssKa: Math.max(0, ...r.buses.map((/** @type {any} */ b) => b.ikss)) }
           : kind === 'contingency' ? { cases: r.cases.length, violating: r.cases.filter((/** @type {any} */ x) => x.converged && x.violations.length).length, unsolvable: r.cases.filter((/** @type {any} */ x) => !x.converged).length }
-            : { stable: r.stable, steps: r.steps };
+            : kind === 'emt' ? { steps: r.steps, peakPu: Math.max(0, ...r.buses.map((/** @type {any} */ b) => b.peakPu)), faultPeakKa: Math.max(0, ...r.faults.map((/** @type {any} */ f) => f.peak)) }
+              : { stable: r.stable, steps: r.steps };
       /** @type {import('./ui/persistence.js').RunRecord} */
       const rec = {
         run, time, kind,
@@ -1090,6 +1092,12 @@ export class App {
       const bad = n1.cases.filter(c => c.converged && c.violations.some(v => !v.inBase)).length, failed = n1.cases.filter(c => !c.converged).length;
       const screened = n1.effort.screened ? `, ${n1.effort.screened} cleared by screening` : '';
       this.log(bad || failed ? 'warn' : 'ok', `Contingency analysis of ${n1.cases.length} contingencies in ${duration(ms)}${screened}: ${bad} with new violations${failed ? `, ${failed} without a solution` : ''}.`);
+    } else if (kind === 'emt') {
+      /** @type {import('./engine/reports.js').EmtResult} */
+      const emt = r;
+      this.log('ok', `EMT simulation in ${duration(ms)}: ${emt.message}`);
+      for (const e of emt.events) if (!e.applied) this.log('warn', `EMT event at ${e.t} s had no effect: ${e.note}`);
+      for (const n of emt.notes.filter(x => /current zero by the end/.test(x))) this.log('warn', n);
     } else {
       /** @type {import('./engine/reports.js').RmsResult} */
       const rms = r;
@@ -1158,11 +1166,21 @@ export class App {
     this.rebuildOverlay();
     this.viewport.invalidate();
     // The plot and the charts read the theme's colours when they draw.
-    if (this.dock.tab === 'rms' || this.dock.chart) this.dock.render();
+    if (this.dock.tab === 'rms' || this.dock.tab === 'emt' || this.dock.chart) this.dock.render();
     this.commands.changed();
   }
 
   // ----- Panels and layout -----
+
+  /** Gives the results panel room for a plot when it is shorter than one can be read in: up to 360 pixels, as the
+   * window allows. */
+  roomForPlot() {
+    const want = Math.min(360, Math.round(innerHeight * 0.42));
+    if (this.prefs.dockH >= want) return;
+    this.prefs.dockH = want;
+    this.savePrefs();
+    this.applyLayout();
+  }
 
   applyLayout() {
     const s = this.root.style;
@@ -1304,6 +1322,7 @@ export class App {
       if (el.cls === 'bus') {
         items.push({ label: 'Short circuit at this busbar', icon: 'shortcircuit', run: () => this.faultAt(el.id) });
         items.push({ label: 'Add fault to simulation', icon: 'rms', run: () => this.addRmsFault(el.id) });
+        items.push({ label: 'Add fault to EMT simulation', icon: 'emt', run: () => this.addEmtFault(el.id) });
       }
       if (el.cls !== 'bus') items.push({ label: el.inService === false ? 'Switch into service' : 'Switch out of service', icon: 'power', hint: 'Shift+O', run: () => this.toggleService() });
       // The arrange commands that apply to the selection.
@@ -1334,6 +1353,22 @@ export class App {
       { t: 0.1, kind: /** @type {const} */ ('fault'), target: busId }, { t: 0.2, kind: /** @type {const} */ ('clear'), target: busId }].sort((a, b) => a.t - b.t);
     this.store.transact('Simulation events', tx => tx.setStudy('rms', 'events', events));
     this.log('info', `The simulation now applies a three-phase fault at ${this.store.get(busId)?.name} from 0.1 s to 0.2 s. Edit events in the study case.`);
+  }
+
+  /** A line-to-earth fault at a busbar for the EMT simulation, applied at a voltage peak of phase a after one cycle
+   * and cleared five cycles later. @param {string} busId */
+  addEmtFault(busId) {
+    const emt = this.store.doc.study.emt;
+    const cycle = 1 / this.store.doc.frequency;
+    const on = +(cycle).toFixed(4), off = +(6 * cycle).toFixed(4);
+    const events = [...emt.events.filter(e => e.target !== busId || (e.kind !== 'fault' && e.kind !== 'clear')),
+      { t: on, kind: /** @type {const} */ ('fault'), target: busId, fault: /** @type {const} */ ('1ph') },
+      { t: off, kind: /** @type {const} */ ('clear'), target: busId }].sort((a, b) => a.t - b.t);
+    this.store.transact('EMT events', tx => {
+      tx.setStudy('emt', 'events', events);
+      if (emt.tEnd < off + 2 * cycle) tx.setStudy('emt', 'tEnd', +(off + 4 * cycle).toFixed(4));
+    });
+    this.log('info', `The EMT simulation now applies a line-to-earth fault at ${this.store.get(busId)?.name} from ${on * 1000} ms, cleared at ${off * 1000} ms. Edit events in the study case.`);
   }
 
   // ----- Commands -----
@@ -1401,6 +1436,8 @@ export class App {
     c.add({ id: 'calc.shortcircuit', keywords: 'fault iec 60909 kurzschluss ikss', label: 'Short circuit', icon: 'shortcircuit', keys: ['Alt+S'], global: true, group: 'Calculate', hint: 'IEC 60909-style short-circuit currents', enabled: idle, run: () => this.calc('shortcircuit') });
     c.add({ id: 'calc.contingency', keywords: 'n-1 outage security', label: 'Contingency', icon: 'contingency', keys: ['Alt+N'], global: true, group: 'Calculate', hint: 'Every branch out in turn, and the contingencies of the study case', enabled: idle, run: () => this.calc('contingency') });
     c.add({ id: 'calc.rms', keywords: 'stability transient dynamic rotor angle rms', label: 'Simulation', icon: 'rms', keys: ['Alt+R'], global: true, group: 'Calculate', hint: 'Stability simulation with the study case events', enabled: idle, run: () => this.calc('rms') });
+    c.add({ id: 'calc.emt', keywords: 'electromagnetic transient emt waveform switching fault inception travelling wave overvoltage', label: 'EMT', icon: 'emt', keys: ['Alt+W'], global: true, group: 'Calculate',
+      hint: 'Electromagnetic transient simulation: three-phase waveforms of the study case\u2019s EMT events', enabled: idle, run: () => this.calc('emt') });
     c.add({ id: 'calc.cancel', label: 'Cancel calculation', icon: 'stop', keys: ['Mod+.'], global: true, group: 'Calculate', enabled: () => !!this.running, run: () => this.engine.cancel() });
     c.add({ id: 'calc.autoLoadFlow', label: 'Recalculate on edit', icon: 'loadflow', group: 'Calculate', hint: 'Run the load flow again after each change once it has been run', pressed: () => this.prefs.autoLoadFlow, run: () => { this.prefs.autoLoadFlow = !this.prefs.autoLoadFlow; this.savePrefs(); } });
     const studyToggle = (/** @type {string} */ id, /** @type {string} */ label, /** @type {string} */ ic, /** @type {string} */ section, /** @type {string} */ key, /** @type {unknown} */ value, /** @type {unknown} */ other) =>
@@ -1423,6 +1460,7 @@ export class App {
     c.add({ id: 'contingency.edit', keywords: 'remedial action special protection double circuit n-2 list', label: 'Contingencies', icon: 'settings', group: 'Study case',
       hint: 'Contingencies of several elements, and remedial actions', run: () => openContingencyDialog(this) });
     c.add({ id: 'rms.events', label: 'Events', icon: 'settings', group: 'Study case', hint: 'Edit the disturbance sequence of the simulation', run: () => openStudyDialog(this, 'rms') });
+    c.add({ id: 'emt.events', label: 'EMT events', icon: 'settings', group: 'Study case', hint: 'Edit the faults and switching of the EMT simulation', run: () => openStudyDialog(this, 'emt') });
     c.add({ id: 'study.settings', label: 'Study case', icon: 'settings', keys: ['Mod+,'], global: true, group: 'Study case', hint: 'Settings of every calculation', run: () => openStudyDialog(this) });
     c.add({ id: 'results.clear', label: 'Clear results', icon: 'close', group: 'Calculate', enabled: () => Object.keys(this.results).length > 0, run: () => { this.results = {}; this.setOverlay('none'); this.dock.render(); this.log('info', 'Results cleared.'); } });
     c.add({ id: 'results.csv', label: 'Export table as CSV', icon: 'csv', group: 'Calculate', run: () => {
@@ -1431,7 +1469,7 @@ export class App {
       download(new Blob([csv.text], { type: 'text/csv' }), fileName(`${this.store.doc.name}-${csv.name}`, '.csv'));
       this.log('ok', `Exported ${csv.name} as CSV.`);
     } });
-    for (const k of /** @type {CalcKind[]} */ (['loadflow', 'shortcircuit', 'contingency', 'rms'])) {
+    for (const k of /** @type {CalcKind[]} */ (['loadflow', 'shortcircuit', 'contingency', 'rms', 'emt'])) {
       c.add({ id: `show.${k}`, label: `Show ${CALC_LABEL[k].toLowerCase()} results on the diagram`, icon: k, group: 'View', enabled: () => !!this.results[k], pressed: () => this.overlayKind === k, run: () => { this.setOverlay(k); this.dock.show(k); } });
     }
     // View

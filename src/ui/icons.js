@@ -30,6 +30,7 @@ const PATHS = {
   shortcircuit: 'M13 2 5 14h6l-1 8 8-12h-6z',
   contingency: 'M4 6h5M15 6h5M6.5 6v12M17.5 6v12M4 18h5M15 18h5M10 10l4 4M14 10l-4 4',
   rms: 'M2 12h3l2.5-6 3.5 12 3-9 2 4h6',
+  emt: 'M2 12c1.2-3.2 3.3-3.2 4.5 0s3.3 3.2 4.5 0l2-9 2 18 1.5-9c1.2-3 3.3-3 4.5 0',
   settings: 'M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4',
   results: 'M4 5h16v14H4zM4 10h16M4 14.5h16M10 10v9',
   names: 'M5 7V5h14v2M12 5v14M9 19h6',

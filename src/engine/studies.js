@@ -1,4 +1,4 @@
-/** The four studies on a PowerStudio document, run by an engine instance. The worker, the main-thread fallback and
+/** The studies on a PowerStudio document, run by an engine instance. The worker, the main-thread fallback and
  * the Node tests all go through here, so they send the engine the same requests.
  *
  * Options follow the study case (src/core/document.js) and may override any of its settings for one run. */
@@ -90,4 +90,7 @@ export class Studies {
 
   /** @param {PowerDocument} doc @param {Record<string, any>} [options] @param {OnProgress} [onProgress] @returns {import('./reports.js').RmsResult} */
   rms(doc, options = {}, onProgress) { return this.run('rms', doc, options, onProgress); }
+
+  /** @param {PowerDocument} doc @param {Record<string, any>} [options] @param {OnProgress} [onProgress] @returns {import('./reports.js').EmtResult} */
+  emt(doc, options = {}, onProgress) { return this.run('emt', doc, options, onProgress); }
 }

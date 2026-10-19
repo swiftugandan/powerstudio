@@ -185,12 +185,25 @@ export class Inspector {
       if (m) rows.push(['Rotor angle range', `${fixed(minOf(m.delta), 1)}° … ${fixed(maxOf(m.delta), 1)}°`], ['Speed range', `${fixed(minOf(m.speed), 3)} … ${fixed(maxOf(m.speed), 3)} Hz`]);
       const k = r.busIds.indexOf(el.id);
       if (k >= 0) rows.push(['Lowest voltage', `${fixed(minOf(r.voltages[k]), 3)} p.u.`], ['Final voltage', `${fixed(r.voltages[k][r.voltages[k].length - 1], 3)} p.u.`]);
+    } else if (kind === 'emt' && R.emt) {
+      /** @type {import('../engine/reports.js').EmtResult} */
+      const r = R.emt.result;
+      const ms = (/** @type {number} */ t) => `${fixed(t * 1000, 2)} ms`;
+      const b = r.buses.find(x => x.id === el.id);
+      if (b) rows.push(['Peak voltage', `${fixed(b.peak, 2)} kV at ${ms(b.peakAt)}`], ['Peak', `${fixed(b.peakPu, 3)} p.u. of crest`],
+        ['RMS range', `${fixed(b.rmsMin, 3)} … ${fixed(b.rmsMax, 3)} p.u.`]);
+      const f = r.faults.find(x => x.target === el.id);
+      if (f) rows.push(['Peak fault current', `${fixed(f.peak, 3)} kA at ${ms(f.peakAt)}`], ['Fault RMS, last cycle', Number.isFinite(f.rms) ? `${fixed(f.rms, 3)} kA` : 'under a cycle']);
+      const br = r.branches.find(x => x.id === el.id);
+      if (br) rows.push(['Peak current', `${fixed(br.peak, 3)} kA at ${ms(br.peakAt)}`], ['Model', br.model === 'travelling' ? 'Travelling wave' : br.model === 'pi' ? 'π section' : 'Transformer windings']);
+      const s = r.sources.find(x => x.id === el.id);
+      if (s) rows.push(['Peak current', `${fixed(s.peak, 3)} kA at ${ms(s.peakAt)}`]);
     }
     if (!rows.length) return null;
     const props = h('div', { class: 'props' });
     for (const [k, v] of rows) props.append(h('label', { text: k }), h('div', { class: 'readonly-value', text: v, title: v }));
     const stale = app.resultsStale(kind) ? h('div', { class: 'stale', html: `${icon('warning', 14)}<span>Calculated before the last edit</span>` }) : null;
-    const label = { loadflow: 'Load flow results', shortcircuit: 'Short-circuit results', contingency: 'Contingency results', rms: 'Simulation results', none: 'Results' }[kind];
+    const label = { loadflow: 'Load flow results', shortcircuit: 'Short-circuit results', contingency: 'Contingency results', rms: 'Simulation results', emt: 'EMT results', none: 'Results' }[kind];
     return this.section('results', label, stale ? [stale, props] : [props]);
   }
 }

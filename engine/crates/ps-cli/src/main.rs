@@ -19,7 +19,7 @@
 //!                                                             when anything differs
 //! ```
 //!
-//! `kind` is one of `loadflow`, `shortcircuit`, `contingency`, `contingency_plan`, `contingency_chunk` or `rms`;
+//! `kind` is one of `loadflow`, `shortcircuit`, `contingency`, `contingency_plan`, `contingency_chunk`, `rms` or `emt`;
 //! the options are those of the browser engine (docs/ENGINE.md).
 
 use std::process::ExitCode;

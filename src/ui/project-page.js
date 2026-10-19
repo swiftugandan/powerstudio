@@ -178,7 +178,7 @@ function runLog(runs, remove) {
   return h('section', { class: 'project-section' }, head, h('div', { class: 'runs-wrap' }, table));
 }
 
-const KIND = /** @type {Record<string, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'Contingency', rms: 'Stability' });
+const KIND = /** @type {Record<string, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'Contingency', rms: 'Stability', emt: 'EMT' });
 
 /** A run's outcome in a few words. @param {import('./persistence.js').RunRecord} r */
 function outcome(r) {
@@ -186,6 +186,7 @@ function outcome(r) {
   if (r.kind === 'loadflow') return o.converged ? `Converged in ${o.iterations}` : 'Did not converge';
   if (r.kind === 'contingency') return `${o.cases} outages, ${o.violating} violating, ${o.unsolvable} unsolvable`;
   if (r.kind === 'shortcircuit') return `${o.buses} busbars, up to ${Number(o.maxIkssKa).toFixed(1)} kA`;
+  if (r.kind === 'emt') return `${o.steps} steps, peak voltage ${Number(o.peakPu).toFixed(2)} p.u.${o.faultPeakKa ? `, peak fault current ${Number(o.faultPeakKa).toFixed(1)} kA` : ''}`;
   return o.stable ? 'Stable' : 'Loses synchronism';
 }
 

@@ -1,7 +1,8 @@
 # PowerStudio user guide
 
 PowerStudio is a power system workbench that runs in a browser tab: draw or import a network, then run load flows,
-IEC 60909-style short circuits, contingency analysis and stability simulations on it. Everything happens on your
+IEC 60909-style short circuits, contingency analysis, stability simulations and electromagnetic transient (EMT)
+simulations on it. Everything happens on your
 device; nothing is uploaded. This guide walks through the work in the order you will meet it. docs/ENGINE.md describes
 exactly what each calculation computes; the README lists what PowerStudio does not do.
 
@@ -105,7 +106,8 @@ change them all, paste a block from a spreadsheet, and undo it as one step.
 
 A study case holds the settings of every calculation: the load-flow tolerance and controls, the short-circuit fault
 type, case, voltage factor tolerance, breaking time, fault duration, line temperature and fault impedance, the
-contingency list and remedial actions, and the simulation's time, step and events. Open it with Ctrl+, (Calculate,
+contingency list and remedial actions, the stability simulation's time, step and events, and the EMT simulation's time,
+step, line model and events. Open it with Ctrl+, (Calculate,
 Study case). The ribbon's Calculate tab holds the common switches (fault type, maximum or minimum, reactive limits).
 
 A project can hold several study cases, scenarios (the operating values: switching states, set points, loads,
@@ -121,6 +123,7 @@ the base network.
 | Short circuit | Alt+S | Ik″, ip, Ib, Ith and Sk″ at every busbar, or at one with the branch contributions |
 | Contingency | Alt+N | Each branch (and optionally machine and busbar) out in turn, and the study case's contingencies, with the violations each causes |
 | Simulation | Alt+R | Rotor angles, speeds, powers, field voltages and bus voltages over time, for the study case's events |
+| EMT | Alt+W | Phase voltages and currents as waveforms over the first cycles of the study case's EMT events, with their peaks |
 
 Ctrl+. cancels a running calculation. With "Recalculate on edit" on, the load flow runs again after every change.
 
@@ -157,6 +160,35 @@ brings beyond the base case.
 **Simulation.** Events are faults (with an impedance), their clearing, trips, reclosures and load steps, at given times.
 The plot shows the chosen quantity for every machine; click legend entries to hide traces. The run says whether every
 machine stays in synchronism.
+
+**EMT simulation.** Where the stability simulation follows electromechanical swings over seconds, the EMT simulation
+shows what happens within cycles: every phase's voltage and current, sample by sample, with the DC offset of a fault
+current, the overvoltage of a switching and the waves that travel along long lines. Use it for fault inception and
+clearing, for energising a line, a cable or a capacitor bank, and for unbalanced faults; use the stability simulation
+for anything longer than a few hundred milliseconds, because the EMT simulation keeps every source's EMF at its load-flow
+value. Its events (Calculate, EMT events, or right-click a busbar and choose "Add fault to EMT simulation") are:
+
+- *Fault at* a busbar: three-phase, line to line (phases b and c), two phases to earth (b and c) or line to earth
+  (phase a), through a resistance in each faulted path (empty: bolted). Its time sets the point on the wave: at a
+  voltage peak the fault current starts without a DC offset, at a voltage zero with the largest one.
+- *Clear fault at* a busbar: each faulted phase goes out at its next current zero, as an arc does.
+- *Trip* a line, transformer, load, shunt or source: each pole of its breakers (at both ends of a branch) opens at its
+  next current zero. What stays behind stays: a cable or a capacitor bank keeps its charge.
+- *Close* the same: all three poles close at once. Lines, transformers, loads and shunts out of service can be closed
+  in, so you can energise them.
+
+The time step is 50 µs by default, which resolves switching and fault transients up to a few kilohertz; shorten it for
+travelling waves on short lines and cables, and to see a wave's front sharply (a step spreads a front over its own
+length). Lines whose travel time is at least one step are simulated as travelling
+waves, the others as π sections (the study case can make them all π sections). The EMT tab shows the waveforms of one
+element at a time: choose a busbar's voltages, a branch's currents at either end, a source's or the fault's current,
+or select an element on the diagram. Drag across the plot to zoom in on a time range (or use the wheel and the zoom
+buttons); double-click shows the whole run. Export the shown waveforms as CSV. The Busbars, Branches, Sources and Faults
+tabs list the peaks, the busbars' lowest and highest one-cycle RMS voltages and each fault's RMS current over its last
+cycle; Switching lists the events and every pole that opened at a current zero. The diagram shows each busbar's peak
+voltage as a share of its nominal crest and each branch's peak current. Both samples come with EMT events: Riverside
+has an earth fault at Hilltop and its clearing, then its capacitor bank switched out and back in onto its charge;
+IEEE 14 has a three-phase fault at bus 4 cleared with line 4-5 tripped.
 
 **Comparing with an earlier run.** Each calculation you start is recorded in the project's run log with hashes of the
 model, the settings and the results. The load-flow table can show the difference from a recorded run ("Compare with a
@@ -199,7 +231,7 @@ Press ? (or open Help, Keyboard shortcuts) for the full list. The ones used most
 | Keys | Command |
 | --- | --- |
 | Ctrl+K | Command palette |
-| Alt+L, Alt+S, Alt+N, Alt+R | Load flow, short circuit, contingency, simulation |
+| Alt+L, Alt+S, Alt+N, Alt+R, Alt+W | Load flow, short circuit, contingency, simulation, EMT simulation |
 | Ctrl+, | Study case |
 | Ctrl+Z, Ctrl+Shift+Z | Undo, redo |
 | Ctrl+O, Ctrl+Shift+O, Ctrl+Shift+S | Open, import, export |

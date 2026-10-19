@@ -4,6 +4,27 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## Electromagnetic transients (2026-10-19, local, branch `claude/trusting-feynman-p3q1c6`)
+
+| Check | Result |
+| --- | --- |
+| Engine against ngspice 42 (`cargo test -p ps-study --test emt -- --nocapture`), worst phase voltage as a share of crest; worst branch, source and fault current as a share of its kind's largest | Riverside line-to-earth 2.01e-3 / 1.08e-4 / 5.23e-5 / 9.57e-5; Riverside 0.4 kV three-phase 8.42e-6 / 1.50e-5 / 5.34e-6 / 2.04e-5; IEEE 14 two-phase-to-earth 2.75e-4 / 3.85e-5 / 5.93e-6 / 3.18e-5; IEEE 14 line-to-line 1.61e-4 / 8.28e-6 / 7.23e-6 / 2.53e-4; line energisation 1.94e-3 / 1.95e-4 / 9.68e-5 / 1.21e-4 |
+| The same comparison in WebAssembly (`tests/emt.test.mjs`) | Passed on all five cases |
+| Native and WebAssembly reports (`tests/engine.test.mjs`) | Equal to 1e-9; the single-precision waveforms to one unit in their last place, or 1e-8 |
+| Closed-form R-L switching, exact delay of a matched lossless line, settling at the faulted phasor solution, poles opening at current zeros, phase shifts beyond the vector group | Passed |
+| `npm test` | 148 passed |
+| `npm run test:engine` | Passed, except the tests that read the reference downloads (CGMES, PSS/E, ACTIVSg, ANDES and the TR 60909-4 archive), which are absent here |
+| Browser, Chromium (`webgpu` and `canvas` projects), including the axe-core audit of the EMT tab in both themes | 101 passed; the `webgpu` project's backend check fails because this container's Chromium has no WebGPU device, so it falls back to Canvas 2D |
+
+Found on the way: the oracle first ran SPICE's switches over a ramp as long as the engine's step, which delayed every
+switching by most of a microsecond and shifted the phase of the ringing after it (1.2e-2 of crest on Riverside); the
+ramp is now 0.1 µs. SPICE's lossless lines set a breakpoint on every change of slope above 1 V, which at 220 kV
+multiplied with each reflection until a 30 ms run did not finish in 25 minutes; without them it takes 6 s. pandapower
+solves nothing for a network with no branch in service and returned the second grid's busbar at 0° instead of −10°,
+so the line case now feeds its load through a transformer and the oracle checks every grid's angle. Firefox and WebKit
+are not installed here, and the CGMES, PSS/E and ACTIVSg reference downloads are blocked by this container's proxy;
+CI runs both.
+
 ## The first CI run, and reproducibility across hosts (2026-10-10)
 
 The first push ran CI for the first time. Two checks failed. The routing test's time bound (400 ms) failed at 777 ms on

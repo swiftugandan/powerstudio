@@ -26,7 +26,7 @@ import { APP_VERSION } from '../core/version.js';
 const DIAGRAM_UP_TO = 4000;
 /** Rows a table prints before it says how many more there are. */
 const ROWS = 40;
-const TITLE = /** @type {Record<CalcKind, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'Contingency analysis', rms: 'Stability simulation' });
+const TITLE = /** @type {Record<CalcKind, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'Contingency analysis', rms: 'Stability simulation', emt: 'EMT simulation' });
 
 /** Builds the report for the open project and prints it. @param {import('../app.js').App} app */
 export async function printReport(app) {
@@ -44,7 +44,7 @@ export async function buildReport(app) {
   const scenario = p.scenarios.find(s => s.id === c.scenario);
   const variants = p.variants.filter(v => c.variants.includes(v.id));
   const runs = new Map((await app.library.runs(app.docId)).map(r => [r.run, r]));
-  const kinds = /** @type {CalcKind[]} */ (['loadflow', 'contingency', 'shortcircuit', 'rms']).filter(k => app.results[k]);
+  const kinds = /** @type {CalcKind[]} */ (['loadflow', 'contingency', 'shortcircuit', 'rms', 'emt']).filter(k => app.results[k]);
   const counts = new Map();
   for (const el of doc.elements) counts.set(el.cls, (counts.get(el.cls) ?? 0) + 1);
   const name = (/** @type {string} */ id) => app.store.get(id)?.name || id;
@@ -75,7 +75,7 @@ export async function buildReport(app) {
     const stored = /** @type {import('../app.js').StoredResult} */ (app.results[k]);
     const stale = app.resultsStale(k);
     const body = k === 'loadflow' ? loadflow(stored.result, name, app) : k === 'contingency' ? contingency(stored.result, name)
-      : k === 'shortcircuit' ? shortcircuit(stored.result, name) : rms(stored.result);
+      : k === 'shortcircuit' ? shortcircuit(stored.result, name) : k === 'emt' ? emt(stored.result, name) : rms(stored.result);
     return h('section', { class: 'report-section' },
       h('h2', { text: TITLE[k] }),
       stale ? h('p', { class: 'report-warn', text: 'Calculated before the last edit: these results may not describe the network as it is now.' }) : null,
@@ -112,6 +112,7 @@ function outcome(r) {
   if (r.kind === 'loadflow') return o.converged ? `Converged in ${o.iterations}` : 'Did not converge';
   if (r.kind === 'contingency') return `${o.violating} violating, ${o.unsolvable} unsolvable`;
   if (r.kind === 'shortcircuit') return `Up to ${Number(o.maxIkssKa).toFixed(1)} kA`;
+  if (r.kind === 'emt') return `Peak ${Number(o.peakPu).toFixed(2)} p.u.${o.faultPeakKa ? `, fault ${Number(o.faultPeakKa).toFixed(1)} kA` : ''}`;
   return o.stable ? 'Stable' : 'Loses synchronism';
 }
 
@@ -184,6 +185,27 @@ function rms(r) {
     h('h3', { text: 'Events' }),
     table(['Time (s)', 'Event'], r.events.map(e => [fixed(e.t, 3), e.note])),
   ];
+}
+
+/** @param {import('../engine/reports.js').EmtResult} r @param {(id: string) => string} name */
+function emt(r, name) {
+  const ms = (/** @type {number} */ t) => fixed(t * 1000, 2);
+  const buses = [...r.buses].sort((a, b) => b.peakPu - a.peakPu);
+  const out = [
+    facts([['Result', r.message], ['Time step', `${fixed(r.dt * 1e6, 1)} µs, ${r.steps.toLocaleString('en-GB')} steps`],
+      ['Lines', `${r.travelling} as travelling waves, ${r.pi} as π sections`],
+      ['Initial state', `within ${r.initialMismatch.toExponential(1)} p.u. of the load flow`]]),
+    h('h3', { text: 'Events and current zeros' }),
+    table(['Time (ms)', 'What happened'], [...r.events.map(e => ({ t: e.at, note: e.note })), ...r.operations.map(o => ({ t: o.t, note: o.note }))]
+      .sort((a, b) => a.t - b.t).slice(0, ROWS).map(x => [ms(x.t), x.note]), '', r.events.length + r.operations.length),
+  ];
+  if (r.faults.length) {
+    out.push(h('h3', { text: 'Faults' }), table(['Busbar', 'Fault', 'From (ms)', 'Peak (kA)', 'At (ms)', 'RMS, last cycle (kA)'],
+      r.faults.map(f => [name(f.target), enumLabel('fault', f.fault), ms(f.tOn), fixed(f.peak, 3), ms(f.peakAt), Number.isFinite(f.rms) ? fixed(f.rms, 3) : '—'])));
+  }
+  out.push(h('h3', { text: 'Highest busbar voltages' }), table(['Busbar', 'Peak (kV)', 'Peak (p.u. of crest)', 'At (ms)', 'Lowest RMS (p.u.)'],
+    buses.slice(0, ROWS).map(b => [name(b.id), fixed(b.peak, 2), fixed(b.peakPu, 3), ms(b.peakAt), fixed(b.rmsMin, 3)]), '', buses.length));
+  return out;
 }
 
 /** The settings a calculation ran with, as the study case dialog lists them. @param {CalcKind} k

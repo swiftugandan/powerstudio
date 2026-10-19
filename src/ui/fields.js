@@ -168,7 +168,8 @@ function controllerRows(f, value, commit, id) {
 
 /** Readable labels for enum options. @param {string} key @param {string} v */
 export function enumLabel(key, v) {
-  if (key === 'fault') return /** @type {Record<string, string>} */ ({ '3ph': 'Three-phase', '2ph': 'Line to line', '1ph': 'Line to earth' })[v] ?? v;
+  if (key === 'fault') return /** @type {Record<string, string>} */ ({ '3ph': 'Three-phase', '2ph': 'Line to line', '2phg': 'Two phases to earth', '1ph': 'Line to earth' })[v] ?? v;
+  if (key === 'lineModel') return v === 'pi' ? 'π sections everywhere' : 'Travelling waves where they fit the step';
   if (key === 'mode' && (v === 'max' || v === 'min')) return v === 'max' ? 'Maximum currents' : 'Minimum currents';
   if (key === 'kappa') return v === 'B' ? 'Method B (R/X at the fault)' : 'Method C (equivalent frequency)';
   if (key === 'lvTolerance') return `${v} % (cmax ${v === '6' ? '1.05' : '1.10'})`;

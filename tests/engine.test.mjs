@@ -19,6 +19,7 @@ const REQUESTS = /** @type {Array<[string, Record<string, unknown>]>} */ ([
   ['shortcircuit', { fault: '1ph', mode: 'min', kappa: 'B' }],
   ['contingency', {}],
   ['rms', { tEnd: 0.5 }],
+  ['emt', { tEnd: 0.05 }],
 ]);
 const INPUTS = ['ieee14', 'ieee14-qlim', 'riverside'];
 
@@ -29,12 +30,25 @@ function withoutTiming(v) {
   return v;
 }
 
+/** The waveforms of an EMT report, and the largest difference between them. */
+const SINGLE = / emt\.(t|.*\.(v|from|to|i)\[\d+\])$/;
+let waveforms = 0;
+
 /** Largest relative difference between two reports of the same shape; throws when their structure differs.
  * @param {any} a @param {any} b @param {string} path @returns {number} */
 function difference(a, b, path) {
   if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) / Math.max(1, Math.abs(a), Math.abs(b));
   if (Array.isArray(a) && Array.isArray(b)) {
     assert.equal(a.length, b.length, `${path}: lengths differ`);
+    // An EMT report keeps its waveforms in single precision, where a last-bit difference in double precision can
+    // round either way: a sample one unit in the last place of a 32-bit float apart counts as equal. The rest go to
+    // `waveforms`, as thousands of steps carry those last bits into currents taken as differences of larger terms.
+    if (SINGLE.test(path)) {
+      for (let i = 0; i < a.length; i++) {
+        if (Math.abs(a[i] - b[i]) > 2 ** -23 * Math.max(Math.abs(a[i]), Math.abs(b[i]))) waveforms = Math.max(waveforms, difference(a[i], b[i], path));
+      }
+      return 0;
+    }
     return a.reduce((m, x, i) => Math.max(m, difference(x, b[i], `${path}[${i}]`)), 0);
   }
   if (a && b && typeof a === 'object' && typeof b === 'object') {
@@ -60,6 +74,7 @@ test('the browser engine (WebAssembly) and the native engine agree on every stud
   }
   // Native builds may fuse multiply-adds that WebAssembly evaluates in two roundings; the reports agree to rounding.
   assert.ok(worst < 1e-9, `largest relative difference ${worst}`);
+  assert.ok(waveforms < 1e-8, `largest relative difference of the EMT waveforms ${waveforms}`);
 });
 
 test('the engine is deterministic: the same request gives the same bytes, on one instance and on a fresh one', async () => {

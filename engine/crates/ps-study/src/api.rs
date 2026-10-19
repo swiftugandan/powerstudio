@@ -5,10 +5,11 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use ps_model::study::{RmsSettings, StudyCase};
+use ps_model::study::{EmtSettings, RmsSettings, StudyCase};
 use ps_model::{Class, Model};
 
 use crate::contingency::{self, Chunk};
+use crate::emt;
 use crate::loadflow::{self, LoadFlowRun};
 use crate::progress::Progress;
 use crate::rms;
@@ -98,6 +99,18 @@ struct RmsOptions {
     max_samples: Option<usize>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct EmtOptions {
+    t_end: Option<f64>,
+    dt_us: Option<f64>,
+    line_model: Option<ps_model::study::LineModel>,
+    events: Option<Vec<ps_model::study::EmtEvent>>,
+    max_samples: Option<usize>,
+    /// Breakers open at their command instead of at the next current zero (comparison with circuit simulators).
+    instant_switching: Option<bool>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ChunkOptions {
@@ -127,7 +140,7 @@ pub struct Loaded {
 /// Runs one request.
 ///
 /// `kind` is `loadflow`, `shortcircuit`, `contingency`, `contingency_plan`, `contingency_chunk`, `contingency_merge`
-/// or `rms`. Every kind but `contingency_merge` needs `doc`; `contingency_merge` takes the chunks as `options`.
+/// `rms` or `emt`. Every kind but `contingency_merge` needs `doc`; `contingency_merge` takes the chunks as `options`.
 pub fn handle(
     kind: &str,
     opts: &Value,
@@ -247,6 +260,27 @@ pub fn handle(
                 study,
                 &settings,
                 o.max_samples.unwrap_or(rms::DEFAULT_SAMPLES),
+                progress,
+            )?)
+        }
+        "emt" => {
+            let o: EmtOptions = options(opts)?;
+            let e = &study.emt;
+            let settings = EmtSettings {
+                t_end: o.t_end.unwrap_or(e.t_end),
+                dt_us: o.dt_us.unwrap_or(e.dt_us),
+                line_model: o.line_model.unwrap_or(e.line_model),
+                events: o.events.unwrap_or_else(|| e.events.clone()),
+            };
+            let options = emt::Options {
+                instant_switching: o.instant_switching.unwrap_or(false),
+            };
+            to_json(&emt::run(
+                model,
+                study,
+                &settings,
+                o.max_samples.unwrap_or(emt::DEFAULT_SAMPLES),
+                options,
                 progress,
             )?)
         }

@@ -647,6 +647,70 @@ test('short circuit, contingency and stability run from the palette and the ribb
   await expect(page.locator('.plot canvas')).toBeVisible();
 });
 
+test('an EMT simulation plots three phases, follows the selection, zooms in time and exports its waveforms', async ({ page }) => {
+  await open(page, 'sample=riverside');
+  await page.keyboard.press('Alt+W');
+  await expect(page.locator('.dock-tab[data-tab="emt"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.dock-toolbar .pill.ok')).toContainText('200 ms simulated');
+  // The faulted busbar's voltages come first, in the three phase colours.
+  await expect(page.locator('.emt-tools select.emt-element')).toHaveValue('B5');
+  await expect(page.locator('.seg.phases button')).toHaveCount(3);
+  await expect.poll(async () => {
+    const img = decodePNG(await page.locator('.plot').screenshot());
+    return Math.min(share(img, [37, 99, 201]), share(img, [209, 73, 91]), share(img, [27, 138, 90]));
+  }).toBeGreaterThan(0.002);
+  // A phase can be hidden.
+  await page.locator('.seg.phases button', { hasText: 'Phase b' }).click();
+  await expect(page.locator('.seg.phases button', { hasText: 'Phase b' })).toHaveAttribute('aria-pressed', 'false');
+  // Selecting a cable plots its currents.
+  await page.locator('.tree-row[data-id="L1"]').click();
+  await expect(page.locator('.emt-tools select').first()).toHaveValue('branch');
+  await expect(page.locator('.emt-tools select.emt-element')).toHaveValue('L1');
+  // The time axis zooms and returns to the whole run.
+  const plot = page.locator('.plot');
+  await expect(plot).toHaveAttribute('data-shown', '0.000000 0.200000');
+  await page.getByRole('button', { name: 'Zoom in on time' }).click();
+  await expect(plot).toHaveAttribute('data-shown', '0.050000 0.150000');
+  await page.getByRole('button', { name: 'Show the whole run' }).click();
+  await expect(plot).toHaveAttribute('data-shown', '0.000000 0.200000');
+  // The waveforms shown export as CSV: time in milliseconds and the three phases.
+  const download = page.waitForEvent('download');
+  await page.locator('[data-cmd="results.csv"]').click();
+  const csv = readFileSync(await (await download).path(), 'utf8').split(/\r?\n/);
+  expect(csv[0]).toBe('Time (ms),Phase a (kA),Phase b (kA),Phase c (kA)');
+  expect(csv.filter(l => l).length).toBe(4002);
+  // The peaks: the capacitor bank switched back in onto its charge raises Mill Lane's voltage most.
+  await page.locator('.dock-toolbar .seg button', { hasText: 'Busbars' }).click();
+  await expect(page.locator('table.grid tbody tr[data-id]').first()).toHaveAttribute('data-id', 'B3');
+  await expect(page.locator('table.grid tbody tr[data-id="B3"]')).toContainText('1.236');
+  // Every pole of the bank's breaker opened at a current zero.
+  await page.locator('.dock-toolbar .seg button', { hasText: 'Switching' }).click();
+  await expect(page.locator('table.grid tbody')).toContainText('Capacitor bank: pole a opened at a current zero.');
+  await expect(page.locator('table.grid tbody')).toContainText('Capacitor bank: pole c opened at a current zero.');
+});
+
+test('EMT events are edited in the study case and act in the next run', async ({ page }) => {
+  await open(page, 'sample=riverside');
+  await palette(page, 'EMT events');
+  const events = page.locator('table.emt-events tbody tr');
+  await expect(events).toHaveCount(4);
+  await page.locator('.dialog button', { hasText: 'Add EMT event' }).click();
+  await expect(events).toHaveCount(5);
+  const row = events.nth(4);
+  await row.locator('select[aria-label="Event type"]').selectOption('trip');
+  await row.locator('select[aria-label="Event element"]').selectOption('L5');
+  await row.locator('input[aria-label="Event time in milliseconds"]').fill('140');
+  await row.locator('input[aria-label="Event time in milliseconds"]').press('Tab');
+  await page.locator('.dialog button', { hasText: 'Apply' }).click();
+  await page.keyboard.press('Alt+W');
+  await page.locator('.dock-toolbar .seg button', { hasText: 'Switching' }).click();
+  await expect(page.locator('table.grid tbody')).toContainText('tripped: each pole opens at its next current zero.');
+  // Undo takes the event back out.
+  await page.keyboard.press('ControlOrMeta+Z');
+  await palette(page, 'EMT events');
+  await expect(events).toHaveCount(4);
+});
+
 test('a machine and its transformer made a power station unit change the short-circuit and breaking currents', async ({ page }) => {
   await open(page, 'sample=riverside');
   await page.keyboard.press('Alt+S');

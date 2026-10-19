@@ -1373,6 +1373,29 @@
      "target": "L7"
     }
    ]
+  },
+  "emt": {
+   "tEnd": 0.2,
+   "dtUs": 50,
+   "lineModel": "auto",
+   "events": [
+    {
+     "t": 0.02,
+     "kind": "fault",
+     "target": "B4",
+     "fault": "3ph"
+    },
+    {
+     "t": 0.1,
+     "kind": "clear",
+     "target": "B4"
+    },
+    {
+     "t": 0.1,
+     "kind": "trip",
+     "target": "L7"
+    }
+   ]
   }
  }
 }

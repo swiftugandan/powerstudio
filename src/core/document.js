@@ -13,6 +13,10 @@ import { checkContingencies } from './contingencies.js';
  * @typedef {import('./catalog.js').FieldSpec} FieldSpec
  * @typedef {{ t: number, kind: 'fault' | 'clear' | 'trip' | 'close' | 'loadstep', target: string, value?: number, r?: number, x?: number }} SimEvent
  *   `value`: a load step's level, %; `r` and `x`: a fault's resistance and reactance, Ω (none: a bolted fault).
+ * @typedef {{ t: number, kind: 'fault' | 'clear' | 'trip' | 'close', target: string, fault?: EmtFaultType, r?: number }} EmtEvent
+ *   An EMT simulation event: `fault` the phases a fault connects (three-phase when absent), `r` its resistance in each
+ *   faulted path, Ω (none: a bolted fault).
+ * @typedef {'3ph' | '2ph' | '2phg' | '1ph'} EmtFaultType
  * @typedef {{ zone: string, export: number, tolerance: number, slack: string }} AreaTarget A zone's interchange: net export
  *   target and tolerance in MW, and the busbar whose machines hold it ('' for none).
  * @typedef {{
@@ -27,6 +31,7 @@ import { checkContingencies } from './contingencies.js';
  *     list: import('./contingencies.js').Contingency[], remedial: import('./contingencies.js').RemedialAction[] },
  *   rms: { tEnd: number, dt: number, events: SimEvent[], loadPPower: number, loadPCurrent: number, loadQPower: number, loadQCurrent: number,
  *     loadVLow: number },
+ *   emt: { tEnd: number, dtUs: number, lineModel: 'auto' | 'pi', events: EmtEvent[] },
  * }} Study
  * @typedef {{ format: 'powerstudio', version: 1, name: string, description: string, baseMVA: number, frequency: 50 | 60,
  *   elements: Element[], study: Study }} PowerDocument
@@ -36,7 +41,7 @@ export const FORMAT = 'powerstudio';
 export const VERSION = 1;
 
 /** Study case settings, described like element fields so the settings dialog and validation share one spec.
- * @type {Readonly<Record<keyof Omit<Study, 'rms'> | 'rms', readonly FieldSpec[]>>} */
+ * @type {Readonly<Record<keyof Study, readonly FieldSpec[]>>} */
 export const STUDY_FIELDS = {
   loadflow: [
     { key: 'tolerance', label: 'Power mismatch tolerance', type: 'number', group: 'loadflow', default: 0.001, unit: 'MVA', min: 1e-9, max: 10 },
@@ -102,9 +107,19 @@ export const STUDY_FIELDS = {
     { key: 'loadVLow', label: 'Constant power and current below', type: 'number', group: 'rms', default: 0.7, unit: 'p.u.', min: 0, max: 1,
       help: 'Below this voltage the constant power and constant current shares turn into constant impedance, so a load near a fault draws a bounded current.' },
   ],
+  emt: [
+    { key: 'tEnd', label: 'Simulation time', type: 'number', group: 'emt', default: 0.2, unit: 's', min: 0.001, max: 10,
+      help: 'Electromagnetic transients last milliseconds to a few cycles. The sources keep their load-flow EMFs, so use the stability simulation for longer swings.' },
+    { key: 'dtUs', label: 'Time step', type: 'number', group: 'emt', default: 50, unit: 'µs', min: 1, max: 1000,
+      help: 'The integration step. 50 µs resolves switching and fault transients up to a few kilohertz; shorten it for travelling waves on short lines and cables.' },
+    { key: 'lineModel', label: 'Line model', type: 'enum', group: 'emt', default: 'auto', options: ['auto', 'pi'],
+      help: 'Travelling waves model a line as distributed, with the time a wave takes to cross it, where that time is at least one step; shorter lines are π sections.' },
+  ],
 };
 
 export const EVENT_KINDS = /** @type {const} */ (['fault', 'clear', 'trip', 'close', 'loadstep']);
+export const EMT_EVENT_KINDS = /** @type {const} */ (['fault', 'clear', 'trip', 'close']);
+export const EMT_FAULTS = /** @type {const} */ (['3ph', '2ph', '2phg', '1ph']);
 
 /** @returns {Study} */
 export function defaultStudy() {
@@ -114,10 +129,22 @@ export function defaultStudy() {
     study[section] = Object.fromEntries(fields.map(f => [f.key, f.default]));
   }
   study.rms.events = [];
+  study.emt.events = [];
   study.contingency.list = [];
   study.loadflow.areas = [];
   study.contingency.remedial = [];
   return /** @type {Study} */ (/** @type {unknown} */ (study));
+}
+
+/**
+ * A study case's settings with what a later version added: a section or setting the stored study lacks takes its
+ * default (study cases stored before EMT studies have no `emt` section). @param {Study} study @returns {Study}
+ */
+export function completeStudy(study) {
+  const def = /** @type {Record<string, Record<string, unknown>>} */ (/** @type {unknown} */ (defaultStudy()));
+  const out = /** @type {Record<string, Record<string, unknown>>} */ (/** @type {unknown} */ (study));
+  for (const [section, values] of Object.entries(def)) out[section] = { ...values, ...(out[section] ?? {}) };
+  return study;
 }
 
 /** @param {string} [name] @returns {PowerDocument} */
@@ -290,6 +317,22 @@ export function* normalizeSteps(input) {
     doc.study.rms.events.push(out);
   }
   doc.study.rms.events.sort((a, b) => a.t - b.t);
+  for (const ev of Array.isArray(study.emt?.events) ? study.emt.events : []) {
+    const e = /** @type {Record<string, unknown>} */ (ev);
+    if (typeof e?.t !== 'number' || !Number.isFinite(e.t) || e.t < 0 || !EMT_EVENT_KINDS.includes(/** @type {never} */ (e.kind))
+      || typeof e.target !== 'string' || !ids.has(e.target)) {
+      issues.push('Study case: skipped an invalid EMT event.');
+      continue;
+    }
+    /** @type {EmtEvent} */
+    const out = { t: e.t, kind: /** @type {EmtEvent['kind']} */ (e.kind), target: e.target };
+    if (e.kind === 'fault') {
+      if (EMT_FAULTS.includes(/** @type {never} */ (e.fault))) out.fault = /** @type {EmtFaultType} */ (e.fault);
+      if (typeof e.r === 'number' && Number.isFinite(e.r) && e.r >= 0) out.r = e.r;
+    }
+    doc.study.emt.events.push(out);
+  }
+  doc.study.emt.events.sort((a, b) => a.t - b.t);
   return { doc, issues };
 }
 

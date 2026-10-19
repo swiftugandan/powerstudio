@@ -65,6 +65,7 @@ changed meanwhile. Position changes are not sent to the engines, which never rea
 | `ps-lf` | Newton-Raphson and DC load flow on sparse matrices |
 | `ps-sc` | IEC 60909-style short circuit |
 | `ps-dyn` | Stability simulation: machines and their controls solved with the network by the implicit trapezoidal rule (see below) |
+| `ps-emt` | Electromagnetic transients: the three-phase circuit of a solved network, stepped by Dommel's method (see below) |
 | `ps-study` | Studies on a model, contingency analysis, reports, the request interface (`api.rs`), the benchmark kit's comparison (`compare.rs`) and key derivation for encrypted projects (`crypto.rs`) |
 | `ps-wasm` | The WebAssembly boundary: `ps_call`, `ps_alloc`, `ps_free` |
 | `ps-cli` | `ps`, the native runner for studies and benchmarks |
@@ -83,6 +84,16 @@ the rotor model with its round-rotor data, and `Controls` (exciter, governor, st
 its parameters in DYR order. In the document they are flat generator fields plus three `controller` fields holding
 `null` or `{ model, â€¦parameters }`; the inspector edits a control's parameters in a group under its model choice, and
 the data sheet shows the model's name. `ps-io/src/dyr.rs` applies a PSS/E DYR file to a model read from RAW.
+
+**Electromagnetic transients (`ps-emt`).** `dense.rs` holds the small matrices of coupled elements and the
+transformations between phase, sequence and modal quantities; `circuit.rs` a linear circuit of ports (weighted sums of
+node voltages) with coupled R-L branches and series sources, capacitances, conductances, switches, travelling-wave
+lines and current injections, and its phasor steady state; `transient.rs` steps it: the companion models, one sparse
+matrix ordered once and factorised again only when a switch changes, two backward-Euler half steps after every
+switching, and switches that open at current zeros. `network.rs` builds the circuit of a solved network: a node per
+phase per bus, a three-pole breaker and terminal nodes per element, lines, transformer windings by vector group,
+sources and loads; `sim.rs` applies the events, keeps the traces and statistics and writes the report. The study
+(`ps-study/src/emt.rs`) solves the load flow first, as the stability study does.
 
 **Engine in the browser (`src/engine/`).** `module.js` compiles the WebAssembly module once per page, from the
 embedded copy in the built file or from the file in the source tree. `host.js` instantiates it and exchanges
@@ -233,6 +244,11 @@ flow with any recorded one: difference columns beside the values they compare (Î
 filter to the rows that changed. The result tables also filter to rows near or beyond their limits, and the
 contingency results list each branch's and busbar's worst post-contingency state with the outage behind it, so "every
 branch above 90 % in any contingency" is one click. The Project page's run log deletes a run with its report.
+
+The EMT tab of the dock plots one element's three phases at a time (a busbar's voltages, a branch's currents at either
+end, a source's or a fault's), follows the diagram's selection, and zooms the time axis; `ui/plot.js` draws each pixel
+column from the extremes of the samples in it, so a run of many cycles keeps its peaks at any width. Its other views are
+the peaks per busbar, branch, source and fault, and the switching log.
 
 The study report (`ui/report.js`) lays the active study case out for print or saving as PDF: a cover with the
 network, the study case, its scenario and variants and the run record of each result (results calculated on edit say

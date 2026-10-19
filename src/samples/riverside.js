@@ -64,5 +64,13 @@ export function riverside() {
     { t: 0.1, kind: 'fault', target: 'B5' },
     { t: 0.25, kind: 'clear', target: 'B5' },
   ] };
+  // EMT: an earth fault at Hilltop cleared at its current zero, then the capacitor bank switched out (its poles open at
+  // current zeros, leaving charge on it) and back in half a cycle after phase a's charge was left, at the opposite peak.
+  doc.study.emt = { ...doc.study.emt, tEnd: 0.2, dtUs: 50, events: [
+    { t: 0.02, kind: 'fault', target: 'B5', fault: '1ph' },
+    { t: 0.08, kind: 'clear', target: 'B5' },
+    { t: 0.12, kind: 'trip', target: 'S1' },
+    { t: 0.1601, kind: 'close', target: 'S1' },
+  ] };
   return doc;
 }

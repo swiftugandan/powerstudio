@@ -655,6 +655,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ps-emt"
+version = "1.1.0"
+dependencies = [
+ "ps-lf",
+ "ps-model",
+ "ps-net",
+ "ps-num",
+ "ps-sparse",
+ "serde",
+]
+
+[[package]]
 name = "ps-io"
 version = "1.1.0"
 dependencies = [
@@ -727,6 +739,7 @@ version = "1.1.0"
 dependencies = [
  "argon2",
  "ps-dyn",
+ "ps-emt",
  "ps-io",
  "ps-lf",
  "ps-model",
