@@ -43,8 +43,10 @@ export async function buildSite() {
     n1Bad: String(s.contingency.bad), n1Total: String(s.contingency.total), n1Outage: s.contingency.outage, n1Loaded: s.contingency.loaded, n1Loading: num(s.contingency.loading, 0),
     rmsVerdict: s.rms.stable ? 'Stays in step' : 'Loses step',
     rmsDetail: `${s.rms.machines} machines through a fault at ${s.rms.faultBus} cleared in ${num(s.rms.clearing * 1000, 0)} ms${s.rms.tripped ? ` by tripping ${s.rms.tripped}` : ''}`,
+    emtPeak: num(s.emt.peak, 1),
+    emtDetail: `peak current into a ${s.emt.fault} fault at ${s.emt.bus}, DC offset included${s.emt.cleared ? ', cleared at its current zeros' : ''}`,
     agreeMatpower: sci(a.matpower), agreeLf: sci(a.pandapowerLf), agreeScSym: sci(a.scSymmetric), agreeScEarth: sci(a.scEarth),
-    iconLoadflow: icon('loadflow', 20), iconShortcircuit: icon('shortcircuit', 20), iconContingency: icon('contingency', 20), iconRms: icon('rms', 20),
+    iconLoadflow: icon('loadflow', 20), iconShortcircuit: icon('shortcircuit', 20), iconContingency: icon('contingency', 20), iconRms: icon('rms', 20), iconEmt: icon('emt', 20),
   };
   let page = await readFile(join(root, 'site', 'index.html'), 'utf8');
   page = page.replace(/\{\{(\w+)\}\}/g, (match, key) => {

@@ -633,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "ps-cli"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ps-io",
  "ps-model",
@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "ps-dyn"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ps-lf",
  "ps-model",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "ps-emt"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ps-lf",
  "ps-model",
@@ -668,7 +668,7 @@ dependencies = [
 
 [[package]]
 name = "ps-io"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "miniz_oxide",
  "ps-model",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "ps-lf"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ps-num",
  "ps-sparse",
@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "ps-model"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "postcard",
  "serde",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "ps-net"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ps-lf",
  "ps-model",
@@ -711,11 +711,11 @@ dependencies = [
 
 [[package]]
 name = "ps-num"
-version = "1.1.0"
+version = "1.2.0"
 
 [[package]]
 name = "ps-sc"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ps-model",
  "ps-net",
@@ -727,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "ps-sparse"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "faer",
  "ps-num",
@@ -735,7 +735,7 @@ dependencies = [
 
 [[package]]
 name = "ps-study"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "argon2",
  "ps-dyn",
@@ -753,14 +753,14 @@ dependencies = [
 
 [[package]]
 name = "ps-topology"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ps-model",
 ]
 
 [[package]]
 name = "ps-wasm"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "ps-io",
  "ps-model",

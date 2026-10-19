@@ -54,7 +54,7 @@ export function diagramSvg(theme) {
     .replace(/<svg ([^>]*?) width="[\d.]+" height="[\d.]+">/, '<svg $1 role="img" aria-label="Single-line diagram of the IEEE 14-bus system after a load flow" preserveAspectRatio="xMidYMid meet">');
 }
 
-/** The four studies on the IEEE 14-bus sample, as the app runs them. */
+/** The five studies on the IEEE 14-bus sample, as the app runs them. */
 export function studies() {
   const doc = ieee14();
   const name = (/** @type {string} */ id) => doc.elements.find(e => e.id === id)?.name ?? id;
@@ -75,6 +75,11 @@ export function studies() {
   const rmsMs = performance.now() - t;
   const fault = rms.events.find(e => e.kind === 'fault'), clear = rms.events.find(e => e.kind === 'clear');
   const trip = rms.events.find(e => e.kind === 'trip');
+  t = performance.now();
+  const emt = engine.emt(doc);
+  const emtMs = performance.now() - t;
+  const emtFault = emt.faults.reduce((m, f) => (f.peak > m.peak ? f : m));
+  const kinds = { '3ph': 'three-phase', '2ph': 'line-to-line', '2phg': 'two-phase-to-earth', '1ph': 'line-to-earth' };
   return {
     loadflow: { iterations: lf.iterations, losses: lf.totals.losses, generation: lf.totals.generation, ms: lfMs },
     shortcircuit: { ikss: top.ikss, ip: top.ip, bus: name(top.id), buses: sc.buses.length, ms: scMs },
@@ -82,6 +87,7 @@ export function studies() {
     rms: { stable: rms.stable, machines: rms.machines.filter(m => doc.elements.find(e => e.id === m.id)?.cls === 'gen').length,
       faultBus: fault ? name(fault.target) : '', clearing: fault && clear ? clear.t - fault.t : NaN, tripped: trip ? name(trip.target) : '',
       seconds: rms.t[rms.t.length - 1], steps: rms.steps, ms: rmsMs },
+    emt: { peak: emtFault.peak, bus: name(emtFault.target), fault: kinds[emtFault.fault], cleared: emtFault.tOff !== null, steps: emt.steps, ms: emtMs },
   };
 }
 

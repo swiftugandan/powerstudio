@@ -4,6 +4,19 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## Release 1.2.0 (2026-10-19, local, branch `claude/epic-curie-q3b2im`)
+
+| Check | Result |
+| --- | --- |
+| Documents saved by 1.1.0 (its samples at commit 830536b, with the voltages pandapower gave them) | Open with nothing to report, keep every value and solve to those voltages (1e-8 p.u.) |
+| `npm test`, including the site build with the EMT figure computed by the engine | 158 passed, 2 skipped |
+| The marketing page at 1280, 900 and 390 px wide in both themes | Five study cards in three, two and one columns; no sideways scrolling |
+
+The EMT branch's review before release found a close that did not cancel a trip still waiting for its current zeros,
+a switch closed in the step before taken to have passed a current zero, one sample more than asked for, an unbounded
+report on networks with more than 20,000 waveforms, a load switched in without the study case's load scaling, and a
+plot window inverted by a drag past the end of the run; all are fixed, the first two with engine tests.
+
 ## Electromagnetic transients (2026-10-19, local, branch `claude/trusting-feynman-p3q1c6`)
 
 | Check | Result |
