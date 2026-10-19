@@ -29,19 +29,7 @@ const collator = new Intl.Collator(undefined, { numeric: true });
  */
 export function dataTable(spec) {
   const { columns, id, selected, sort } = spec;
-  const col = columns.find(c => c.key === sort.key) ?? columns[0];
-  // Sort keys are read once per row, then the rows are ordered by index.
-  const keys = spec.rows.map(r => col.value(r));
-  const order = keys.map((_, i) => i).sort((a, b) => {
-    const x = keys[a], y = keys[b];
-    if (typeof x === 'number' && typeof y === 'number') {
-      const fx = Number.isFinite(x), fy = Number.isFinite(y);
-      if (!fx || !fy) return fx === fy ? 0 : fx ? -1 : 1; // missing values last
-      return (x - y) * sort.dir;
-    }
-    return collator.compare(String(x), String(y)) * sort.dir;
-  });
-  const rows = order.map(i => spec.rows[i]);
+  const rows = sortRows(columns, spec.rows, sort);
   const head = h('tr', {}, ...columns.map(c => h('th', {
     class: c.num ? 'num' : '', scope: 'col', 'data-key': c.key, tabindex: '0', title: c.help,
     'aria-sort': c.key === sort.key ? (sort.dir === 1 ? 'ascending' : 'descending') : undefined,
@@ -101,6 +89,25 @@ export function dataTable(spec) {
   head.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); const th = /** @type {HTMLElement} */ (e.target); if (th.dataset.key) spec.onSort(th.dataset.key); } });
   body.addEventListener('click', e => { const tr = /** @type {HTMLElement | null} */ (/** @type {HTMLElement} */ (e.target).closest('tr')); if (tr?.dataset.id) spec.onRow(tr.dataset.id, e); });
   return table;
+}
+
+/** Rows in a table's order: by the sort column, missing values last. The chart of a table shows them in this order too.
+ * @template R
+ * @param {Column<R>[]} columns @param {R[]} rows @param {{ key: string, dir: 1 | -1 }} sort @returns {R[]} */
+export function sortRows(columns, rows, sort) {
+  const col = columns.find(c => c.key === sort.key) ?? columns[0];
+  // Sort keys are read once per row, then the rows are ordered by index.
+  const keys = rows.map(r => col.value(r));
+  const order = keys.map((_, i) => i).sort((a, b) => {
+    const x = keys[a], y = keys[b];
+    if (typeof x === 'number' && typeof y === 'number') {
+      const fx = Number.isFinite(x), fy = Number.isFinite(y);
+      if (!fx || !fy) return fx === fy ? 0 : fx ? -1 : 1; // missing values last
+      return (x - y) * sort.dir;
+    }
+    return collator.compare(String(x), String(y)) * sort.dir;
+  });
+  return order.map(i => rows[i]);
 }
 
 /** CSV text for a table's columns and rows (RFC 4180 quoting, values unformatted). @template R

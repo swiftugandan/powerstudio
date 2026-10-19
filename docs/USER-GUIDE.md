@@ -6,6 +6,9 @@ simulations on it. Everything happens on your
 device; nothing is uploaded. This guide walks through the work in the order you will meet it. docs/ENGINE.md describes
 exactly what each calculation computes; the README lists what PowerStudio does not do.
 
+New to PowerStudio? [Get started with PowerStudio](GETTING-STARTED.md) takes you through a first session on the IEEE
+14-bus sample, and this guide fills in the detail.
+
 ## Starting
 
 Open `PowerStudio.html` (the single file from a release, or the hosted app). The first time, it opens the IEEE
@@ -127,6 +130,14 @@ Ctrl+. cancels a running calculation. With "Recalculate on edit" on, the load fl
 Results appear on the diagram (coloured by loading or voltage, with result boxes) and in the results panel's tab for
 the calculation. Click a row to select the element; sort by any column; export the table as CSV. A result that no
 longer matches the network after an edit is marked as old.
+
+**Charts.** Switch a result from Table to Chart to see it as bars: the busbar voltages as a profile around 1 p.u.
+with the voltage band shaded, the branch loadings ranked against 90 % and 100 %, the worst loading of each branch
+under N-1 against the limit, and Ik″ at every busbar. Bars take the diagram's colours. The chart shows the same rows
+as the table, with the same filters (near limits, outside the band, changed), and a compared run shows as a line
+across each bar. Choose the order beside the filters; hover over a bar for its values. Click a bar to select its
+element; with the chart focused, the arrow keys, Home and End move between bars and Enter selects. CSV export gives the
+table either way. The choice lasts until you switch back.
 
 **Labels on the diagram.** Names and result boxes are placed so that none covers another: each starts in its usual
 place and moves aside, along its line or bar, when that place is taken; where nothing nearby is free it moves further
