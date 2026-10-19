@@ -542,7 +542,8 @@ impl Transient {
         self.n += 1;
         let mut opened = Vec::new();
         for k in 0..self.sw_i.len() {
-            if self.pending[k] && self.sw_i[k] * self.sw_last[k] <= 0.0 {
+            // A sign change, or no current at all; a switch closed in the last step has no previous current to compare.
+            if self.pending[k] && (self.sw_i[k] * self.sw_last[k] < 0.0 || self.sw_i[k] == 0.0) {
                 opened.push(k);
             }
             self.sw_last[k] = self.sw_i[k];

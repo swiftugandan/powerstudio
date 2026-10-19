@@ -325,8 +325,15 @@ pub fn simulate(
 
     // Recording.
     let traces = 3 * buses.len() + 6 * branches.len() + 3 * sources.len() + 3 * faults.len();
-    let samples = max_samples.min((VALUE_BUDGET / traces.max(1)).max(MIN_SAMPLES)).max(2);
-    let every = (steps as usize + 1).div_ceil(samples).max(1) as u64;
+    if VALUE_BUDGET / traces.max(1) < MIN_SAMPLES {
+        return Err(format!(
+            "This network has {traces} waveforms to record, more than an EMT simulation keeps ({}). Simulate a smaller part of it.",
+            VALUE_BUDGET / MIN_SAMPLES
+        ));
+    }
+    let samples = max_samples.min(VALUE_BUDGET / traces.max(1)).max(2);
+    // Every `every`-th step and the last one: at most `samples` in all.
+    let every = (steps as usize).div_ceil(samples - 1).max(1) as u64;
     let cycle = (1.0 / (f_hz * dt)).round().max(1.0) as usize;
     let parts = Parts {
         buses: &buses,
@@ -734,7 +741,8 @@ fn apply(
                             if out && tr.is_closed(s) && !tr.is_pending(s) {
                                 changed = true;
                                 if instant { tr.open(s) } else { tr.open_at_zero(s) }
-                            } else if !out && !tr.is_closed(s) {
+                            } else if !out && (!tr.is_closed(s) || tr.is_pending(s)) {
+                                // A pole still waiting for its current zero stays closed: the close cancels the trip.
                                 changed = true;
                                 tr.close(s);
                             }

@@ -258,6 +258,24 @@ pub fn shunt_admittance(s: &ps_model::Shunt) -> C64 {
     }
 }
 
+/// A shunt's admittance per unit on `base_mva` at a bus of `base_kv`.
+pub fn shunt_pu(s: &ps_model::Shunt, base_kv: f64, base_mva: f64) -> C64 {
+    shunt_admittance(s).scale(base_kv * base_kv / base_mva)
+}
+
+/// A load's consumption per unit on `base_mva`, multiplied by `load_scale`.
+pub fn load_pu(l: &ps_model::Load, load_scale: f64, base_mva: f64) -> C64 {
+    C64::new(l.p, l.q).scale(load_scale / base_mva)
+}
+
+/// A source's positive-sequence impedance per unit on `base_mva` from its short-circuit power `sk_mva` and R/X, with
+/// its zero sequence from X0/X1 and R0/X0 (`None` when X0/X1 is zero: no zero-sequence path).
+pub fn source_impedance_pu(base_mva: f64, sk_mva: f64, rx: f64, x0x1: f64, r0x0: f64) -> (C64, Option<C64>) {
+    let x = (base_mva / sk_mva) / (1.0 + rx * rx).sqrt();
+    let z0 = (x0x1 > 0.0).then(|| C64::new(r0x0 * x0x1 * x, x0x1 * x));
+    (C64::new(rx * x, x), z0)
+}
+
 /// Where a calculation branch comes from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BranchSource {
@@ -313,6 +331,8 @@ pub struct Calc {
     pub shunt_controls: Vec<u32>,
     /// What the build simplified or skipped, in plain words.
     pub warnings: Vec<String>,
+    /// The multiplier on every load the network was built with.
+    pub load_scale: f64,
 }
 
 /// An HVDC link's injections, MW and Mvar into the AC network at each station (generator convention).
@@ -546,8 +566,8 @@ impl Calc {
             net.loads.push(PuLoad {
                 id: loads.len(),
                 bus: b,
-                p: l.p * opt.load_scale / sb,
-                q: l.q * opt.load_scale / sb,
+                p: load_pu(l, opt.load_scale, sb).re,
+                q: load_pu(l, opt.load_scale, sb).im,
                 p_zip: l.p_zip,
                 q_zip: l.q_zip,
                 scalable: true,
@@ -562,8 +582,7 @@ impl Calc {
             if !on(Class::Shunt, k) {
                 continue;
             }
-            let kv = net.buses[b].base_kv;
-            let y = shunt_admittance(s).scale(kv * kv / sb);
+            let y = shunt_pu(s, net.buses[b].base_kv, sb);
             net.shunts.push(PuShunt {
                 id: shunts.len(),
                 bus: b,
@@ -627,6 +646,7 @@ impl Calc {
             tap_sources,
             shunt_controls,
             warnings,
+            load_scale: opt.load_scale,
         };
         calc.start_internal_buses();
         calc

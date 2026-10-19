@@ -98,8 +98,10 @@ export class Plot {
     else {
       // At least ten samples stay in view.
       const least = d.t.length > 1 ? 10 * (b - a) / (d.t.length - 1) : 0;
-      let lo = Math.max(a, t0), hi = Math.min(b, t1);
-      if (hi - lo < least) { const mid = (lo + hi) / 2; lo = Math.max(a, mid - least / 2); hi = Math.min(b, lo + least); }
+      // In order and within the run, whichever way and wherever the drag went.
+      const clamp = (/** @type {number} */ t) => Math.min(b, Math.max(a, t));
+      let lo = clamp(Math.min(t0, t1)), hi = clamp(Math.max(t0, t1));
+      if (hi - lo < least) { const mid = (lo + hi) / 2; lo = Math.max(a, mid - least / 2); hi = Math.min(b, lo + least); lo = Math.max(a, hi - least); }
       d.window = lo <= a && hi >= b ? null : [lo, hi];
     }
     this.onZoom?.(d.window ?? null);

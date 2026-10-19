@@ -618,14 +618,6 @@ fn untwo(yff: C64, yft: C64, ytt: C64, ratio: f64, shift: f64) -> (C64, C64, C64
     (ys, yff.scale(ratio * ratio) - ys, ytt - ys, ratio, shift)
 }
 
-/// A source's impedance from a short-circuit power and R/X at a bus, p.u., with its zero sequence from X0/X1 and
-/// R0/X0 (`None` when X0/X1 is zero: no zero-sequence path).
-fn network_impedance(sb: f64, sk: f64, rx: f64, x0x1: f64, r0x0: f64) -> (C64, Option<C64>) {
-    let x = (sb / sk) / (1.0 + rx * rx).sqrt();
-    let z0 = (x0x1 > 0.0).then(|| C64::new(r0x0 * x0x1 * x, x0x1 * x));
-    (C64::new(rx * x, x), z0)
-}
-
 /// Builds the circuit of `calc` (whose network is the load flow's solved one) from the load flow `lf`.
 pub fn build(model: &Model, calc: &Calc, lf: &Solution, st: &EmtSettings, dt: f64) -> Result<Network, String> {
     let net = &calc.net;
@@ -741,7 +733,7 @@ pub fn build(model: &Model, calc: &Calc, lf: &Solution, st: &EmtSettings, dt: f6
             continue;
         }
         let (z1, z0) = match g.sc.feeder {
-            Some(f) => network_impedance(sb, f.sk_max, f.rx_max, f.x0x1, f.r0x0),
+            Some(f) => ps_net::source_impedance_pu(sb, f.sk_max, f.rx_max, f.x0x1, f.r0x0),
             None => {
                 let z = |x: f64| ps_net::machine_z_pu(x, g.rated_mva, g.rated_kv, sb, kv);
                 let z1 = C64::new(z(g.sc.rs), z(g.sc.xdss));
@@ -764,7 +756,7 @@ pub fn build(model: &Model, calc: &Calc, lf: &Solution, st: &EmtSettings, dt: f6
             continue;
         }
         let i = (C64::new(u.p, u.q) / v).conj();
-        let (z1, z0) = network_impedance(sb, g.sk_max, g.rx_max, g.x0x1, g.r0x0);
+        let (z1, z0) = ps_net::source_impedance_pu(sb, g.sk_max, g.rx_max, g.x0x1, g.r0x0);
         let name = label(model, Class::ExternalGrid, row);
         b.source(&g.id.clone(), &name, bus, v + z1 * i, z1, z0)?;
     }
@@ -788,13 +780,12 @@ pub fn build(model: &Model, calc: &Calc, lf: &Solution, st: &EmtSettings, dt: f6
     }
     for l in model.loads.iter().filter(|l| !l.in_service) {
         if let Some(bus) = topo.bus_of(l.node) {
-            b.shunt_element(&l.id, bus, C64::new(l.p / sb, -l.q / sb), false);
+            b.shunt_element(&l.id, bus, ps_net::load_pu(l, calc.load_scale, sb).conj(), false);
         }
     }
     for s in model.shunts.iter().filter(|s| !s.in_service) {
         if let Some(bus) = topo.bus_of(s.node) {
-            let kv = net.buses[bus].base_kv;
-            b.shunt_element(&s.id, bus, ps_net::shunt_admittance(s).scale(kv * kv / sb), false);
+            b.shunt_element(&s.id, bus, ps_net::shunt_pu(s, net.buses[bus].base_kv, sb), false);
         }
     }
     // Faults.

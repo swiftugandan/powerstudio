@@ -261,6 +261,52 @@ fn breakers_open_at_current_zeros() {
 }
 
 #[test]
+fn a_close_cancels_a_trip_still_waiting_for_its_current_zeros() {
+    // The close comes 0.1 ms after the trip, before any pole has reached its current zero: the cable stays in.
+    let r = emt(
+        "inputs/riverside.json",
+        json!({ "tEnd": 0.06, "dtUs": 20, "lineModel": "pi", "maxSamples": 1_000_000,
+                "events": [{ "t": 0.03, "kind": "trip", "target": "L1" }, { "t": 0.0301, "kind": "close", "target": "L1" }] }),
+    );
+    assert!(
+        r["events"][1]["applied"].as_bool().unwrap(),
+        "{}",
+        r["events"][1]["note"]
+    );
+    let br = r["branches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "L1")
+        .unwrap();
+    for end in ["from", "to"] {
+        for p in 0..3 {
+            let i = series(&br[end][p]);
+            let tail = &i[i.len() - 1000..];
+            assert!(
+                tail.iter().any(|&x| x != 0.0),
+                "{end} {p}: the pole opened after the close"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_run_keeps_at_most_its_samples() {
+    let r = emt(
+        "emt/emt-line.json",
+        json!({ "tEnd": 0.06, "dtUs": 50, "maxSamples": 10 }),
+    );
+    let t = series(&r["t"]);
+    assert!(t.len() <= 10, "{} samples", t.len());
+    // Times are kept as f32.
+    assert!(
+        (t[t.len() - 1] - 0.06).abs() < 1e-6,
+        "the last sample is the end: {t:?}"
+    );
+}
+
+#[test]
 fn energising_an_out_of_service_line_and_reclosing() {
     let r = emt(
         "emt/emt-line.json",

@@ -533,8 +533,8 @@ nominal crest `√2·Un/√3`, with its time, and the lowest and highest one-cyc
 cycle; per branch the phase currents into it at each end (kA) and their peak; per source and fault the phase currents
 and their peak, and per fault the largest phase's RMS current over its last full cycle and when it began and went out;
 the events with what they did and every pole that opened at a current zero. Peaks and RMS values are taken at every
-step, not from the kept samples. A report keeps up to 10,000 samples a trace and at most six million values in all (at
-least 300 samples a trace). The default step is 50 µs and the default time 0.2 s; Riverside's 0.2 s takes about 0.2 s
+step, not from the kept samples. A report keeps up to 10,000 samples a trace and at most six million values in all; a
+network with more traces than leave 300 samples each (20,000) is refused. The default step is 50 µs and the default time 0.2 s; Riverside's 0.2 s takes about 0.2 s
 natively and IEEE 14's about 0.4 s.
 
 **Checked by**
