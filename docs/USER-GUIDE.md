@@ -5,6 +5,9 @@ IEC 60909-style short circuits, contingency analysis and stability simulations o
 device; nothing is uploaded. This guide walks through the work in the order you will meet it. docs/ENGINE.md describes
 exactly what each calculation computes; the README lists what PowerStudio does not do.
 
+New to PowerStudio? [Get started with PowerStudio](GETTING-STARTED.md) takes you through a first session on the IEEE
+14-bus sample, and this guide fills in the detail.
+
 ## Starting
 
 Open `PowerStudio.html` (the single file from a release, or the hosted app). The first time, it opens the IEEE
