@@ -9,6 +9,8 @@ diagram is drawn with WebGPU, with a Canvas 2D fallback.
 **Open the app: https://swiftugandan.github.io/powerstudio/app/** · Website: https://swiftugandan.github.io/powerstudio/ ·
 Offline copy: download `PowerStudio.html` from the [latest release](https://github.com/swiftugandan/powerstudio/releases/latest)
 
+New to PowerStudio? [Get started](docs/GETTING-STARTED.md) with a 30-minute walkthrough on the IEEE 14-bus sample.
+
 ![PowerStudio after a load flow on the IEEE 14-bus system](docs/screenshots/01-load-flow.png)
 
 > PowerStudio is an independent open-source project inspired by the workflow of desktop power system tools such as
@@ -111,6 +113,7 @@ component in a CycloneDX bill of materials.
 
 | Document | For |
 | --- | --- |
+| [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | A first session: load flow, study cases, short circuit, contingency, stability, export |
 | [docs/USER-GUIDE.md](docs/USER-GUIDE.md) | Using the app: drawing, data, study cases, calculations, import and export |
 | [docs/ENGINE.md](docs/ENGINE.md) | What every calculation computes, its conventions and how it is checked |
 | [docs/BENCHMARK-KIT.md](docs/BENCHMARK-KIT.md) | Comparing PowerStudio with your own tool on your own model |
