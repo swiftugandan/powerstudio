@@ -3,8 +3,11 @@
 import { h, esc } from './dom.js';
 import { icon } from './icons.js';
 import { fixed, clock, duration } from './format.js';
-import { dataTable, toCSV } from './table.js';
+import { dataTable, sortRows, toCSV } from './table.js';
 import { Plot, seriesColor } from './plot.js';
+import { BarChart } from './chart.js';
+import { loadingColor, voltageColor } from './overlay.js';
+import { mix } from '../render/displaylist.js';
 import { CLASSES } from '../core/catalog.js';
 import { effectiveTheme } from './theme.js';
 import { enumLabel } from './fields.js';
@@ -80,6 +83,8 @@ export class Dock {
     });
     /** @type {Plot | null} */
     this.plot = null;
+    /** The chart on screen, when a result shows as one. @type {BarChart | null} */
+    this.chart = null;
     this.sheet = new DataSheet(app);
   }
 
@@ -133,12 +138,15 @@ export class Dock {
 
   render() {
     this.renderTabs();
-    this.body.classList.remove('column');
+    this.body.classList.remove('column', 'charted');
     this.current = null;
     const app = this.app;
     const scroll = this.fromTop ? 0 : this.body.scrollTop;
     this.fromTop = false;
     if (this.tab !== 'rms') this.plot = null;
+    // A chart drawn again keeps the keyboard on the bar it was on.
+    const chartFocus = this.chart && document.activeElement === this.chart.canvas ? this.chart.focusedId() ?? '' : null;
+    this.chart = null;
     if (this.tab === 'output') this.renderLog();
     else if (this.tab === 'data') { const { toolbar, sheet } = this.sheet.render(this.body); this.mount([toolbar], sheet); }
     else if (!app.results[this.tab]) this.renderEmpty(this.tab);
@@ -147,6 +155,11 @@ export class Dock {
     else if (this.tab === 'contingency') this.renderContingency();
     else if (this.tab === 'rms') { this.renderRms(); return; }
     this.body.scrollTop = scroll;
+    const chart = /** @type {BarChart | null} */ (this.chart);
+    if (chart && chartFocus !== null) {
+      chart.canvas.focus();
+      if (chartFocus) chart.moveTo(Math.max(0, chart.data?.bars.findIndex(b => b.id === chartFocus) ?? 0));
+    }
   }
 
   renderLog() {
@@ -211,6 +224,48 @@ export class Dock {
   table(columns, rows, name, sortKey, def, dir = 1) {
     this.current = { columns, rows, name };
     return dataTable({ columns, rows, id: r => r.id, selected: this.app.selection, sort: this.sortFor(sortKey, def, dir), onSort: this.onSort(sortKey), onRow: (id, e) => this.pick(id, e), scroller: this.body });
+  }
+
+  /**
+   * A result as a table, or as a chart where the view has one and charts are chosen. Both show the same rows in the same
+   * order, so a sort or filter chosen in one holds in the other; the CSV export is the table's either way.
+   * @param {{ columns: any[], rows: any[], name: string, sortKey: string, def: string, dir?: 1 | -1,
+   *   chart?: { orders: Array<[string, 1 | -1, string]>, data: (rows: any[]) => import('./chart.js').ChartData } }} spec
+   * @returns {{ content: HTMLElement, as: HTMLElement | null, order: HTMLElement | null }}
+   */
+  present(spec) {
+    const dir = spec.dir ?? 1;
+    if (!spec.chart) return { content: this.table(spec.columns, spec.rows, spec.name, spec.sortKey, spec.def, dir), as: null, order: null };
+    const as = this.segmented([['table', 'Table'], ['chart', 'Chart']], this.app.prefs.resultsAs, v => {
+      this.app.prefs.resultsAs = /** @type {'table' | 'chart'} */ (v);
+      this.app.savePrefs();
+    });
+    as.setAttribute('aria-label', 'Show results as');
+    if (this.app.prefs.resultsAs !== 'chart') return { content: this.table(spec.columns, spec.rows, spec.name, spec.sortKey, spec.def, dir), as, order: null };
+    this.current = { columns: spec.columns, rows: spec.rows, name: spec.name };
+    const sort = this.sortFor(spec.sortKey, spec.def, dir);
+    // The orders that suit the chart; a sort chosen in the table by another column stays, named as such.
+    const order = /** @type {HTMLSelectElement} */ (h('select', { class: 'input chart-order', 'aria-label': 'Order of the bars' }));
+    const at = spec.chart.orders.findIndex(([key, d]) => key === sort.key && d === sort.dir);
+    if (at < 0) order.append(h('option', { value: '', text: 'As sorted in the table' }));
+    spec.chart.orders.forEach(([, , label], i) => order.append(h('option', { value: String(i), text: label })));
+    order.value = at < 0 ? '' : String(at);
+    const orders = spec.chart.orders;
+    order.addEventListener('change', () => {
+      const o = orders[Number(order.value)];
+      if (!o) return;
+      sort.key = o[0];
+      sort.dir = o[1];
+      this.render();
+    });
+    const rows = sortRows(spec.columns, spec.rows, sort);
+    if (!rows.length) return { content: h('div', { class: 'dock-empty', text: 'No rows match this filter.' }), as, order };
+    this.body.classList.add('charted');
+    const host = h('div', { class: 'plot chart' });
+    this.chart = new BarChart(host);
+    this.chart.onPick = (id, e) => this.pick(id, /** @type {MouseEvent} */ (e));
+    this.chart.set(spec.chart.data(rows));
+    return { content: host, as, order };
   }
 
   /** @param {string} id */
@@ -294,7 +349,7 @@ export class Dock {
     const seg = this.segmented(views, view, v => { this.lfView = v; });
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), seg);
     /** @type {HTMLElement | null} */
-    let filters = null;
+    let filters = null, as = null, order = null;
     let table;
     if (view === 'warnings') {
       /** @typedef {{ id: string, kind: string, text: string }} WarningRow */
@@ -350,7 +405,8 @@ export class Dock {
         ...(other ? /** @type {Array<[string, string, (b: any) => boolean]>} */ ([['changed', 'Changed', b => !(Math.abs(du(b)) <= 1e-4 && Math.abs(dva(b)) <= 0.01)]]) : []),
       ], r.buses);
       filters = shown.seg;
-      table = this.table([
+      const P = app.palette;
+      const presented = this.present({ columns: [
         { key: 'name', label: 'Busbar', value: (/** @type {any} */ b) => this.nameOf(b.id) },
         { key: 'type', label: 'Type', value: (/** @type {any} */ b) => b.type },
         { key: 'kv', label: 'U', unit: 'kV', num: true, value: (/** @type {any} */ b) => b.kv, text: (/** @type {any} */ b) => fixed(b.kv, 3) },
@@ -361,7 +417,22 @@ export class Dock {
         ...(other ? [{ key: 'dva', label: 'ΔAngle', unit: '°', num: true, value: dva, text: (/** @type {any} */ b) => signed(dva(b), 3) }] : []),
         { key: 'p', label: 'P injected', unit: 'MW', num: true, value: (/** @type {any} */ b) => b.p, text: (/** @type {any} */ b) => fixed(b.p, 3) },
         { key: 'q', label: 'Q injected', unit: 'Mvar', num: true, value: (/** @type {any} */ b) => b.q, text: (/** @type {any} */ b) => fixed(b.q, 3) },
-      ], shown.rows, 'load-flow-busbars', 'lf-buses', 'name');
+      ], rows: shown.rows, name: 'load-flow-busbars', sortKey: 'lf-buses', def: 'name', chart: {
+        orders: [['name', 1, 'By name'], ['vm', 1, 'Lowest first'], ['vm', -1, 'Highest first']],
+        data: rows => {
+          const bars = rows.map(b => {
+            const x = band(b);
+            return { id: b.id, name: this.nameOf(b.id), value: b.vm, color: (x && voltageColor(P, b.vm, x.lo, x.hi)) ?? P.res.ok, lo: x?.lo, hi: x?.hi,
+              ref: other ? other.get(b.id)?.vm ?? NaN : undefined, detail: [`U ${fixed(b.kv, 3)} kV`, `Angle ${fixed(b.va, 2)}°`] };
+          });
+          const outside = bars.filter(b => b.lo !== undefined && b.hi !== undefined && (b.value < b.lo || b.value > b.hi)).length;
+          return { bars, label: 'Voltage', unit: 'p.u.', digits: 4, base: 1, refName: 'Compared run', limitName: 'Band', selected: app.selection,
+            title: `Voltage profile of ${bars.length} busbar${bars.length === 1 ? '' : 's'}${extremes(bars, 4, 'p.u.')}; ${outside || 'none'} outside ${outside === 1 ? 'its' : 'their'} band` };
+        },
+      } });
+      table = presented.content;
+      as = presented.as;
+      order = presented.order;
     } else if (view === 'branches') {
       const other = this.compare ? new Map(this.compare.result.branches.map(b => [b.id, b])) : null;
       const dl = (/** @type {any} */ b) => { const o = other?.get(b.id); return o && Number.isFinite(b.loading) && Number.isFinite(o.loading) ? b.loading - o.loading : NaN; };
@@ -372,7 +443,8 @@ export class Dock {
         ...(other ? /** @type {Array<[string, string, (b: any) => boolean]>} */ ([['changed', 'Changed', b => !(Math.abs(dl(b)) <= 0.05 && Math.abs(dp(b)) <= 0.01)]]) : []),
       ], r.branches);
       filters = shown.seg;
-      table = this.table([
+      const P = app.palette;
+      const presented = this.present({ columns: [
         { key: 'name', label: 'Branch', value: (/** @type {any} */ b) => this.nameOf(b.id) },
         { key: 'cls', label: 'Type', value: (/** @type {any} */ b) => CLASSES[/** @type {'line' | 'trafo'} */ (b.cls)].label },
         { key: 'loading', label: 'Loading', unit: '%', num: true, value: (/** @type {any} */ b) => b.loading, text: (/** @type {any} */ b) => fixed(b.loading, 1),
@@ -385,7 +457,21 @@ export class Dock {
         { key: 'qTo', label: 'Q to', unit: 'Mvar', num: true, value: (/** @type {any} */ b) => b.qTo, text: (/** @type {any} */ b) => fixed(b.qTo, 3) },
         { key: 'iFrom', label: 'I max', unit: 'kA', num: true, value: (/** @type {any} */ b) => Math.max(b.iFrom, b.iTo), text: (/** @type {any} */ b) => fixed(Math.max(b.iFrom, b.iTo), 4) },
         { key: 'pLoss', label: 'Losses', unit: 'kW', num: true, value: (/** @type {any} */ b) => b.pLoss * 1000, text: (/** @type {any} */ b) => fixed(b.pLoss * 1000, 1) },
-      ], shown.rows, 'load-flow-branches', 'lf-branches', 'loading', -1);
+      ], rows: shown.rows, name: 'load-flow-branches', sortKey: 'lf-branches', def: 'loading', dir: -1, chart: {
+        orders: [['loading', -1, 'Highest first'], ['loading', 1, 'Lowest first'], ['name', 1, 'By name']],
+        data: rows => {
+          const bars = rows.map(b => ({ id: b.id, name: this.nameOf(b.id), value: b.loading, color: loadingColor(P, b.loading),
+            ref: other ? other.get(b.id)?.loading ?? NaN : undefined,
+            detail: [`P from ${fixed(b.pFrom, 2)} MW`, `I max ${fixed(Math.max(b.iFrom, b.iTo), 3)} kA`] }));
+          const over = bars.filter(b => b.value > 100).length;
+          return { bars, label: 'Loading', unit: '%', digits: 1, base: 0, refName: 'Compared run', selected: app.selection,
+            lines: [{ value: 90, label: '90 %', tone: 'warn' }, { value: 100, label: '100 %', tone: 'bad' }],
+            title: `Loading of ${bars.length} branch${bars.length === 1 ? '' : 'es'}${extremes(bars, 1, '%')}; ${over || 'none'} above 100 %` };
+        },
+      } });
+      table = presented.content;
+      as = presented.as;
+      order = presented.order;
     } else {
       const rows = [
         ...r.gens.map(u => ({ ...u, kind: 'gen' })), ...r.grids.map(u => ({ ...u, kind: 'extgrid' })),
@@ -404,7 +490,7 @@ export class Dock {
     const pills = notes.length > 0 && notes.length <= 3 && notes.every(n => n.length <= 200);
     // Filters for the busbar and branch tables, and the comparison with a recorded run.
     const compare = this.compareControl();
-    const second = filters || compare ? this.toolbar(filters ?? h('span'), h('span', { class: 'grow' }), compare ?? h('span')) : null;
+    const second = filters || compare || as ? this.toolbar(as ?? h('span'), filters ?? h('span'), h('span', { class: 'grow' }), order ?? h('span'), compare ?? h('span')) : null;
     this.mount([bar, second, pills ? h('div', { class: 'dock-toolbar', html: notes.map(n => `<span class="pill warn">${icon('warning', 13)}${esc(n)}</span>`).join('') }) : null], table);
   }
 
@@ -419,9 +505,11 @@ export class Dock {
     const view = r.contributions.length ? this.scView : 'buses';
     const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), this.segmented(items, view, v => { this.scView = v; }));
     let table;
+    /** @type {HTMLElement | null} */
+    let as = null, order = null;
     if (view === 'buses') {
-      const one = r.fault === '1ph';
-      table = this.table([
+      const one = r.fault === '1ph', P = app.palette, maxI = Math.max(1e-9, maxOf(r.buses.map(b => b.ikss)));
+      const presented = this.present({ columns: [
         { key: 'name', label: 'Busbar', value: (/** @type {any} */ b) => this.nameOf(b.id) },
         { key: 'un', label: 'Un', unit: 'kV', num: true, value: (/** @type {any} */ b) => Number(app.store.get(b.id)?.vn ?? NaN), text: (/** @type {any} */ b) => fixed(Number(app.store.get(b.id)?.vn ?? NaN), 2) },
         { key: 'ikss', label: 'Ik″', unit: 'kA', num: true, value: (/** @type {any} */ b) => b.ikss, text: (/** @type {any} */ b) => fixed(b.ikss, 3) },
@@ -434,7 +522,19 @@ export class Dock {
         { key: 'z1', label: '|Z1|', unit: 'Ω', num: true, value: (/** @type {any} */ b) => Math.hypot(b.r1, b.x1), text: (/** @type {any} */ b) => fixed(Math.hypot(b.r1, b.x1), 4) },
         ...(one ? [{ key: 'z0', label: '|Z0|', unit: 'Ω', num: true, value: (/** @type {any} */ b) => Math.hypot(b.r0, b.x0), text: (/** @type {any} */ b) => (Math.hypot(b.r0, b.x0) > 1e6 ? 'open' : fixed(Math.hypot(b.r0, b.x0), 4)) }] : []),
         { key: 'c', label: 'c', num: true, value: (/** @type {any} */ b) => b.c, text: (/** @type {any} */ b) => fixed(b.c, 2) },
-      ], r.buses, 'short-circuit-busbars', 'sc-buses', 'ikss', -1);
+      ], rows: r.buses, name: 'short-circuit-busbars', sortKey: 'sc-buses', def: 'ikss', dir: -1, chart: {
+        orders: [['ikss', -1, 'Highest first'], ['ikss', 1, 'Lowest first'], ['name', 1, 'By name']],
+        data: rows => {
+          // Coloured as on the diagram: from the lowest current to the highest.
+          const bars = rows.map(b => ({ id: b.id, name: this.nameOf(b.id), value: b.ikss, color: mix(P.res.ok, P.res.high, Math.min(1, b.ikss / maxI)),
+            detail: [`ip ${fixed(b.ip, 3)} kA`, ...(r.fault === '3ph' && r.mode === 'max' ? [`Ib ${fixed(b.ib, 3)} kA`] : []), `Sk″ ${fixed(b.skss, 1)} MVA`] }));
+          return { bars, label: 'Ik″', unit: 'kA', digits: 3, base: 0, selected: app.selection,
+            title: `Initial short-circuit current at ${bars.length} busbar${bars.length === 1 ? '' : 's'}${extremes(bars, 3, 'kA')}` };
+        },
+      } });
+      table = presented.content;
+      as = presented.as;
+      order = presented.order;
     } else {
       table = this.table([
         { key: 'name', label: 'Branch', value: (/** @type {any} */ c) => this.nameOf(c.id) },
@@ -443,7 +543,8 @@ export class Dock {
       ], r.contributions, 'short-circuit-contributions', 'sc-contrib', 'iFrom', -1);
     }
     const notes = r.warnings.map(w => `<span class="pill warn">${icon('warning', 13)}${esc(w)}</span>`).join('');
-    this.mount([bar, notes ? h('div', { class: 'dock-toolbar', html: notes }) : null], r.buses.length ? table : h('div', { class: 'dock-empty', text: 'No busbar could be faulted. See the warnings above.' }));
+    const second = as ? this.toolbar(as, h('span', { class: 'grow' }), order ?? h('span')) : null;
+    this.mount([bar, second, notes ? h('div', { class: 'dock-toolbar', html: notes }) : null], r.buses.length ? table : h('div', { class: 'dock-empty', text: 'No busbar could be faulted. See the warnings above.' }));
   }
 
   renderContingency() {
@@ -496,13 +597,23 @@ export class Dock {
     if (view === 'branches') {
       const rows = Object.entries(r.worstLoading).map(([id, w]) => ({ id, value: w.value, outage: w.outage }));
       const shown = this.filtered([['near', 'Above 90 %', b => b.value >= 90], ['out', 'Above 100 %', b => b.value > 100]], rows);
-      const table = this.table([
+      const P = this.app.palette;
+      const presented = this.present({ columns: [
         { key: 'name', label: 'Branch', value: (/** @type {any} */ b) => this.nameOf(b.id) },
         { key: 'value', label: 'Worst loading', unit: '%', num: true, value: (/** @type {any} */ b) => b.value, text: (/** @type {any} */ b) => fixed(b.value, 1),
           bar: (/** @type {any} */ b) => ({ pct: b.value, color: loadCss(b.value) }), cls: (/** @type {any} */ b) => (b.value > r.limit ? 'bad' : '') },
         { key: 'outage', label: 'Under the outage of', value: (/** @type {any} */ b) => name(b.outage) },
-      ], shown.rows, 'contingency-worst-loading', 'n1-branches', 'value', -1);
-      this.mount([bar, this.toolbar(shown.seg), ...notes], table);
+      ], rows: shown.rows, name: 'contingency-worst-loading', sortKey: 'n1-branches', def: 'value', dir: -1, chart: {
+        orders: [['value', -1, 'Highest first'], ['value', 1, 'Lowest first'], ['name', 1, 'By name']],
+        data: rows => {
+          const bars = rows.map(b => ({ id: b.id, name: this.nameOf(b.id), value: b.value, color: loadingColor(P, b.value), detail: [`Under the outage of ${name(b.outage)}`] }));
+          const over = bars.filter(b => b.value > r.limit).length;
+          return { bars, label: 'Worst loading', unit: '%', digits: 1, base: 0, selected: this.app.selection,
+            lines: [{ value: r.limit, label: `Limit ${r.limit} %`, tone: 'bad' }],
+            title: `Worst post-contingency loading of ${bars.length} branch${bars.length === 1 ? '' : 'es'}${extremes(bars, 1, '%')}; ${over || 'none'} above the limit` };
+        },
+      } });
+      this.mount([bar, this.toolbar(presented.as ?? h('span'), shown.seg, h('span', { class: 'grow' }), presented.order ?? h('span')), ...notes], presented.content);
       return;
     }
     const band = (/** @type {string} */ id) => this.app.store.get(id);
@@ -587,6 +698,16 @@ const RMS_QUANTITIES = /** @type {const} */ ([
   { key: 'efd', label: 'Field voltage', unit: 'p.u.' }, { key: 'pm', label: 'Mechanical power', unit: 'MW' },
   { key: 'v', label: 'Busbar voltage', unit: 'p.u.' },
 ]);
+
+/** The highest and lowest bars of a chart, for its text description. @param {Array<{ name: string, value: number }>} bars
+ * @param {number} digits @param {string} unit */
+function extremes(bars, digits, unit) {
+  const valued = bars.filter(b => Number.isFinite(b.value));
+  if (!valued.length) return '';
+  const hi = valued.reduce((a, b) => (b.value > a.value ? b : a)), lo = valued.reduce((a, b) => (b.value < a.value ? b : a));
+  const at = (/** @type {{ name: string, value: number }} */ b) => `${b.name} at ${fixed(b.value, digits)} ${unit}`;
+  return valued.length === 1 ? `: ${at(hi)}` : `: highest ${at(hi)}, lowest ${at(lo)}`;
+}
 
 /** A difference with its sign, or a dash when one run lacks the element. @param {number} v @param {number} digits */
 function signed(v, digits) {

@@ -175,7 +175,11 @@ change marks results stale (each result records the network revision it was comp
 and inspector, rebuilds the diagram, re-runs the load flow when "Recalculate on edit" is on, and schedules an autosave.
 The model tree (`tree.js`, above 2,000 rows) and the result tables (`table.js`, above 500 rows) are virtual: they
 keep every row's description, sort with one shared collator, and put only the rows in view into the page, so a
-70,000-busbar network opens in about a second and its tables scroll freely. Code that takes the extent of large
+70,000-busbar network opens in about a second and its tables scroll freely. A result view with a chart (`chart.js`:
+busbar voltages, branch loadings, worst N-1 loadings, Ik″) draws the table's own rows, filtered and sorted as the table
+has them (`sortRows`), as bars on Canvas 2D in the stability plot's visual language and the diagram's colour scales;
+with more bars than pixel columns, each column draws the element furthest from the baseline, so a peak or a dip
+survives on a 70,000-busbar grid. Code that takes the extent of large
 arrays uses `core/extent.js`, because spreading them into `Math.min` overflows the call stack. Dialogs that edit
 the study case (`study.js`, `contingency-editor.js`) work on a draft and write it back in one transaction on Apply.
 Fields that choose an element (busbar fields above 200 busbars, the fault location, simulation event targets, the

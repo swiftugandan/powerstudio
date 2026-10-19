@@ -104,7 +104,7 @@ test('the getting-started guide can be followed from start to finish', async ({ 
   for (const key of ['ikss', 'ip', 'ib', 'ith', 'skss']) await expect(page.locator(`table.grid thead th[data-key="${key}"]`)).toBeVisible();
   await page.locator('.tree-row[data-id="B4"]').click();
   await palette(page, 'Short circuit at selected busbar');
-  await expect(page.locator('.dock-toolbar')).toContainText('Fault at Bus 4');
+  await expect(page.locator('.dock-toolbar').first()).toContainText('Fault at Bus 4');
   await page.locator('.dock-toolbar .seg button', { hasText: /^Contributions/ }).click();
   await expect(page.locator('table.grid tbody tr[data-id="L7"]')).toBeVisible();
   await expect(page.locator('.ribbon-panel [data-cmd="sc.allBuses"]')).toContainText('Every busbar');

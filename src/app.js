@@ -1157,7 +1157,8 @@ export class App {
     this.palette = readPalette();
     this.rebuildOverlay();
     this.viewport.invalidate();
-    if (this.dock.tab === 'rms') this.dock.render();
+    // The plot and the charts read the theme's colours when they draw.
+    if (this.dock.tab === 'rms' || this.dock.chart) this.dock.render();
     this.commands.changed();
   }
 
