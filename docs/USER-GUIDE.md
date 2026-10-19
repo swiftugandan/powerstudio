@@ -125,6 +125,14 @@ Results appear on the diagram (coloured by loading or voltage, with result boxes
 the calculation. Click a row to select the element; sort by any column; export the table as CSV. A result that no
 longer matches the network after an edit is marked as old.
 
+**Charts.** Switch a result from Table to Chart to see it as bars: the busbar voltages as a profile around 1 p.u.
+with the voltage band shaded, the branch loadings ranked against 90 % and 100 %, the worst loading of each branch
+under N-1 against the limit, and Ik″ at every busbar. Bars take the diagram's colours. The chart shows the same rows
+as the table, with the same filters (near limits, outside the band, changed), and a compared run shows as a line
+across each bar. Choose the order beside the filters; hover over a bar for its values. Click a bar to select its
+element; with the chart focused, the arrow keys, Home and End move between bars and Enter selects. CSV export gives the
+table either way. The choice lasts until you switch back.
+
 **Labels on the diagram.** Names and result boxes are placed so that none covers another: each starts in its usual
 place and moves aside, along its line or bar, when that place is taken; where nothing nearby is free it moves further
 and a thin leader line joins it to its element. Drag any label to put it where you want it: it stays there, relative

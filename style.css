@@ -573,6 +573,12 @@ td.num .sheet-editor { text-align: right; font-family: var(--mono); font-size: 1
 .plot-side label:hover { background: var(--hover); }
 .plot-side .sw { width: 10px; height: 3px; border-radius: 2px; flex: none; }
 .plot-side input { accent-color: var(--accent); margin: 0; }
+/* A chart fills the panel; a panel too short for it and its toolbars scrolls. */
+.dock-body.charted { display: flex; flex-direction: column; }
+.dock-body.charted > .chart { flex: 1 0 160px; }
+.dock-body.charted > .dock-head { position: static; }
+.chart canvas:focus-visible { outline-offset: -2px; }
+.dock-toolbar select.chart-order { width: auto; height: 26px; font-size: 12px; }
 .plot-tip { position: absolute; pointer-events: none; padding: 6px 8px; font-size: 11.5px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-2); white-space: nowrap; }
 .plot-tip .row { display: flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
 .plot-tip .row i { width: 8px; height: 3px; border-radius: 2px; }

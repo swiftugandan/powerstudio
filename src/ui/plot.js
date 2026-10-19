@@ -2,7 +2,7 @@
  * markers, a hover read-out and a draggable time cursor that drives the diagram. */
 
 import { fixed } from './format.js';
-import { setHtml } from './dom.js';
+import { setHtml, esc } from './dom.js';
 
 /** @typedef {{ name: string, color: string, data: Float32Array }} Series */
 
@@ -68,7 +68,7 @@ export class Plot {
     this.draw(i);
     const r = this.canvas.getBoundingClientRect();
     this.tip.hidden = false;
-    setHtml(this.tip, `<div class="row"><b>t = ${fixed(d.t[i], 3)} s</b></div>` + d.series.slice(0, 12).map(s => `<div class="row"><i style="background:${s.color}"></i>${s.name}: ${fixed(s.data[i], 3)} ${d.unit}</div>`).join(''));
+    setHtml(this.tip, `<div class="row"><b>t = ${fixed(d.t[i], 3)} s</b></div>` + d.series.slice(0, 12).map(s => `<div class="row"><i style="background:${s.color}"></i>${esc(s.name)}: ${fixed(s.data[i], 3)} ${esc(d.unit)}</div>`).join(''));
     const x = e.clientX - r.left, tw = this.tip.offsetWidth;
     this.tip.style.left = `${x + 14 + tw > r.width ? x - tw - 14 : x + 14}px`;
     this.tip.style.top = '10px';

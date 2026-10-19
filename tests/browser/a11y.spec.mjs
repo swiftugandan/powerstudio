@@ -65,6 +65,24 @@ for (const theme of /** @type {const} */ (['light', 'dark'])) {
       await page.keyboard.press('Alt+S');
       await expect(page.locator('.dock-tab[data-tab="shortcircuit"]')).toHaveAttribute('aria-selected', 'true');
       await audit(page, 'short-circuit results');
+      // The chart draws on the theme's own surface, and passes the audit as the table does.
+      await page.getByRole('group', { name: 'Show results as' }).getByRole('button', { name: 'Chart' }).click();
+      const chart = page.locator('.dock .chart canvas');
+      await expect(chart).toHaveAttribute('aria-label', /^Initial short-circuit current/);
+      const [corner, surface] = await chart.evaluate(c => {
+        const px = /** @type {CanvasRenderingContext2D} */ (/** @type {HTMLCanvasElement} */ (c).getContext('2d')).getImageData(2, 2, 1, 1).data;
+        const probe = document.createElement('div');
+        probe.style.color = 'var(--surface)';
+        document.body.append(probe);
+        const css = getComputedStyle(probe).color;
+        probe.remove();
+        return [`rgb(${px[0]}, ${px[1]}, ${px[2]})`, css];
+      });
+      expect(corner).toBe(surface);
+      await audit(page, 'short-circuit chart');
+      await page.keyboard.press('Alt+L');
+      await expect(chart).toHaveAttribute('aria-label', /^Voltage profile/);
+      await audit(page, 'load-flow chart');
       await page.locator('.dock-tab[data-tab="data"]').click();
       await audit(page, 'data sheet');
     });

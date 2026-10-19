@@ -552,6 +552,60 @@ test('records a planned change in a variant, turns it off and on, logs the run, 
   await expect(page.locator('table.runs tbody tr')).toHaveCount(1);
 });
 
+test('load-flow, short-circuit and contingency results show as charts of the table\'s rows', async ({ page }) => {
+  await open(page);
+  await loadFlow(page);
+  const as = page.getByRole('group', { name: 'Show results as' });
+  await as.getByRole('button', { name: 'Chart' }).click();
+  const chart = page.locator('.dock .chart canvas');
+  await expect(chart).toHaveAttribute('aria-label', /^Voltage profile of 14 busbars: highest Bus 8 at 1\.0900 p\.u\., lowest Bus 3 at 1\.0100 p\.u\.; 3 outside their band\./);
+  // The row filters hold for the chart.
+  await page.locator('.dock-toolbar .seg button', { hasText: 'Outside band' }).click();
+  await expect(chart).toHaveAttribute('aria-label', /^Voltage profile of 3 busbars/);
+  await page.locator('.dock-toolbar .seg button', { hasText: 'All' }).click();
+  // The order, then the keyboard: Home is the lowest voltage, Enter selects it and the chart keeps the focus.
+  await page.locator('select.chart-order').selectOption({ label: 'Lowest first' });
+  await chart.focus();
+  await page.keyboard.press('Home');
+  const live = page.locator('.dock .chart [aria-live]');
+  await expect(live).toHaveText('Bus 3: 1.0100 p.u., 1 of 14');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.tree-row[data-id="B3"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(chart).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(live).toContainText('2 of 14');
+  // The table shows the rows in the order the chart had.
+  await as.getByRole('button', { name: 'Table' }).click();
+  await expect(page.locator('table.grid th[data-key="vm"]')).toHaveAttribute('aria-sort', 'ascending');
+  await expect(page.locator('table.grid tbody tr[data-id]').first()).toHaveAttribute('data-id', 'B3');
+  // Branches rank by loading; a click on a bar selects its branch; the CSV is the table's.
+  await as.getByRole('button', { name: 'Chart' }).click();
+  await page.locator('.dock .seg button', { hasText: 'Branches' }).click();
+  await expect(chart).toHaveAttribute('aria-label', /^Loading of 20 branches: highest Transformer 5-6 at 76\.4 %/);
+  const box = /** @type {{ x: number, y: number, width: number, height: number }} */ (await chart.boundingBox());
+  await page.mouse.click(box.x + 70, box.y + box.height / 3);
+  await expect(page.locator('#inspector-panel')).toContainText('Transformer 5-6');
+  const download = page.waitForEvent('download');
+  await page.locator('.dock-tabs [data-cmd="results.csv"]').click();
+  const csv = readFileSync(/** @type {string} */ (await (await download).path()), 'utf8');
+  expect(csv.trim().split('\r\n')).toHaveLength(21);
+  // The choice of chart lasts: the short circuit shows as one too.
+  await page.keyboard.press('Alt+S');
+  await expect(chart).toHaveAttribute('aria-label', /^Initial short-circuit current at 14 busbars: highest Bus 8 at 27\.350 kA/);
+  await page.keyboard.press('Alt+N');
+  await expect(page.locator('.dock-toolbar .pill.bad')).toBeVisible();
+  await page.locator('.dock .seg button', { hasText: 'Branches' }).click();
+  await expect(chart).toHaveAttribute('aria-label', /^Worst post-contingency loading of \d+ branches: highest .*; \d+ above the limit\./);
+  // A view with no chart shows its table, without the switch.
+  await page.locator('.dock .seg button', { hasText: 'Contingencies' }).click();
+  await expect(page.locator('table.grid')).toBeVisible();
+  await expect(as).toHaveCount(0);
+  await page.reload();
+  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio?.ready === true);
+  await loadFlow(page);
+  await expect(chart).toBeVisible();
+});
+
 test('compares a load flow with a recorded run and filters to what changed', async ({ page }) => {
   await open(page);
   await loadFlow(page);
