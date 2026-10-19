@@ -928,8 +928,14 @@ test('switches theme and redraws the diagram in the dark palette', async ({ page
   await page.locator('#viewport canvas.viewport-canvas').focus();
   await page.keyboard.press('Shift+T');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  // The frame as the renderer produced it: the read-back also replaces a GPU that stopped drawing without reporting a
+  // lost device (CI's software WebGPU), which would otherwise leave the light frame on screen.
+  await expect.poll(async () => {
+    const url = await page.evaluate(() => /** @type {any} */ (window).powerstudio.snapshot());
+    return share(decodePNG(Buffer.from(url.split(',')[1], 'base64')), [16, 21, 27], 12);
+  }).toBeGreaterThan(0.5); // --dg-bg in the dark theme
   // The redraw takes a frame or several (software WebGPU on CI is slow): poll the picture rather than wait a fixed time.
-  await expect.poll(async () => share(decodePNG(await page.locator('#viewport').screenshot()), [16, 21, 27], 12)).toBeGreaterThan(0.5); // --dg-bg in the dark theme
+  await expect.poll(async () => share(decodePNG(await page.locator('#viewport').screenshot()), [16, 21, 27], 12)).toBeGreaterThan(0.5);
 });
 
 test('can be told to draw with Canvas 2D', async ({ page }) => {
