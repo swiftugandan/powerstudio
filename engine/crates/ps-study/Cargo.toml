@@ -1,6 +1,6 @@
 [package]
 name = "ps-study"
-description = "PowerStudio studies: runs load flow, short circuit, contingency and stability calculations on a model and reports the results by element."
+description = "PowerStudio studies: runs load flow, short circuit, contingency, stability and electromagnetic transient calculations on a model and reports the results by element."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,6 +14,7 @@ ps-net.workspace = true
 ps-lf.workspace = true
 ps-sc.workspace = true
 ps-dyn.workspace = true
+ps-emt.workspace = true
 ps-num.workspace = true
 ps-io.workspace = true
 serde.workspace = true

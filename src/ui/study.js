@@ -4,11 +4,13 @@ import { h } from './dom.js';
 import { icon } from './icons.js';
 import { fieldRow, elementPicker, MANY_BUSES } from './fields.js';
 import { modal } from './feedback.js';
-import { STUDY_FIELDS, EVENT_KINDS } from '../core/document.js';
+import { STUDY_FIELDS, EVENT_KINDS, EMT_EVENT_KINDS, EMT_FAULTS } from '../core/document.js';
 import { parseNumber } from './format.js';
+import { enumLabel } from './fields.js';
 
-const TITLES = /** @type {Record<string, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'Contingency analysis', rms: 'Stability simulation' });
+const TITLES = /** @type {Record<string, string>} */ ({ loadflow: 'Load flow', shortcircuit: 'Short circuit', contingency: 'Contingency analysis', rms: 'Stability simulation', emt: 'EMT simulation' });
 const EVENT_LABEL = /** @type {Record<string, string>} */ ({ fault: 'Three-phase fault at', clear: 'Clear fault at', trip: 'Switch out', close: 'Switch in', loadstep: 'Set load to (% of initial)' });
+const EMT_EVENT_LABEL = /** @type {Record<string, string>} */ ({ fault: 'Fault at', clear: 'Clear fault at', trip: 'Trip', close: 'Close' });
 
 /** @param {import('../app.js').App} app @param {string} [focusSection] */
 export async function openStudyDialog(app, focusSection) {
@@ -53,26 +55,31 @@ export async function openStudyDialog(app, focusSection) {
       const areas = areaEditor(app, /** @type {any} */ (draft.loadflow));
       if (areas) body.append(h('h3', { text: 'Area interchange', id: 'study-areas' }), areas);
     }
+    if (section === 'rms') body.append(h('h3', { text: 'Simulation events', id: 'study-rms-events' }), eventEditor(app, /** @type {any} */ (draft.rms)));
+    if (section === 'emt') body.append(h('h3', { text: 'EMT events', id: 'study-emt-events' }), emtEventEditor(app, /** @type {any} */ (draft.emt)));
     if (section === 'contingency') {
       const { list, remedial } = doc.study.contingency;
       const own = `${list.length} contingenc${list.length === 1 ? 'y' : 'ies'} of your own and ${remedial.length} remedial action${remedial.length === 1 ? '' : 's'}`;
       body.append(h('p', { class: 'study-note', text: `${own}. Edit them from Calculate, Security, Contingencies.` }));
     }
   }
-  body.append(h('h3', { text: 'Simulation events' }), eventEditor(app, /** @type {any} */ (draft.rms)));
-  const ok = await modal({
+  const shown = modal({
     title: 'Study case', body, wide: true,
     actions: [{ label: 'Cancel', value: false }, { label: 'Apply', primary: true, run: () => (Object.keys(errors).length ? null : true) }],
   });
+  // The section a command opened the dialog for comes into view at the top.
+  if (focusSection) requestAnimationFrame(() => document.getElementById(`study-${focusSection}`)?.scrollIntoView({ block: 'start' }));
+  const ok = await shown;
   if (!ok) return;
   app.tryEdit('Study case', () => app.store.transact('Edit study case', tx => {
     for (const [section, fields] of Object.entries(STUDY_FIELDS)) for (const f of fields) tx.setStudy(section, f.key, draft[section][f.key]);
     const events = /** @type {any[]} */ (draft.rms.events).filter(e => Number.isFinite(e.t) && e.target).sort((a, b) => a.t - b.t);
     if (JSON.stringify(events) !== JSON.stringify(doc.study.rms.events)) tx.setStudy('rms', 'events', events);
+    const emtEvents = /** @type {any[]} */ (draft.emt.events).filter(e => Number.isFinite(e.t) && e.t >= 0 && e.target).sort((a, b) => a.t - b.t);
+    if (JSON.stringify(emtEvents) !== JSON.stringify(doc.study.emt.events)) tx.setStudy('emt', 'events', emtEvents);
     const areas = /** @type {import('../core/document.js').AreaTarget[]} */ (draft.loadflow.areas).filter(a => a.slack || a.export !== 0);
     if (JSON.stringify(areas) !== JSON.stringify(doc.study.loadflow.areas)) tx.setStudy('loadflow', 'areas', areas);
   }));
-  if (focusSection) document.getElementById(`study-${focusSection}`)?.scrollIntoView();
 }
 
 /**
@@ -174,4 +181,88 @@ function eventEditor(app, rms) {
   const add = h('button', { type: 'button', class: 'btn', style: 'margin-top:8px', html: `${icon('plus', 14)}<span>Add event</span>`,
     onclick: () => { const last = rms.events[rms.events.length - 1]; rms.events.push({ t: last ? +(last.t + 0.1).toFixed(3) : 0.1, kind: 'fault', target: targets('fault')[0]?.id ?? '' }); render(); } });
   return h('div', {}, table, add);
+}
+
+/**
+ * The EMT simulation's events: faults of any kind through a resistance, their clearing, and breakers opened and
+ * closed. Times are in milliseconds here and seconds in the document.
+ * @param {import('../app.js').App} app @param {{ events: import('../core/document.js').EmtEvent[] }} emt
+ */
+function emtEventEditor(app, emt) {
+  const doc = app.store.doc;
+  const table = h('table', { class: 'events emt-events' });
+  /** @type {Map<string, Array<{ id: string, name: string }>>} */
+  const lists = new Map();
+  const switchable = new Set(['line', 'trafo', 'gen', 'extgrid', 'load', 'shunt']);
+  const targets = (/** @type {string} */ kind) => {
+    const group = kind === 'fault' || kind === 'clear' ? 'bus' : 'other';
+    let list = lists.get(group);
+    if (!list) {
+      list = doc.elements.filter(e => (group === 'bus' ? e.cls === 'bus' : switchable.has(e.cls))).map(e => ({ id: e.id, name: /** @type {string} */ (e.name) }));
+      lists.set(group, list);
+    }
+    return list;
+  };
+  const ms = (/** @type {number} */ t) => String(+(t * 1000).toFixed(3));
+  const render = () => {
+    table.replaceChildren(h('thead', {}, h('tr', {}, h('th', { text: 'Time (ms)' }), h('th', { text: 'Event' }), h('th', { text: 'Element' }),
+      h('th', { text: 'Fault', title: 'The phases a fault connects, and its resistance in each faulted path in Ω (empty: a bolted fault)' }), h('th'))));
+    const body = h('tbody');
+    emt.events.forEach((ev, i) => {
+      const t = h('input', { class: 'input', value: ms(ev.t), 'aria-label': 'Event time in milliseconds', inputmode: 'decimal', style: 'width:80px;text-align:right' });
+      t.addEventListener('change', () => { const v = parseNumber(t.value); ev.t = v / 1000; t.classList.toggle('invalid', !(v >= 0)); });
+      const kind = h('select', { class: 'input', 'aria-label': 'Event type' }, ...EMT_EVENT_KINDS.map(k => h('option', { value: k, text: EMT_EVENT_LABEL[k] })));
+      kind.value = ev.kind;
+      kind.addEventListener('change', () => {
+        ev.kind = /** @type {any} */ (kind.value);
+        if (!targets(ev.kind).some(e => e.id === ev.target)) ev.target = targets(ev.kind)[0]?.id ?? '';
+        if (ev.kind !== 'fault') { delete ev.fault; delete ev.r; } else ev.fault ??= '3ph';
+        render();
+      });
+      const choices = targets(ev.kind);
+      /** @type {HTMLElement} */
+      let target;
+      if (choices.length > MANY_BUSES) {
+        const picker = elementPicker(choices, ev.target, `emt-event-${i}`, v => { ev.target = v; return ''; }, undefined, ev.kind === 'fault' || ev.kind === 'clear' ? 'busbar' : 'element');
+        picker.input.setAttribute('aria-label', 'Event element');
+        picker.input.addEventListener('change', () => { const msg = picker.apply(); picker.input.classList.toggle('invalid', !!msg); picker.input.title = msg; });
+        target = picker.input;
+      } else {
+        const select = h('select', { class: 'input', 'aria-label': 'Event element' }, ...choices.map(e => h('option', { value: e.id, text: e.name || e.id })));
+        select.value = ev.target;
+        select.addEventListener('change', () => { ev.target = select.value; });
+        target = select;
+      }
+      /** @type {HTMLElement} */
+      let fault;
+      if (ev.kind === 'fault') {
+        const type = h('select', { class: 'input', 'aria-label': 'Fault type' }, ...EMT_FAULTS.map(f => h('option', { value: f, text: enumLabel('fault', f) })));
+        type.value = ev.fault ?? '3ph';
+        type.addEventListener('change', () => { ev.fault = /** @type {any} */ (type.value); });
+        const r = h('input', { class: 'input', 'aria-label': 'Fault resistance in ohms', placeholder: 'R Ω', inputmode: 'decimal', style: 'width:64px;text-align:right', value: ev.r === undefined ? '' : String(ev.r) });
+        r.addEventListener('change', () => {
+          const x = r.value.trim() === '' ? undefined : parseNumber(r.value);
+          const bad = x !== undefined && !(x >= 0);
+          r.classList.toggle('invalid', bad);
+          if (bad) return;
+          if (x === undefined) delete ev.r; else ev.r = x;
+        });
+        fault = h('span', { class: 'fault-z' }, type, r);
+      } else fault = h('span', { class: 'muted', text: '—', 'aria-label': 'No fault' });
+      const del = h('button', { type: 'button', class: 'icon-btn sm', 'aria-label': 'Remove event', html: icon('delete', 15), onclick: () => { emt.events.splice(i, 1); render(); } });
+      body.append(h('tr', {}, h('td', {}, t), h('td', {}, kind), h('td', {}, target), h('td', {}, fault), h('td', {}, del)));
+    });
+    table.append(body);
+  };
+  render();
+  const add = h('button', { type: 'button', class: 'btn', style: 'margin-top:8px', html: `${icon('plus', 14)}<span>Add EMT event</span>`,
+    onclick: () => {
+      const last = emt.events[emt.events.length - 1];
+      emt.events.push(last ? { t: +(last.t + 0.05).toFixed(4), kind: 'clear', target: last.kind === 'fault' || last.kind === 'clear' ? last.target : targets('clear')[0]?.id ?? '' }
+        : { t: 0.02, kind: 'fault', target: targets('fault')[0]?.id ?? '', fault: '3ph' });
+      render();
+    } });
+  return h('div', {},
+    h('p', { class: 'study-note', text: 'A trip opens each breaker pole at its next current zero, as an arc goes out, and a cleared fault goes out phase by phase the same way. A close switches all three poles at once, so its time sets the point on the wave. Lines, transformers, loads and shunts out of service can be closed in.' }),
+    table, add);
 }

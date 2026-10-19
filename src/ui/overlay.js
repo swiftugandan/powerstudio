@@ -27,8 +27,11 @@ export function voltageColor(P, vm, vmin, vmax) {
   return undefined;
 }
 
+/** Peak voltages, as shares of the nominal crest, the EMT colouring marks as raised and as high. */
+const EMT_RAISED = 1.2, EMT_HIGH = 1.5;
+
 /**
- * @param {'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} kind @param {any} result
+ * @param {'loadflow' | 'shortcircuit' | 'contingency' | 'rms' | 'emt'} kind @param {any} result
  * @param {import('../core/document.js').PowerDocument} doc @param {Palette} P
  * @param {{ colouring: 'results' | 'voltage', rmsIndex?: number }} opt
  * @returns {{ overlay: Overlay, legend: Legend | null }}
@@ -103,6 +106,25 @@ export function buildOverlay(kind, result, doc, P, opt) {
     });
     for (const m of r.machines) elements.set(m.id, { box: [`δ ${fixed(m.delta[i], 1)}°`, `P ${fixed(m.pe[i], 1)} MW`] });
     if (colour) legend = { kind: 'swatches', title: `t = ${fixed(r.t[i], 3)} s`, items: [{ label: 'Voltage below 0.8 p.u.', color: P.res.high }, { label: 'Below band', color: P.res.warn }] };
+  } else if (kind === 'emt') {
+    /** @type {import('../engine/reports.js').EmtResult} */
+    const r = result;
+    faultAt = r.faults[0]?.target ?? '';
+    // Busbars: the highest instantaneous voltage as a share of the nominal crest, and the lowest one-cycle RMS.
+    for (const b of r.buses) {
+      const high = b.peakPu > EMT_HIGH, raised = b.peakPu > EMT_RAISED;
+      elements.set(b.id, { box: [`û ${fixed(b.peakPu, 2)} p.u.`, `RMS min ${fixed(b.rmsMin, 2)} p.u.`],
+        color: colour ? (high ? P.res.high : raised ? P.res.warn : undefined) : undefined, alert: high });
+    }
+    // Branches and sources: their peak current, the branches coloured by it.
+    const maxI = Math.max(1e-9, ...r.branches.map(b => b.peak));
+    for (const b of r.branches) {
+      if (b.winding > 1) continue;
+      elements.set(b.id, { mid: `î ${fixed(b.peak, 2)} kA`, color: colour ? mix(P.muted, P.res.high, Math.min(1, b.peak / maxI)) : undefined });
+    }
+    for (const s of r.sources) elements.set(s.id, { box: [`î ${fixed(s.peak, 2)} kA`] });
+    if (colour) legend = { kind: 'ramp', title: 'Peak current', stops: [P.muted, P.res.high], from: 'low', to: 'high',
+      extra: [{ label: `Voltage peak above ${EMT_RAISED} p.u.`, color: P.res.warn }, { label: `above ${EMT_HIGH} p.u.`, color: P.res.high }] };
   }
   return { overlay: { elements, faultAt, deenergized }, legend };
 }

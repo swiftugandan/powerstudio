@@ -7,12 +7,15 @@ import { dataTable, toCSV } from './table.js';
 import { Plot, seriesColor } from './plot.js';
 import { CLASSES } from '../core/catalog.js';
 import { effectiveTheme } from './theme.js';
-import { enumLabel } from './fields.js';
+import { enumLabel, elementPicker, MANY_BUSES } from './fields.js';
 import { minOf, maxOf } from '../core/extent.js';
 import { DataSheet } from './datasheet.js';
+import { busesOf } from '../core/document.js';
 
 /** @typedef {{ time: number, level: 'info' | 'ok' | 'warn' | 'error', text: string, detail?: string }} LogEntry
- * @typedef {'output' | 'data' | 'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} DockTab
+ * @typedef {'output' | 'data' | 'loadflow' | 'shortcircuit' | 'contingency' | 'rms' | 'emt'} DockTab
+ * @typedef {{ kind: 'bus' | 'branch' | 'source' | 'fault', id: string, end: 0 | 1 }} EmtTrace What the EMT view plots: a busbar's
+ *   voltages, a branch's currents at one end, a source's or a fault's currents
  * @typedef {import('../engine/reports.js').CalcKind} CalcKind */
 
 /** Whether a tab shows a calculation's results. @param {DockTab} t @returns {t is CalcKind} */
@@ -20,7 +23,7 @@ const isResult = t => t !== 'output' && t !== 'data';
 
 const TABS = /** @type {Array<[DockTab, string, string]>} */ ([
   ['output', 'Output', 'info'], ['data', 'Data', 'database'], ['loadflow', 'Load flow', 'loadflow'], ['shortcircuit', 'Short circuit', 'shortcircuit'],
-  ['contingency', 'Contingency', 'contingency'], ['rms', 'Stability', 'rms'],
+  ['contingency', 'Contingency', 'contingency'], ['rms', 'Stability', 'rms'], ['emt', 'EMT', 'emt'],
 ]);
 
 /** @param {number} pct @returns {string} */
@@ -35,7 +38,7 @@ export class Dock {
     /** Pending animation frame of a log render. */
     this.logFrame = 0;
     /** @type {DockTab} */
-    this.tab = /** @type {DockTab} */ (app.prefs.dockTab) in { output: 1, data: 1, loadflow: 1, shortcircuit: 1, contingency: 1, rms: 1 } ? /** @type {DockTab} */ (app.prefs.dockTab) : 'output';
+    this.tab = /** @type {DockTab} */ (app.prefs.dockTab) in { output: 1, data: 1, loadflow: 1, shortcircuit: 1, contingency: 1, rms: 1, emt: 1 } ? /** @type {DockTab} */ (app.prefs.dockTab) : 'output';
     /** @type {Record<string, { key: string, dir: 1 | -1 }>} */
     this.sorts = {};
     this.lfView = 'buses';
@@ -53,6 +56,17 @@ export class Dock {
     this.rmsVar = 'delta';
     /** @type {Set<string>} */
     this.rmsHidden = new Set();
+    /** The EMT view (waveforms or a table), what it plots, the phases hidden, the times shown, and the result they
+     * were chosen for. */
+    this.emtView = 'waves';
+    /** @type {EmtTrace | null} */
+    this.emtTrace = null;
+    /** @type {Set<number>} */
+    this.emtHidden = new Set();
+    /** @type {[number, number] | null} */
+    this.emtWindow = null;
+    /** @type {import('../engine/reports.js').EmtResult | null} */
+    this.emtFor = null;
     /** @type {{ columns: any[], rows: any[], name: string } | null} */
     this.current = null;
     // The header: the tabs, which alone make the tab list, and the panel's tools beside them.
@@ -102,6 +116,7 @@ export class Dock {
     this.app.savePrefs();
     if (this.app.prefs.dock === false) this.app.setPanel('dock', true);
     if (isResult(tab) && tab !== this.app.overlayKind && this.app.results[tab]) this.app.setOverlay(tab);
+    if ((tab === 'rms' || tab === 'emt') && this.app.results[tab]) this.app.roomForPlot();
     this.render();
   }
 
@@ -138,7 +153,7 @@ export class Dock {
     const app = this.app;
     const scroll = this.fromTop ? 0 : this.body.scrollTop;
     this.fromTop = false;
-    if (this.tab !== 'rms') this.plot = null;
+    if (this.tab !== 'rms' && this.tab !== 'emt') this.plot = null;
     if (this.tab === 'output') this.renderLog();
     else if (this.tab === 'data') { const { toolbar, sheet } = this.sheet.render(this.body); this.mount([toolbar], sheet); }
     else if (!app.results[this.tab]) this.renderEmpty(this.tab);
@@ -146,6 +161,7 @@ export class Dock {
     else if (this.tab === 'shortcircuit') this.renderShortCircuit();
     else if (this.tab === 'contingency') this.renderContingency();
     else if (this.tab === 'rms') { this.renderRms(); return; }
+    else if (this.tab === 'emt' && this.renderEmt()) return;
     this.body.scrollTop = scroll;
   }
 
@@ -163,7 +179,8 @@ export class Dock {
   /** @param {CalcKind} tab */
   renderEmpty(tab) {
     const what = { loadflow: ['loadflow', 'No load flow yet', 'calc.loadflow', 'Run load flow'], shortcircuit: ['shortcircuit', 'No short-circuit calculation yet', 'calc.shortcircuit', 'Run short circuit'],
-      contingency: ['contingency', 'No contingency analysis yet', 'calc.contingency', 'Run N-1 analysis'], rms: ['rms', 'No stability simulation yet', 'calc.rms', 'Run simulation'] }[tab];
+      contingency: ['contingency', 'No contingency analysis yet', 'calc.contingency', 'Run N-1 analysis'], rms: ['rms', 'No stability simulation yet', 'calc.rms', 'Run simulation'],
+      emt: ['emt', 'No EMT simulation yet', 'calc.emt', 'Run EMT simulation'] }[tab];
     this.body.replaceChildren(h('div', { class: 'dock-empty' }, h('div', { class: 'inner' }, h('span', { html: icon(what[0], 26) }), h('div', { text: what[1] }),
       h('button', { type: 'button', class: 'btn primary', 'data-cmd': what[2], html: `${icon('play', 14)}<span>${what[3]}</span>` }))));
   }
@@ -572,12 +589,237 @@ export class Dock {
     void rows;
   }
 
+  /** The EMT view follows the diagram's selection: an element with waveforms becomes the one plotted. */
+  emtSelectionChanged() {
+    const r = this.app.results.emt?.result;
+    if (this.emtView !== 'waves' || !r) { this.render(); return; }
+    if (this.app.selection.size !== 1) return;
+    const trace = emtTraceOf(r, [...this.app.selection][0]);
+    if (trace && (trace.kind !== this.emtTrace?.kind || trace.id !== this.emtTrace.id)) { this.emtTrace = trace; this.render(); }
+  }
+
+  /** The EMT results: waveforms, or a table. Returns whether a plot was drawn (the body is then a column). */
+  renderEmt() {
+    const app = this.app, { result: r, ms } = /** @type {{ result: import('../engine/reports.js').EmtResult, ms: number }} */ (app.results.emt);
+    if (this.emtFor !== r) {
+      // A new run: keep what was plotted if the run has it, and show all of it.
+      this.emtFor = r;
+      this.emtWindow = null;
+      if (this.emtTrace && !emtSeries(r, this.emtTrace)) this.emtTrace = null;
+    }
+    const tEnd = r.t.length ? r.t[r.t.length - 1] : 0;
+    const top = r.buses.reduce((/** @type {import('../engine/reports.js').EmtBus | null} */ m, b) => (!m || b.peakPu > m.peakPu ? b : m), null);
+    const fault = r.faults.reduce((/** @type {import('../engine/reports.js').EmtFault | null} */ m, f) => (!m || f.peak > m.peak ? f : m), null);
+    const pill = h('span', { class: 'pill ok', html: `${icon('check', 13)}${esc(fixed(tEnd * 1000, 0))} ms simulated` });
+    const parts = [`<span>Step <b>${esc(fixed(r.dt * 1e6, r.dt * 1e6 < 10 ? 1 : 0))} µs</b></span>`];
+    if (top) parts.push(`<span>Highest voltage <b>${fixed(top.peakPu, 2)} p.u.</b> at ${esc(this.nameOf(top.id))}</span>`);
+    if (fault) parts.push(`<span>Peak fault current <b>${fixed(fault.peak, 2)} kA</b></span>`);
+    parts.push(`<span>Time <b>${duration(ms)}</b></span>`);
+    const summary = h('div', { class: 'summary', html: parts.join('') });
+    const views = /** @type {Array<[string, string]>} */ ([['waves', 'Waveforms'], ['buses', `Busbars ${r.buses.length}`], ['branches', `Branches ${r.branches.length}`]]);
+    if (r.sources.length) views.push(['sources', `Sources ${r.sources.length}`]);
+    if (r.faults.length) views.push(['faults', `Faults ${r.faults.length}`]);
+    views.push(['switching', `Switching ${r.events.length + r.operations.length}`]);
+    const view = views.some(v => v[0] === this.emtView) ? this.emtView : 'waves';
+    const seg = this.segmented(views, view, v => { this.emtView = v; });
+    seg.setAttribute('aria-label', 'EMT results');
+    const bar = this.toolbar(pill, this.staleNote() ?? h('span'), summary, h('span', { class: 'grow' }), seg);
+    if (view === 'waves') { this.renderEmtWaves(r, bar); return true; }
+    const at = (/** @type {number} */ t) => fixed(t * 1000, 2);
+    let table;
+    let filters = null;
+    if (view === 'buses') {
+      const shown = this.filtered([['over', 'Peak above 1.2 p.u.', b => b.peakPu > 1.2], ['dip', 'RMS below 0.9 p.u.', b => b.rmsMin < 0.9]], r.buses);
+      filters = this.toolbar(shown.seg);
+      table = this.table([
+        { key: 'name', label: 'Busbar', value: (/** @type {any} */ b) => this.nameOf(b.id) },
+        { key: 'kv', label: 'Un', unit: 'kV', num: true, value: (/** @type {any} */ b) => b.kv, text: (/** @type {any} */ b) => fixed(b.kv, 1) },
+        { key: 'peak', label: 'Peak voltage', unit: 'kV', num: true, value: (/** @type {any} */ b) => b.peak, text: (/** @type {any} */ b) => fixed(b.peak, 2) },
+        { key: 'peakPu', label: 'Peak', unit: 'p.u. of crest', num: true, value: (/** @type {any} */ b) => b.peakPu, text: (/** @type {any} */ b) => fixed(b.peakPu, 3),
+          cls: (/** @type {any} */ b) => (b.peakPu > 1.5 ? 'bad' : b.peakPu > 1.2 ? 'warn' : '') },
+        { key: 'peakAt', label: 'At', unit: 'ms', num: true, value: (/** @type {any} */ b) => b.peakAt, text: (/** @type {any} */ b) => at(b.peakAt) },
+        { key: 'rmsMin', label: 'Lowest RMS', unit: 'p.u.', num: true, value: (/** @type {any} */ b) => b.rmsMin, text: (/** @type {any} */ b) => fixed(b.rmsMin, 3),
+          cls: (/** @type {any} */ b) => (b.rmsMin < 0.9 ? 'warn' : '') },
+        { key: 'rmsMax', label: 'Highest RMS', unit: 'p.u.', num: true, value: (/** @type {any} */ b) => b.rmsMax, text: (/** @type {any} */ b) => fixed(b.rmsMax, 3),
+          cls: (/** @type {any} */ b) => (b.rmsMax > 1.1 ? 'warn' : '') },
+      ], shown.rows, 'emt-busbars', 'emt-buses', 'peakPu', -1);
+    } else if (view === 'branches') {
+      table = this.table([
+        { key: 'name', label: 'Branch', value: (/** @type {any} */ b) => (b.winding ? `${this.nameOf(b.id)}, winding ${b.winding}` : this.nameOf(b.id)) },
+        { key: 'model', label: 'Model', value: (/** @type {any} */ b) => EMT_MODEL[/** @type {string} */ (b.model)] ?? b.model },
+        { key: 'peak', label: 'Peak current', unit: 'kA', num: true, value: (/** @type {any} */ b) => b.peak, text: (/** @type {any} */ b) => fixed(b.peak, 3) },
+        { key: 'peakAt', label: 'At', unit: 'ms', num: true, value: (/** @type {any} */ b) => b.peakAt, text: (/** @type {any} */ b) => at(b.peakAt) },
+      ], r.branches, 'emt-branches', 'emt-branches', 'peak', -1);
+    } else if (view === 'sources') {
+      table = this.table([
+        { key: 'name', label: 'Source', value: (/** @type {any} */ s) => s.name || this.nameOf(s.id) },
+        { key: 'peak', label: 'Peak current', unit: 'kA', num: true, value: (/** @type {any} */ s) => s.peak, text: (/** @type {any} */ s) => fixed(s.peak, 3) },
+        { key: 'peakAt', label: 'At', unit: 'ms', num: true, value: (/** @type {any} */ s) => s.peakAt, text: (/** @type {any} */ s) => at(s.peakAt) },
+      ], r.sources, 'emt-sources', 'emt-sources', 'peak', -1);
+    } else if (view === 'faults') {
+      const rows = r.faults.map((f, k) => ({ ...f, id: f.target, key: k }));
+      table = this.table([
+        { key: 'name', label: 'Busbar', value: (/** @type {any} */ f) => this.nameOf(f.target) },
+        { key: 'fault', label: 'Fault', value: (/** @type {any} */ f) => enumLabel('fault', f.fault) },
+        { key: 'tOn', label: 'From', unit: 'ms', num: true, value: (/** @type {any} */ f) => f.tOn, text: (/** @type {any} */ f) => at(f.tOn) },
+        { key: 'tOff', label: 'Out', unit: 'ms', num: true, value: (/** @type {any} */ f) => f.tOff ?? Infinity, text: (/** @type {any} */ f) => (f.tOff === null ? 'to the end' : at(f.tOff)) },
+        { key: 'peak', label: 'Peak current', unit: 'kA', num: true, value: (/** @type {any} */ f) => f.peak, text: (/** @type {any} */ f) => fixed(f.peak, 3) },
+        { key: 'peakAt', label: 'At', unit: 'ms', num: true, value: (/** @type {any} */ f) => f.peakAt, text: (/** @type {any} */ f) => at(f.peakAt) },
+        { key: 'rms', label: 'RMS, last cycle', unit: 'kA', num: true, value: (/** @type {any} */ f) => f.rms, text: (/** @type {any} */ f) => (Number.isFinite(f.rms) ? fixed(f.rms, 3) : 'under a cycle') },
+      ], rows, 'emt-faults', 'emt-faults', 'tOn', 1);
+    } else {
+      const rows = [
+        ...r.events.map((e, k) => ({ id: e.target, key: `e${k}`, t: e.at, what: e.applied ? 'Event' : 'Event, no effect', note: e.note })),
+        ...r.operations.map((o, k) => ({ id: o.element, key: `o${k}`, t: o.t, what: 'Current zero', note: o.note })),
+      ];
+      table = this.table([
+        { key: 't', label: 'Time', unit: 'ms', num: true, value: (/** @type {any} */ x) => x.t, text: (/** @type {any} */ x) => fixed(x.t * 1000, 3) },
+        { key: 'what', label: 'Kind', value: (/** @type {any} */ x) => x.what, cls: (/** @type {any} */ x) => (x.what === 'Event, no effect' ? 'warn' : '') },
+        { key: 'note', label: 'What happened', value: (/** @type {any} */ x) => x.note, title: (/** @type {any} */ x) => x.note },
+      ], rows, 'emt-switching', 'emt-switching', 't', 1);
+    }
+    const notes = r.notes.length ? h('div', { class: 'dock-notes' }, ...r.notes.map(n => h('div', { class: 'plot-note', text: n }))) : null;
+    this.mount([bar, filters, notes], table);
+    return false;
+  }
+
+  /** The waveform view of an EMT result. @param {import('../engine/reports.js').EmtResult} r @param {HTMLElement} bar */
+  renderEmtWaves(r, bar) {
+    const app = this.app;
+    if (!this.emtTrace) {
+      // What the diagram has selected, or else the first fault's busbar, or else the first busbar.
+      const picked = [...app.selection].map(id => emtTraceOf(r, id)).find(x => x);
+      this.emtTrace = picked ?? (r.faults[0] ? { kind: 'bus', id: r.faults[0].target, end: 0 } : r.buses[0] ? { kind: 'bus', id: r.buses[0].id, end: 0 } : null);
+    }
+    const trace = this.emtTrace;
+    const series = trace ? emtSeries(r, trace) : null;
+    const dark = effectiveTheme() === 'dark';
+    // What to plot: the quantity, the element, a branch's end, the phases, and the time zoom.
+    const kinds = /** @type {Array<[EmtTrace['kind'], string, number]>} */ ([['bus', 'Busbar voltage', r.buses.length], ['branch', 'Branch current', r.branches.length],
+      ['source', 'Source current', r.sources.length], ['fault', 'Fault current', r.faults.length]]).filter(k => k[2] > 0);
+    const kind = /** @type {HTMLSelectElement} */ (h('select', { class: 'input', 'aria-label': 'Quantity plotted' }, ...kinds.map(([v, label]) => h('option', { value: v, text: label }))));
+    kind.value = trace?.kind ?? 'bus';
+    kind.addEventListener('change', () => {
+      const k = /** @type {EmtTrace['kind']} */ (kind.value);
+      const first = emtElements(r, k)[0];
+      this.emtTrace = first ? { kind: k, id: first.id, end: 0 } : null;
+      this.render();
+    });
+    const list = emtElements(r, trace?.kind ?? 'bus').map(e => ({ id: e.id, name: e.kind === 'fault' ? `Fault at ${this.nameOf(e.id)}` : e.name || this.nameOf(e.id) }));
+    /** @type {HTMLElement} */
+    let element;
+    const choose = (/** @type {string} */ id) => { if (trace) { this.emtTrace = { ...trace, id, end: 0 }; this.render(); } };
+    if (list.length > MANY_BUSES) {
+      const picker = elementPicker(list, trace?.id ?? '', 'emt-element', id => { choose(id); return ''; }, undefined, 'element');
+      picker.input.setAttribute('aria-label', 'Element plotted');
+      picker.input.addEventListener('change', () => { const msg = picker.apply(); picker.input.classList.toggle('invalid', !!msg); });
+      element = picker.input;
+    } else {
+      const select = /** @type {HTMLSelectElement} */ (h('select', { class: 'input emt-element', 'aria-label': 'Element plotted' }, ...list.map(e => h('option', { value: e.id, text: e.name }))));
+      select.value = trace?.id ?? '';
+      select.addEventListener('change', () => choose(select.value));
+      element = select;
+    }
+    const controls = [kind, element];
+    if (trace?.kind === 'branch') {
+      const el = app.store.get(trace.id);
+      const ends = el ? busesOf(el) : [];
+      const end = /** @type {HTMLSelectElement} */ (h('select', { class: 'input', 'aria-label': 'Branch end' },
+        h('option', { value: '0', text: `At ${ends[0] ? this.nameOf(ends[0]) : 'the from end'}` }), h('option', { value: '1', text: `At ${ends[1] ? this.nameOf(ends[1]) : 'the to end'}` })));
+      end.value = String(trace.end);
+      end.addEventListener('change', () => { this.emtTrace = { ...trace, end: end.value === '1' ? 1 : 0 }; this.render(); });
+      controls.push(end);
+    }
+    const phases = h('div', { class: 'seg phases', role: 'group', 'aria-label': 'Phases shown' });
+    ['a', 'b', 'c'].forEach((p, k) => {
+      const on = !this.emtHidden.has(k);
+      phases.append(h('button', { type: 'button', 'aria-pressed': String(on), html: `<i class="sw" style="background:${seriesColor(k, dark)}"></i>Phase ${p}`,
+        onclick: () => { if (on) this.emtHidden.add(k); else this.emtHidden.delete(k); this.render(); } }));
+    });
+    const zoom = (/** @type {string} */ ic, /** @type {string} */ label, /** @type {() => void} */ run) =>
+      h('button', { type: 'button', class: 'icon-btn sm', title: label, 'aria-label': label, html: icon(ic, 16), onclick: run });
+    const tools = this.toolbar(...controls, phases, h('span', { class: 'grow' }),
+      zoom('zoomIn', 'Zoom in on time', () => this.plot?.zoomBy(0.5)), zoom('zoomOut', 'Zoom out on time', () => this.plot?.zoomBy(2)), zoom('fit', 'Show the whole run', () => this.plot?.zoomTo(null)));
+    tools.classList.add('emt-tools');
+    this.body.classList.add('column');
+    const wrap = h('div', { class: 'plot-wrap' });
+    const plotHost = h('div', { class: 'plot', role: 'img', 'aria-label': series ? `${series.label} of ${series.title}` : 'No waveform' });
+    const side = h('div', { class: 'plot-side', role: 'region', 'aria-label': 'Events and notes', tabindex: '0' });
+    wrap.append(plotHost, side);
+    this.mount([bar, tools], wrap);
+    side.append(h('p', { class: 'plot-note', text: 'Drag across the plot to zoom in on a time range, or use the wheel; double-click shows the whole run.' }));
+    side.append(h('h4', { text: 'Events' }));
+    for (const e of r.events) side.append(h('div', { class: 'plot-note', html: `<b class="num">${esc(fixed(e.at * 1000, 2))} ms</b> ${esc(e.note)}` }));
+    if (r.operations.length) {
+      side.append(h('h4', { text: 'Current zeros' }));
+      for (const o of r.operations) side.append(h('div', { class: 'plot-note', html: `<b class="num">${esc(fixed(o.t * 1000, 2))} ms</b> ${esc(o.note)}` }));
+    }
+    if (r.notes.length) {
+      side.append(h('h4', { text: 'Notes' }));
+      for (const n of r.notes) side.append(h('div', { class: 'plot-note', text: n }));
+    }
+    this.plot = new Plot(plotHost);
+    this.plot.onZoom = w => { this.emtWindow = w; };
+    const shown = series ? series.phases.map((data, k) => ({ name: `Phase ${'abc'[k]}`, color: seriesColor(k, dark), data, k })).filter(x => !this.emtHidden.has(x.k)) : [];
+    this.plot.set({ t: r.t, unit: series?.unit ?? '', label: series?.label, events: r.events.filter(e => e.applied).map(e => e.at), cursor: -1,
+      timeUnit: 'ms', zoomable: true, window: this.emtWindow, series: shown });
+    if (series) {
+      const cols = ['a', 'b', 'c'].map((p, k) => ({ key: p, label: `Phase ${p}`, unit: series.unit, value: (/** @type {any} */ x) => x[p], k }));
+      // Times to the nanosecond, values to the seven digits single precision holds.
+      const v = (/** @type {number} */ x) => Number(x.toPrecision(7));
+      const rows = Array.from(r.t, (t, i) => ({ t: Math.round(t * 1e9) / 1e6, a: v(series.phases[0][i]), b: v(series.phases[1][i]), c: v(series.phases[2][i]) }));
+      this.current = { name: `emt-${series.label.toLowerCase().replaceAll(' ', '-')}-${series.title}`, rows,
+        columns: [{ key: 't', label: 'Time', unit: 'ms', value: (/** @type {any} */ x) => x.t }, ...cols] };
+    }
+  }
+
   /** CSV of the table on screen. */
   csv() {
     if (this.tab === 'data') return this.sheet.csv();
     if (!this.current) return null;
     return { name: this.current.name, text: toCSV(this.current.columns, this.current.rows) };
   }
+}
+
+/** How the EMT report names a branch's model. */
+const EMT_MODEL = /** @type {Record<string, string>} */ ({ travelling: 'Travelling wave', pi: 'π section', transformer: 'Transformer' });
+
+/** An EMT result's elements of one kind, with their display names (sources carry their own).
+ * @param {import('../engine/reports.js').EmtResult} r @param {EmtTrace['kind']} kind
+ * @returns {Array<{ id: string, name: string, kind: EmtTrace['kind'] }>} */
+function emtElements(r, kind) {
+  if (kind === 'bus') return r.buses.map(b => ({ id: b.id, name: '', kind }));
+  if (kind === 'branch') return r.branches.filter(b => b.winding <= 1).map(b => ({ id: b.id, name: '', kind }));
+  if (kind === 'source') return r.sources.map(s => ({ id: s.id, name: s.name, kind }));
+  return r.faults.map(f => ({ id: f.target, name: '', kind }));
+}
+
+/** What the EMT view plots for an element the diagram selected: a busbar's voltages, a branch's or a source's currents.
+ * @param {import('../engine/reports.js').EmtResult} r @param {string} id @returns {EmtTrace | null} */
+function emtTraceOf(r, id) {
+  if (r.buses.some(b => b.id === id)) return { kind: 'bus', id, end: 0 };
+  if (r.branches.some(b => b.id === id)) return { kind: 'branch', id, end: 0 };
+  if (r.sources.some(s => s.id === id)) return { kind: 'source', id, end: 0 };
+  return null;
+}
+
+/** The three phase traces of what an EMT view plots, with their unit and names; null when the run lacks it.
+ * @param {import('../engine/reports.js').EmtResult} r @param {EmtTrace} trace */
+function emtSeries(r, trace) {
+  if (trace.kind === 'bus') {
+    const b = r.buses.find(x => x.id === trace.id);
+    return b ? { phases: b.v, unit: 'kV', label: 'Phase voltage', title: trace.id } : null;
+  }
+  if (trace.kind === 'branch') {
+    const b = r.branches.find(x => x.id === trace.id);
+    return b ? { phases: trace.end === 1 ? b.to : b.from, unit: 'kA', label: 'Current', title: trace.id } : null;
+  }
+  if (trace.kind === 'source') {
+    const s = r.sources.find(x => x.id === trace.id);
+    return s ? { phases: s.i, unit: 'kA', label: 'Current', title: trace.id } : null;
+  }
+  const f = r.faults.find(x => x.target === trace.id);
+  return f ? { phases: f.i, unit: 'kA', label: 'Fault current', title: trace.id } : null;
 }
 
 /** What the stability view can plot. */

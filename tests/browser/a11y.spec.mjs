@@ -80,6 +80,16 @@ for (const theme of /** @type {const} */ (['light', 'dark'])) {
       await audit(page, 'command palette');
     });
 
+    test('the EMT waveforms and their peak table', async ({ page }) => {
+      await open(page, 'sample=riverside');
+      await page.keyboard.press('Alt+W');
+      await expect(page.locator('.dock-tab[data-tab="emt"]')).toHaveAttribute('aria-selected', 'true');
+      await expect(page.locator('.plot canvas')).toBeVisible();
+      await audit(page, 'EMT waveforms');
+      await page.locator('.dock-toolbar .seg button', { hasText: 'Busbars' }).click();
+      await audit(page, 'EMT peaks');
+    });
+
     test('the File page', async ({ page }) => {
       await open(page);
       await page.locator('.ribbon-tab.file-tab').click();

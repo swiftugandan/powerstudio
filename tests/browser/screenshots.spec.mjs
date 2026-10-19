@@ -4,7 +4,7 @@
  *   PS_SCREENSHOTS=1 npx playwright test screenshots --project=webgpu
  */
 import { test, expect } from '@playwright/test';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 
 const DIR = 'docs/screenshots';
 const enabled = process.env.PS_SCREENSHOTS === '1';
@@ -79,6 +79,16 @@ test('stability simulation', async ({ page }) => {
   await shot(page, '04-stability', 'Classical-model stability simulation: a fault at Bus 4 cleared by tripping Line 4-5, rotor angles against the centre of inertia.');
 });
 
+test('EMT simulation', async ({ page }) => {
+  await open(page, 'sample=riverside');
+  await page.keyboard.press('Alt+W');
+  await expect(page.locator('.plot canvas')).toBeVisible();
+  await page.locator('.splitter-h').focus();
+  for (let i = 0; i < 2; i++) await page.keyboard.press('Shift+ArrowUp');
+  await page.waitForTimeout(200);
+  await shot(page, '10-emt', 'EMT simulation of the Riverside network: an earth fault at Hilltop cleared at its current zero, then the capacitor bank switched out and back in onto its charge; the three phase voltages at Hilltop.');
+});
+
 test('command palette and study case', async ({ page }) => {
   await open(page, 'sample=ieee14');
   await page.keyboard.press('ControlOrMeta+K');
@@ -115,5 +125,9 @@ test('phone layout', async ({ page }) => {
 
 test.afterAll(() => {
   if (!enabled) return;
-  writeFileSync(`${DIR}/manifest.json`, JSON.stringify(manifest, null, 2) + '\n');
+  // A run of some of the captures keeps the others' entries.
+  const path = `${DIR}/manifest.json`;
+  const kept = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
+  const all = { ...kept, ...manifest };
+  writeFileSync(path, JSON.stringify(Object.fromEntries(Object.keys(all).sort().map(k => [k, all[k]])), null, 2) + '\n');
 });

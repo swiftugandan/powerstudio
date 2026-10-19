@@ -6,7 +6,7 @@
 
 /**
  * @typedef {'number' | 'integer' | 'string' | 'bool' | 'enum' | 'bus' | 'trafo' | 'controller' | 'labels' | 'route'} FieldType
- * @typedef {'basic' | 'loadflow' | 'shortcircuit' | 'rms' | 'graphic'} FieldGroup
+ * @typedef {'basic' | 'loadflow' | 'shortcircuit' | 'rms' | 'emt' | 'graphic'} FieldGroup
  * @typedef {{
  *   key: string, label: string, type: FieldType, group: FieldGroup, default: unknown,
  *   unit?: string, min?: number, max?: number, exclusiveMin?: boolean, options?: readonly string[], help?: string,

@@ -124,6 +124,39 @@ a load flow, which is the quickest way to look at a case that fails.
 `tests/oracle.test.mjs` fails when the committed inputs no longer match the samples, so a sample cannot drift away
 from its goldens unnoticed. Moving a busbar on the diagram changes the inputs but not the goldens.
 
+## Electromagnetic transients against ngspice
+
+`scripts/oracle/emt_spice.py` writes `tests/oracle/golden/emt-<case>.json` for every case in
+`tests/oracle/emt-cases.json`: the phase voltages of every busbar and the phase currents at every branch's from end,
+every source and the fault, every 50 µs. For each case it solves the document's load flow with pandapower (built as
+`oracle.py` builds it), writes the network as a SPICE circuit in SI units from the document's own data, has ngspice
+find the circuit's AC steady state (and checks it against pandapower's voltages to 1e-4), and runs ngspice's transient
+analysis from it (second-order Gear, reltol 1e-6, a step of at most 0.2 µs). Its switches are XSPICE's, moving from
+open to closed over 0.1 µs (`switchRampUs`); its lossless lines set no breakpoints of their own, which at transmission
+voltages multiply with every reflection until the run stalls, so the step limit bounds their error. The engine's
+breaker resistance and every node's conductance to earth are the case file's `engine` values, and the tests check that
+they still equal the engine's. The oracle refuses a load flow that leaves a grid's busbar away from the grid's angle
+(pandapower solves nothing when no branch is in service). It needs ngspice (with its XSPICE code models, as distributions ship it) on the path and the oracle
+environment:
+
+```sh
+.venv/bin/python scripts/oracle/emt_spice.py                 # every case, under a minute each
+.venv/bin/python scripts/oracle/emt_spice.py riverside-1ph   # one case
+EMT_SPICE_KEEP=/tmp/case.cir .venv/bin/python scripts/oracle/emt_spice.py ieee14-2ph   # also keep the netlist
+```
+
+The synthetic network of the line case comes from `scripts/export-oracle-inputs.mjs` (`tests/oracle/emt/`), which
+`tests/oracle.test.mjs` keeps current. The engine runs the cases at a 1 µs step (the line case at 0.25 µs: the
+trapezoidal rule spreads a travelling wave's front over one step, so near fronts its error falls only in proportion to
+the step) with breakers that open at their
+command (`instantSwitching`), as SPICE's switches are time-controlled; events lie off the 50 µs sampling grid, so no
+sample falls on a travelling wave's front. `engine/crates/ps-study/tests/emt.rs` and `tests/emt.test.mjs` compare
+every sample, natively and in WebAssembly, and print the worst differences with `--nocapture`:
+
+```sh
+cd engine && cargo test -p ps-study --test emt -- --nocapture
+```
+
 ## Short circuit against IEC TR 60909-4
 
 `scripts/export-oracle-inputs.mjs` also writes a Riverside variant with a solar park and a battery fed through

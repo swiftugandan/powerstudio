@@ -272,3 +272,17 @@ table (`andes/io/psse-dyr.yaml`) lists them in another order (TB before TC, KA a
 case is a spreadsheet, so that table is not exercised by its own cases. `scripts/oracle/andes_dyn.py` writes the
 record in ANDES's order, by name, for ANDES; ESST1A's typical values are ANDES's defaults as it loads
 `ieee14/ieee14_esst1a.xlsx`.
+
+## Electromagnetic transients
+
+The method is Dommel's: H. W. Dommel, "Digital Computer Solution of Electromagnetic Transients in Single- and
+Multiphase Networks", IEEE Transactions on Power Apparatus and Systems, PAS-88(4), 1969, and his EMTP Theory Book
+(Bonneville Power Administration, 1986) for the travelling-wave line with lumped losses. No value of either is
+used: the lossy line's equations are checked against the exact cascade they stand for
+(`engine/crates/ps-emt/src/circuit.rs`), and the solver against the closed forms and the circuit simulator below. The
+damping of switching by two backward-Euler half steps is the critical damping adjustment of J. R. Marti and J. Lin,
+"Suppression of numerical oscillations in the EMTP", IEEE Transactions on Power Systems 4(2), 1989.
+
+The EMT goldens (`tests/oracle/golden/emt-*.json`) come from ngspice 42 (https://ngspice.sourceforge.io/, BSD
+licence), as packaged by Ubuntu 24.04 (`ngspice 42+ds-3build1`), run by `scripts/oracle/emt_spice.py` on circuits
+it writes from the documents; the operating point comes from pandapower 3.5.6, as for the other sample goldens.

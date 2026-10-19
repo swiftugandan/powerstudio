@@ -407,6 +407,92 @@ impl Default for RmsSettings {
     }
 }
 
+/// What an EMT event does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EmtEventKind {
+    /// A fault at a node.
+    Fault,
+    /// Clears the fault at a node: each faulted phase goes out at its next current zero.
+    Clear,
+    /// Opens a branch's, load's, shunt's or source's breaker: each pole opens at its next current zero.
+    Trip,
+    /// Closes a breaker: all three poles at once.
+    Close,
+}
+
+/// The phases an EMT fault connects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum EmtFault {
+    /// Three phases to earth.
+    #[default]
+    #[serde(rename = "3ph")]
+    ThreePhase,
+    /// Phases b and c to each other.
+    #[serde(rename = "2ph")]
+    LineToLine,
+    /// Phases b and c to earth.
+    #[serde(rename = "2phg")]
+    TwoPhaseEarth,
+    /// Phase a to earth.
+    #[serde(rename = "1ph")]
+    LineToEarth,
+}
+
+/// An EMT simulation event.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmtEvent {
+    /// Time, s.
+    pub t: f64,
+    /// What happens.
+    pub kind: EmtEventKind,
+    /// Identifier of the element concerned.
+    pub target: String,
+    /// The phases a fault connects; three-phase when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fault: Option<EmtFault>,
+    /// Fault resistance in each faulted path, Ω; a fault without one is bolted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r: Option<f64>,
+}
+
+/// How an EMT simulation models lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum LineModel {
+    /// Travelling waves (Bergeron) where every mode's travel time is at least one step, π sections otherwise.
+    #[default]
+    Auto,
+    /// π sections everywhere.
+    Pi,
+}
+
+/// Electromagnetic transient settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EmtSettings {
+    /// Simulated time, s.
+    pub t_end: f64,
+    /// Time step, µs.
+    pub dt_us: f64,
+    /// Line model.
+    pub line_model: LineModel,
+    /// Events in time order.
+    pub events: Vec<EmtEvent>,
+}
+
+impl Default for EmtSettings {
+    fn default() -> Self {
+        Self {
+            t_end: 0.2,
+            dt_us: 50.0,
+            line_model: LineModel::Auto,
+            events: Vec::new(),
+        }
+    }
+}
+
 /// A study case: settings for every calculation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
@@ -419,4 +505,6 @@ pub struct StudyCase {
     pub contingency: ContingencySettings,
     /// Stability.
     pub rms: RmsSettings,
+    /// Electromagnetic transients.
+    pub emt: EmtSettings,
 }

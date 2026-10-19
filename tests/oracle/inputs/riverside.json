@@ -741,6 +741,34 @@
      "target": "B5"
     }
    ]
+  },
+  "emt": {
+   "tEnd": 0.2,
+   "dtUs": 50,
+   "lineModel": "auto",
+   "events": [
+    {
+     "t": 0.02,
+     "kind": "fault",
+     "target": "B5",
+     "fault": "1ph"
+    },
+    {
+     "t": 0.08,
+     "kind": "clear",
+     "target": "B5"
+    },
+    {
+     "t": 0.12,
+     "kind": "trip",
+     "target": "S1"
+    },
+    {
+     "t": 0.1601,
+     "kind": "close",
+     "target": "S1"
+    }
+   ]
   }
  }
 }

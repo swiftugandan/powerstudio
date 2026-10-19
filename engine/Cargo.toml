@@ -24,6 +24,7 @@ ps-topology = { path = "crates/ps-topology" }
 ps-net = { path = "crates/ps-net" }
 ps-sc = { path = "crates/ps-sc" }
 ps-dyn = { path = "crates/ps-dyn" }
+ps-emt = { path = "crates/ps-emt" }
 ps-study = { path = "crates/ps-study" }
 
 [workspace.lints.rust]

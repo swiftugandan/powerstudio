@@ -92,6 +92,12 @@ export function ieee14() {
     { t: 0.18, kind: 'clear', target: 'B4' },
     { t: 0.18, kind: 'trip', target: 'L7' },
   ] };
+  // EMT: the same fault seen in its first cycles, cleared at its current zeros with the line beside it tripped.
+  doc.study.emt = { ...doc.study.emt, tEnd: 0.2, dtUs: 50, events: [
+    { t: 0.02, kind: 'fault', target: 'B4', fault: '3ph' },
+    { t: 0.1, kind: 'clear', target: 'B4' },
+    { t: 0.1, kind: 'trip', target: 'L7' },
+  ] };
   return doc;
 }
 

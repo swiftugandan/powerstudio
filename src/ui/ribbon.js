@@ -17,7 +17,7 @@ export const TABS = [
     { label: 'Clipboard', items: [{ cmd: 'edit.paste', size: 'large' }, { stack: ['edit.cut', 'edit.copy', 'edit.duplicate'] }] },
     { label: 'Edit', items: [{ cmd: 'edit.delete', size: 'large' }, { stack: ['edit.toggleService', 'edit.selectAll', 'layout.arrange'] }] },
     { label: 'Tools', items: [{ cmd: 'tool.select', size: 'large' }, { cmd: 'tool.pan', size: 'large' }] },
-    { label: 'Calculate', items: [{ cmd: 'calc.loadflow', size: 'large' }, { cmd: 'calc.shortcircuit', size: 'large' }, { cmd: 'calc.contingency', size: 'large' }, { cmd: 'calc.rms', size: 'large' }] },
+    { label: 'Calculate', items: [{ cmd: 'calc.loadflow', size: 'large' }, { cmd: 'calc.shortcircuit', size: 'large' }, { cmd: 'calc.contingency', size: 'large' }, { cmd: 'calc.rms', size: 'large' }, { cmd: 'calc.emt', size: 'large' }] },
     { label: 'Navigate', items: [{ cmd: 'view.fit', size: 'large' }, { stack: ['view.zoomIn', 'view.zoomOut', 'palette.open'] }] },
   ] },
   { id: 'insert', label: 'Insert', groups: [
@@ -31,7 +31,7 @@ export const TABS = [
     { label: 'Steady state', items: [{ cmd: 'calc.loadflow', size: 'large' }, { stack: ['calc.autoLoadFlow', 'calc.qlimits', 'calc.dcStart'] }] },
     { label: 'Faults', items: [{ cmd: 'calc.shortcircuit', size: 'large' }, { stack: ['sc.fault3ph', 'sc.fault2ph', 'sc.fault1ph'] }, { stack: ['sc.max', 'sc.min', 'sc.allBuses'] }] },
     { label: 'Security', items: [{ cmd: 'calc.contingency', size: 'large' }, { stack: ['contingency.edit', 'contingency.gens', 'contingency.screening'] }] },
-    { label: 'Dynamics', items: [{ cmd: 'calc.rms', size: 'large' }, { stack: ['rms.events', 'calc.cancel'] }] },
+    { label: 'Dynamics', items: [{ cmd: 'calc.rms', size: 'large' }, { cmd: 'calc.emt', size: 'large' }, { stack: ['rms.events', 'emt.events', 'calc.cancel'] }] },
     { label: 'Study case', items: [{ cmd: 'study.settings', size: 'large' }, { stack: ['results.clear', 'results.csv'] }] },
   ] },
   { id: 'arrange', label: 'Arrange', groups: [

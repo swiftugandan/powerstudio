@@ -5,7 +5,7 @@
  * plots and overlays read directly. engine/crates/ps-study defines the reports; docs/ENGINE.md describes them. */
 
 /**
- * @typedef {'loadflow' | 'shortcircuit' | 'contingency' | 'rms'} CalcKind
+ * @typedef {'loadflow' | 'shortcircuit' | 'contingency' | 'rms' | 'emt'} CalcKind
  * @typedef {{ id: string, vm: number, va: number, kv: number, p: number, q: number, type: 'Ref' | 'PV' | 'PQ' }} BusResult
  * @typedef {{ id: string, cls: 'line' | 'trafo' | 'trafo3', winding?: number, pFrom: number, qFrom: number, pTo: number, qTo: number,
  *   iFrom: number, iTo: number, pLoss: number, qLoss: number, loading: number }} BranchResult
@@ -52,7 +52,24 @@
  * @typedef {{ t: Float32Array, machines: MachineTrace[], busIds: string[], voltages: Float32Array[], events: Array<SimEvent & { applied: boolean, note: string }>,
  *   stable: boolean, lossOfSynchronism: number | null, angleReference: 'grid' | 'coi', steps: number, notes: string[], message: string }} RmsResult
  *   `notes`: the models' limits widened to the operating point.
- * @typedef {{ loadflow: LoadFlowResult, shortcircuit: ShortCircuitResult, contingency: ContingencyResult, rms: RmsResult }} ResultOf
+ * @typedef {[Float32Array, Float32Array, Float32Array]} Phases Traces of phases a, b and c.
+ * @typedef {{ id: string, kv: number, v: Phases, peak: number, peakPu: number, peakAt: number, rmsMin: number, rmsMax: number }} EmtBus
+ *   `v` phase-to-earth voltages, kV; `peak` the largest instantaneous one, kV, and `peakPu` as a share of the nominal crest
+ *   √2·Un/√3; `rmsMin` and `rmsMax` the extremes of any phase's one-cycle RMS voltage after the first cycle, p.u.
+ * @typedef {{ id: string, winding: number, model: 'travelling' | 'pi' | 'transformer', from: Phases, to: Phases, peak: number,
+ *   peakAt: number }} EmtBranch Phase currents into the branch at each end, kA; `winding` 1 to 3 for a three-winding
+ *   transformer's winding, 0 otherwise.
+ * @typedef {{ id: string, name: string, i: Phases, peak: number, peakAt: number }} EmtSource Phase currents out of the
+ *   source into the network, kA.
+ * @typedef {{ target: string, fault: import('../core/document.js').EmtFaultType, tOn: number, tOff: number | null, i: Phases,
+ *   peak: number, peakAt: number, rms: number }} EmtFault Phase currents into the fault, kA; `rms` the largest phase's
+ *   RMS current over the fault's last full cycle (NaN for a fault shorter than a cycle).
+ * @typedef {import('../core/document.js').EmtEvent & { applied: boolean, at: number, note: string }} EmtAppliedEvent
+ * @typedef {{ t: Float32Array, dt: number, steps: number, buses: EmtBus[], branches: EmtBranch[], sources: EmtSource[],
+ *   faults: EmtFault[], events: EmtAppliedEvent[], operations: Array<{ t: number, element: string, note: string }>,
+ *   travelling: number, pi: number, initialMismatch: number, factorisations: number, notes: string[], message: string }} EmtResult
+ *   `operations`: breaker poles and fault paths that opened at a current zero.
+ * @typedef {{ loadflow: LoadFlowResult, shortcircuit: ShortCircuitResult, contingency: ContingencyResult, rms: RmsResult, emt: EmtResult }} ResultOf
  * @typedef {{ class: string, count: number, status: 'mapped' | 'used' | 'not used', detail: string }} ImportClass
  * @typedef {{ files: Array<{ name: string, profiles: string[] }>, classes: ImportClass[], notes: string[] }} ImportReport
  * @typedef {{ severity: 'warning' | 'error', class: string, id: string, message: string }} ModelIssue
@@ -84,6 +101,13 @@ export function adapt(kind, raw) {
     r = { ...raw, buses: raw.buses.map((/** @type {any} */ b) => ({ ...b, r0: num(b.r0), x0: num(b.x0) })) };
   } else if (kind === 'contingency') {
     r = { ...raw, base: adaptCase(raw.base), cases: raw.cases.map(adaptCase) };
+  } else if (kind === 'emt') {
+    const phases = (/** @type {number[][]} */ p) => /** @type {Phases} */ (p.map(x => Float32Array.from(x)));
+    r = { ...raw, t: Float32Array.from(raw.t),
+      buses: raw.buses.map((/** @type {any} */ b) => ({ ...b, v: phases(b.v) })),
+      branches: raw.branches.map((/** @type {any} */ b) => ({ ...b, from: phases(b.from), to: phases(b.to) })),
+      sources: raw.sources.map((/** @type {any} */ s) => ({ ...s, i: phases(s.i) })),
+      faults: raw.faults.map((/** @type {any} */ f) => ({ ...f, i: phases(f.i), rms: num(f.rms) })) };
   } else {
     r = { ...raw, t: Float32Array.from(raw.t),
       machines: raw.machines.map((/** @type {any} */ m) => ({ ...m, delta: Float32Array.from(m.delta), speed: Float32Array.from(m.speed), pe: Float32Array.from(m.pe),

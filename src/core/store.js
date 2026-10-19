@@ -201,6 +201,8 @@ export class Tx {
     if (study.loadflow.areas.some(a => a.slack === id)) this.setStudy('loadflow', 'areas', study.loadflow.areas.map(a => (a.slack === id ? { ...a, slack: '' } : a)));
     const events = study.rms.events.filter(e => e.target !== id);
     if (events.length !== study.rms.events.length) this.setStudy('rms', 'events', events);
+    const emtEvents = study.emt.events.filter(e => e.target !== id);
+    if (emtEvents.length !== study.emt.events.length) this.setStudy('emt', 'events', emtEvents);
     const list = study.contingency.list.map(c => ({ ...c, elements: c.elements.filter(e => e !== id) })).filter(c => c.elements.length);
     if (JSON.stringify(list) !== JSON.stringify(study.contingency.list)) this.setStudy('contingency', 'list', list);
     // A rule with a condition on the element goes (without the condition it would fire more widely than meant), and

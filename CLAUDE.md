@@ -1,7 +1,8 @@
 # PowerStudio: notes for agents
 
 PowerStudio is a browser-based power system analysis workbench: a single-line diagram editor with load flow,
-IEC 60909-style short circuit, N-1 contingency and stability simulation with machine controls. Read README.md for
+IEC 60909-style short circuit, N-1 contingency, stability simulation with machine controls and three-phase
+electromagnetic transient (EMT) simulation. Read README.md for
 features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md for what every calculation computes.
 
 ## Commands
@@ -27,6 +28,8 @@ features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md f
   reproducibility, writes the SBOM, attests and drafts the release. `node scripts/check-reproducible.mjs` and
   `node scripts/sbom.mjs` run the same checks locally.
 - `PS_SCREENSHOTS=1 npx playwright test screenshots --project=webgpu`: refreshes `docs/screenshots/`.
+- `.venv/bin/python scripts/oracle/emt_spice.py [case]`: the EMT goldens from ngspice (`tests/oracle/emt-cases.json`;
+  needs ngspice with its XSPICE code models on the path, docs/TESTING.md).
 - `node scripts/scene-bench.mjs`: times the diagram build of a 70,000-busbar grid with labels in Chromium.
 
 ## Rules
@@ -48,6 +51,9 @@ features and limits, docs/ARCHITECTURE.md for the structure and docs/ENGINE.md f
   validated against ANDES before it ships: a case in `tests/oracle/dyn-cases.json`, `scripts/oracle/andes_dyn.py`,
   then `engine/crates/ps-study/tests/dynamics.rs` (docs/TESTING.md).
   The engine's document writer (`ps-io/src/powerstudio_write.rs`) mirrors `VECTOR_GROUPS`; a test keeps them equal.
+- EMT (`ps-emt`, docs/design/EMT.md) is three-phase and keeps the ngspice comparison green, natively
+  (`cargo test -p ps-study --test emt`) and in WebAssembly (`tests/emt.test.mjs`). New EMT equipment is checked
+  against ngspice or a closed form before it ships. Never call it compliant with an EMT standard or grid code.
 - Other tools' files (CGMES, PSS/E RAW, MATPOWER) open through the engine (`src/engine/exchange.js`); there is no
   importer in JavaScript.
 - Every document edit goes through `store.transact` so undo, redo, autosave and staleness work.

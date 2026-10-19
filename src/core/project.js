@@ -20,6 +20,7 @@
 
 import { CLASS_ORDER, fieldOf } from './catalog.js';
 import { DRAWING_KEYS } from './store.js';
+import { completeStudy } from './document.js';
 
 /**
  * @typedef {import('./document.js').PowerDocument} PowerDocument
@@ -244,6 +245,7 @@ export function projectFromParts(base, parts) {
     ...(m.source ? { source: m.source } : {}),
   });
   if (!p.cases.length) p.cases = projectFromDocument(base).cases;
+  for (const c of p.cases) completeStudy(c.study);
   if (!p.cases.some(c => c.id === p.activeCase)) p.activeCase = p.cases[0].id;
   if (!activeCase(p).variants.includes(p.recording)) p.recording = '';
   return p;

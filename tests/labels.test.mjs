@@ -15,11 +15,12 @@ const palette = /** @type {any} */ ({ bg: rgba, grid: rgba, ink: rgba, muted: rg
 
 /**
  * The diagram of a sample with a study's results on it.
- * @param {import('../src/core/document.js').PowerDocument} doc @param {'loadflow' | 'shortcircuit' | 'contingency'} kind
+ * @param {import('../src/core/document.js').PowerDocument} doc @param {'loadflow' | 'shortcircuit' | 'contingency' | 'emt'} kind
  * @param {{ disentangle?: boolean, branchNames?: boolean }} [opt]
  */
 function scene(doc, kind, opt = {}) {
-  const result = kind === 'loadflow' ? studies.loadflow(doc, {}) : kind === 'shortcircuit' ? studies.shortcircuit(doc, {}) : studies.contingency(doc);
+  const result = kind === 'loadflow' ? studies.loadflow(doc, {}) : kind === 'shortcircuit' ? studies.shortcircuit(doc, {})
+    : kind === 'emt' ? studies.emt(doc, { tEnd: 0.05 }) : studies.contingency(doc);
   const { overlay } = buildOverlay(kind, result, doc, palette, { colouring: 'results' });
   return buildScene({ elements: doc.elements, palette, selection: new Set(), hover: '', overlay, preview: null,
     labels: { names: true, branchNames: !!opt.branchNames, boxes: true, disentangle: opt.disentangle ?? true } });
@@ -36,7 +37,7 @@ function overlaps(list) {
 }
 
 for (const [name, make] of /** @type {const} */ ([['IEEE 14-bus', ieee14], ['Riverside', riverside]])) {
-  for (const kind of /** @type {const} */ (['loadflow', 'shortcircuit', 'contingency'])) {
+  for (const kind of /** @type {const} */ (['loadflow', 'shortcircuit', 'contingency', 'emt'])) {
     test(`${name}, ${kind}: no name or result box overlaps another`, () => {
       const list = scene(make(), kind, { branchNames: true });
       assert.ok(/** @type {any} */ (list.labels).items.length > 20);

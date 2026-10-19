@@ -19,7 +19,7 @@ Every calculation follows the same path, one crate per step:
 3. **Topology** (`ps-topology`). Closed switches merge nodes into calculation buses, branches in service join them
    into islands, and islands without a source are de-energised.
 4. **Per unit** (`ps-net`). The calculation buses and every branch as a per-unit two-port.
-5. **Solvers** (`ps-lf`, `ps-sc`, `ps-dyn`; contingency analysis in `ps-study`), on sparse matrices (`ps-sparse`).
+5. **Solvers** (`ps-lf`, `ps-sc`, `ps-dyn`, `ps-emt`; contingency analysis in `ps-study`), on sparse matrices (`ps-sparse`).
 6. **Reports** (`ps-study`). Results by element identifier, in engineering units, as JSON.
 
 ## The model
@@ -452,6 +452,117 @@ constant power and 30 % constant current in active power) through a line trip. E
 - `tests/dynamics.test.mjs`: the catalogue's control models equal the engine's library; a RAW file with its DYR file
   opens in the app with every machine's models and simulates.
 
+## Electromagnetic transients (EMT)
+
+`ps-emt` simulates the network's electromagnetic transients: the instantaneous phase voltages and currents in the
+first cycles after a fault, a fault's clearing, or a switching, at a step of microseconds. It complements the RMS
+simulation, which follows phasors over seconds and cannot show a DC offset, a travelling wave or an unbalanced
+waveform. It makes no claim of compliance with any EMT standard or grid code. docs/design/EMT.md records the decisions.
+
+**The circuit.** The network is three-phase: every calculation bus has a node per phase, and every element its own
+terminal nodes behind a three-pole breaker, each pole a switch of 1e-5 p.u. when closed. A breaker that opens leaves
+the element's stored energy where physics leaves it: a line keeps its trapped charge, a load's inductance discharges
+through its resistance. Every node has a conductance of 1e-6 p.u. to earth, so an unearthed star point or an isolated
+delta winding stays defined; it draws no measurable current. Quantities are per unit on the system base and each bus's
+base voltage, phase to earth, so a phase voltage of 1 is the nominal phase-to-earth RMS value; the report gives kV and
+kA. The simulation starts from the load flow (`ps-study/src/emt.rs`) on the network as solved: final taps and
+sections, and each load's consumption at its solved voltage.
+
+**Models.**
+
+- *Branches* start from the load flow's own two-port: the series admittance `ys = −yft·t*`, the shunts
+  `y_from = yff·r² − ys` and `y_to = ytt − ys`, the ratio `r` and the shift θ are taken back out of the four
+  admittances (`t = r·e^{jθ}`), so the positive-sequence circuit is the load flow's network.
+- *Lines* add their zero sequence from the model (R0, X0, B0; a line without zero-sequence data takes its positive
+  sequence and the report says so). A line whose zero and positive-sequence travel times `τ = √(X·B)/ω` are both at
+  least one step is a constant-parameter travelling-wave line (Bergeron) in Clarke's modal components: per mode, the
+  surge impedance `Zc = √(X/B)`, the travel time, and the resistance lumped a quarter at each end and half in the
+  middle (Dommel's lossy approximation: `i_k(t) = v_k(t)/Z′ + I_k`, `Z′ = Zc + R/4`, with
+  `I_k = −(1+h)/2·(v_m/Z′ + h·i_m) − (1−h)/2·(v_k/Z′ + h·i_k)` at `t − τ` and `h = (Zc − R/4)/(Zc + R/4)`); delays
+  between steps are interpolated linearly. Other lines are coupled π sections: series R and L matrices and shunt
+  capacitance matrices from the sequence values (`(x0 + 2x1)/3` on the diagonal, `(x0 − x1)/3` off it). A series
+  capacitor (negative reactance) is a series R and C per phase. The study case can make every line a π section.
+- *Transformers*: per leg, an ideal transformer between the two windings' leg voltages, the leakage impedance on the
+  second winding's side and the magnetising admittances across either winding. A star winding's leg is phase to
+  neutral (the neutral earthed directly, through the earthing impedance, or not at all, as the vector group and the
+  neutral earthing data say), a delta's is between two phases. Per leg the ratio is `r·w₁/w₂` and the leakage
+  impedance `z·w₂²`, with `w = √3` for a delta and 1 for a star, so the positive sequence is the load flow's. The
+  windings' arrangement (the delta's phase pair, the leg each winding feeds, its polarity) is the one whose phase shift
+  lies nearest the two-port's; the rest, a phase shifter's angle, rotates the first winding's phase voltages by a real
+  3 × 3 matrix that turns the positive sequence by the angle, the negative sequence by its opposite, and passes the
+  zero sequence. So the vector group's 30° steps and the zero-sequence paths (a delta shorts its zero sequence, an
+  unearthed star blocks it) follow from the connections. Three-winding transformers are built from their star
+  equivalent, each winding to an earthed star at the star point. Zigzag windings are refused. Saturation and the zero
+  sequence of a three-limb core are not modelled: the zero-sequence leakage equals the positive-sequence one.
+- *Synchronous machines*: a constant EMF behind the subtransient impedance R + jX″d, from the load flow's terminal
+  voltage and current, with the neutral earthed or not as the machine's data say (the editor's machines are
+  unearthed). A network feeder and an external grid: a constant EMF behind their short-circuit impedance
+  (`X = (Sbase/Sk″max)/√(1 + (R/X)²)`) with its zero sequence from X0/X1 and R0/X0, or unearthed when X0/X1 is zero.
+  The rotor does not move and no control acts, so a simulation stands for the first cycles. Converter-fed sources inject
+  a balanced sinusoidal current at their load-flow output; a trip stops it.
+- *Loads*: an earthed star of R in parallel with L (or C) per phase, from their load-flow consumption. Shunts, static
+  var compensators and HVDC stations: their load-flow admittance.
+
+**Initial state.** The circuit's own sinusoidal steady state at the system frequency, solved as a complex sparse
+system, sets every inductor current, capacitor voltage and travelling-wave history (for one travel time back), so an
+undisturbed network stays where it is. With π lines it is the load flow's state to within the breaker resistance
+(about 3e-5 p.u. on the samples); a travelling-wave line, a distributed line where the load flow's is a π section,
+adds its distributed effect (about 1e-4 p.u. on IEEE 14). The report gives the difference.
+
+**Method.** Dommel's method: every element becomes its trapezoidal companion model, a conductance and a history
+current (an R-L branch `i(t) = Geq·u(t) + Geq·(u(t−Δt) + (2L/Δt − R)·i(t−Δt))` with `Geq = (R + 2L/Δt)⁻¹`, a
+capacitance `i(t) = (2C/Δt)·u(t) − ((2C/Δt)·u(t−Δt) + i(t−Δt))`, coupled ones with matrices), and the nodal equations
+`G·v = i` are solved each step by sparse LU. Coupled elements and ideal transformers are ports: weighted sums of node
+voltages, through which the element's currents leave its nodes. `G` changes only when a switch does, so the matrix is
+ordered once and factorised again only then. The trapezoidal rule rings on a voltage across an inductance or a current
+into a capacitance that jumped, so the step after every switching is taken as two backward-Euler half steps (critical
+damping adjustment); their companion conductances equal the trapezoidal ones, so no refactorisation is needed.
+
+**Switching and events.** Events act at the nearest step. A fault connects the bus's phases through its resistance in
+each faulted path (bolted: the breaker's resistance): three phases to earth, phases b and c to each other (line to
+line), b and c to earth, or a to earth. A clearing extinguishes each faulted phase at its next current zero. A trip
+asks each pole of the element's breakers (both ends of a branch) to open at its next current zero, as an arc goes out;
+a pole whose current has a DC offset that keeps it from zero stays closed, and the report says so. A close closes all
+three poles at its time, which sets the point on wave. Lines, transformers, loads and shunts out of service between
+energised buses are built with open breakers, so a close energises them. (`instantSwitching` opens poles at their
+command instead; it exists for comparisons with simulators whose switches are time-controlled, and cutting an
+inductive current at once makes an overvoltage only the network's capacitance bounds.)
+
+**Report.** Per busbar the three phase-to-earth voltages (kV), the largest instantaneous value, also as a share of the
+nominal crest `√2·Un/√3`, with its time, and the lowest and highest one-cycle RMS voltage of any phase after the first
+cycle; per branch the phase currents into it at each end (kA) and their peak; per source and fault the phase currents
+and their peak, and per fault the largest phase's RMS current over its last full cycle and when it began and went out;
+the events with what they did and every pole that opened at a current zero. Peaks and RMS values are taken at every
+step, not from the kept samples. A report keeps up to 10,000 samples a trace and at most six million values in all (at
+least 300 samples a trace). The default step is 50 µs and the default time 0.2 s; Riverside's 0.2 s takes about 0.2 s
+natively and IEEE 14's about 0.4 s.
+
+**Checked by**
+
+- `engine/crates/ps-study/tests/emt.rs` and `tests/emt.test.mjs` against ngspice on the cases of
+  `tests/oracle/emt-cases.json` (TESTING.md has the procedure): Riverside with a line-to-earth fault through 0.5 Ω and
+  its clearing, and a three-phase fault on its 0.4 kV busbar; IEEE 14 with a two-phase-to-earth fault and a
+  line-to-line fault; and two 220 kV grids, one feeding a load through a transformer, joined by energising a 100 km
+  travelling-wave line, then a line-to-earth fault. The oracle rebuilds each network in volts, amperes, ohms, henries and farads from the document, independently
+  of the engine, starts from ngspice's own AC solution at pandapower's load flow, and integrates with a step of at most
+  0.2 µs; the engine steps 1 µs, and 0.25 µs on the line. Every phase voltage agrees to 2.1e-3 of the nominal crest
+  and every current to 2.6e-4 of its kind's largest value. Away from switching the error falls with the square of the
+  step, as the trapezoidal rule's does; a travelling wave's front is a jump, which the rule spreads over one step, so
+  just behind fronts it falls in proportion to the step (on the line, 1.2e-2 of crest at 1 µs, 5e-3 at 0.5 µs).
+- `engine/crates/ps-emt/src/circuit.rs`: the travelling-wave line's two-port equals the exact cascade of R/4, half a
+  lossless line, R/2, half a lossless line and R/4 to 1e-12, at the system frequency and at its 7th and 31st
+  harmonics.
+- `engine/crates/ps-study/tests/emt.rs`: an R-L branch switched onto a source agrees with the closed form (the
+  steady-state sinusoid less its value at the switching, decaying with L/R) to 2e-3 of its amplitude at a 10 µs step;
+  a matched lossless line delays its sending voltage by exactly its travel time; a fault applied for good settles at
+  the phasor solution of the faulted circuit to 1e-3; every pole of a tripped cable opens at the first step after its
+  current changes sign and carries nothing afterwards; the samples stay at their load-flow voltages without events
+  (one-cycle RMS within 1e-4 p.u.); transformers with a phase shift beyond their vector group (7.5° and −12°) and a
+  phase-shifting tap start at the load flow and stay there, which fails if the extra shift turns the wrong way; the
+  same request gives the same report.
+- `tests/engine.test.mjs`: the native and WebAssembly engines give the same report (waveforms, kept in single
+  precision, to 1e-8 of their scale).
+
 ## MATPOWER import
 
 `ps-io` reads MATPOWER cases of format version 2 straight into the model and is exact for everything MATPOWER
@@ -661,6 +772,7 @@ carries options that override the document's study case for one run, and returns
 | `contingency` | none | base case, ranked cases, worst loading per branch, voltage extremes per bus |
 | `contingency_plan`, `contingency_chunk`, `contingency_merge` | none; `from`, `to`; the chunks | the outage list; one chunk; the merged report |
 | `rms` | `tEnd`, `dt`, `events`, `maxSamples` | traces per machine and bus, events with what they did, stability verdict |
+| `emt` | `tEnd` (s), `dtUs` (µs), `lineModel` (`auto`, `pi`), `events`, `maxSamples`; `instantSwitching` (breakers open at their command, for comparisons with circuit simulators) | phase voltages per bus and phase currents per branch end, source and fault, with their peaks; events and the poles that opened at current zeros |
 
 The WebAssembly module has one entry point, `ps_call`, which takes and returns an envelope: a little-endian u32
 header length, a JSON header, and a payload (the document in, the report out). `ps_alloc` and `ps_free` manage the
