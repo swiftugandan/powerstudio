@@ -1,4 +1,4 @@
-//! The operator benchmark kit's comparison (docs/BENCHMARK-KIT.md): PowSyBl's load flow of the IEEE 14-bus PSS/E case
+//! The operator benchmark kit's comparison (docs/guide/check-against-your-tool.md): PowSyBl's load flow of the IEEE 14-bus PSS/E case
 //! (the oracle golden), written as an operator's tool would export it, compares within tolerance; a changed value and
 //! a bus the model lacks are reported.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]

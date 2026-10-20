@@ -36,7 +36,7 @@ import { icon, logo } from './ui/icons.js';
 import { kbd, isMac } from './ui/keys.js';
 import { fixed, duration } from './ui/format.js';
 import { enumLabel } from './ui/fields.js';
-import { REPO_URL } from './core/version.js';
+import { REPO_URL, SITE_URL } from './core/version.js';
 
 /**
  * @typedef {import('./core/catalog.js').Element} Element
@@ -1543,10 +1543,10 @@ export class App {
     // Help
     c.add({ id: 'palette.open', label: 'Command palette', icon: 'search', keys: ['Mod+K', 'Mod+Shift+P'], global: true, group: 'Help', hint: 'Search commands and elements', run: () => openPalette(this) });
     c.add({ id: 'help.shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'], group: 'Help', run: () => openBackstage(this, 'shortcuts') });
-    c.add({ id: 'help.start', label: 'Getting started', keywords: 'tutorial walkthrough first steps newcomer beginner', icon: 'play', group: 'Help', hint: 'A first session on the IEEE 14-bus sample, from load flow to stability, in the documentation',
-      run: () => { open(`${REPO_URL}/blob/main/docs/GETTING-STARTED.md`, '_blank', 'noopener'); } });
-    c.add({ id: 'help.guide', label: 'User guide', keywords: 'manual documentation help how to', icon: 'help', group: 'Help', hint: 'How to draw, calculate, import and export, in the documentation',
-      run: () => { open(`${REPO_URL}/blob/main/docs/USER-GUIDE.md`, '_blank', 'noopener'); } });
+    c.add({ id: 'help.start', label: 'Getting started', keywords: 'tutorial walkthrough first steps newcomer beginner guide', icon: 'play', group: 'Help', hint: 'A first session on the IEEE 14-bus sample, from load flow to EMT, in the guide',
+      run: () => { open(`${SITE_URL}guide/get-started.html`, '_blank', 'noopener'); } });
+    c.add({ id: 'help.guide', label: 'Guide', keywords: 'manual documentation help how to user guide', icon: 'help', group: 'Help', hint: 'Task-based guide: draw, calculate, import, export and each study',
+      run: () => { open(`${SITE_URL}guide/`, '_blank', 'noopener'); } });
     c.add({ id: 'help.about', label: 'About PowerStudio', icon: 'info', group: 'Help', run: () => openBackstage(this, 'about') });
     void closeBackstage;
   }

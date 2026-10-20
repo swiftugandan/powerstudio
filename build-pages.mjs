@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-/** Builds the GitHub Pages site into _site/: the marketing page at /, the app at /app/, the single-file download
- * PowerStudio.html with its SHA-256, the workspace screenshot and build-info.json. The page's figures and its diagram
- * are computed by the engine here, so the page says what the app does. */
+/** Builds the GitHub Pages site into _site/: the marketing page at /, the app at /app/, the guide at /guide/, the
+ * single-file download PowerStudio.html with its SHA-256, the workspace screenshot and build-info.json. The page's
+ * figures and its diagram are computed by the engine here, so the page says what the app does. */
 
 import { readFile, writeFile, mkdir, rm, cp } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { buildApp } from './build.mjs';
 import { studies, agreement, diagramSvg } from './scripts/site-data.mjs';
+import { renderGuidePages } from './scripts/render-guide.mjs';
 import { APP_VERSION, REPO_URL, SITE_URL } from './src/core/version.js';
 import { icon } from './src/ui/icons.js';
 
@@ -55,18 +56,23 @@ export async function buildSite() {
   });
   await rm(out, { recursive: true, force: true });
   await mkdir(join(out, 'app'), { recursive: true });
+  await mkdir(join(out, 'guide'), { recursive: true });
   await writeFile(join(out, 'index.html'), page);
   await writeFile(join(out, 'app', 'index.html'), app);
   await writeFile(join(out, 'PowerStudio.html'), app);
   await writeFile(join(out, 'PowerStudio.html.sha256'), `${sha}  PowerStudio.html\n`);
+  const guidePages = renderGuidePages(join(root, 'docs', 'guide'), {
+    logo: LOGO, version: APP_VERSION, siteUrl: SITE_URL, favicon, repo: REPO_URL,
+  });
+  for (const g of guidePages) await writeFile(join(out, 'guide', g.path), g.html);
   await cp(join(root, 'docs', 'screenshots', '01-load-flow.png'), join(out, 'workspace.png'));
   await cp(join(root, 'favicon.svg'), join(out, 'favicon.svg'));
   await writeFile(join(out, 'build-info.json'), JSON.stringify({ name: 'powerstudio', version: APP_VERSION, appSha256: sha, sourceRevision: process.env.GITHUB_SHA ?? null }, null, 2) + '\n');
   await writeFile(join(out, '.nojekyll'), '');
-  return { sha, page };
+  return { sha, page, guidePages: guidePages.length };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { sha } = await buildSite();
-  console.log(`Built _site/ (marketing page, app at /app/, PowerStudio.html sha256 ${sha})`);
+  const { sha, guidePages } = await buildSite();
+  console.log(`Built _site/ (marketing page, app at /app/, guide at /guide/ (${guidePages} pages), PowerStudio.html sha256 ${sha})`);
 }

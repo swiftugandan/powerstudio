@@ -717,9 +717,9 @@ the version, rebuilds, attests the files and drafts the GitHub release from docs
 
 What was built, by section 9: reproducible builds checked by `scripts/check-reproducible.mjs` and a CI job (9.3); the
 bill of materials and its licence policy, the release workflow with artifact attestations, and fixtures of every
-released version's documents (9.3); the operator benchmark kit, `ps compare` with docs/BENCHMARK-KIT.md (9.4); Trusted
+released version's documents (9.3); the operator benchmark kit, `ps compare` with docs/guide/check-against-your-tool.md (9.4); Trusted
 Types enforced, encrypted project export with Argon2id and AES-256-GCM, and the threat model stated in the app and in
-docs/SECURITY.md (9.5); and docs/USER-GUIDE.md. The new browser projects found a real fault, WebKit refusing Blobs in
+docs/SECURITY.md (9.5); and docs/guide/. The new browser projects found a real fault, WebKit refusing Blobs in
 IndexedDB in private browsing, and the audit found contrast, tab, splitter and focus faults; docs/TEST-REPORT.md lists
 them. Signed tags need the maintainer's key and are left to the release itself.
 

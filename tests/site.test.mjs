@@ -6,7 +6,7 @@ import { buildApp } from '../build.mjs';
 import { APP_VERSION } from '../src/core/version.js';
 
 test('the site serves the build unchanged at /app/ and as the download, and the page is complete', async () => {
-  const { sha, page } = await buildSite();
+  const { sha, page, guidePages } = await buildSite();
   const app = await buildApp();
   assert.equal(readFileSync('_site/app/index.html', 'utf8'), app);
   assert.equal(readFileSync('_site/PowerStudio.html', 'utf8'), app);
@@ -15,6 +15,11 @@ test('the site serves the build unchanged at /app/ and as the download, and the 
   assert.match(page, /not affiliated with, endorsed by or connected to DIgSILENT GmbH/);
   assert.match(page, /IEC 60909-style/);
   assert.match(page, /<svg [^>]*aria-label="Single-line diagram of the IEEE 14-bus system/);
+  assert.match(page, /href="\.\/guide\/"/);
+  assert.ok(guidePages >= 15, `guide should publish contents plus 14 chapters, got ${guidePages}`);
+  assert.match(readFileSync('_site/guide/index.html', 'utf8'), /PowerStudio guide/);
+  assert.match(readFileSync('_site/guide/get-started.html', 'utf8'), /Get started/);
+  assert.match(readFileSync('_site/guide/find-fault-levels.html', 'utf8'), /Find fault/);
   // The page loads nothing from other origins: no scripts at all, and only local images and styles.
   assert.doesNotMatch(page, /<script/i);
   assert.doesNotMatch(page, /<(?:img|link)[^>]+(?:src|href)="https?:/i);
