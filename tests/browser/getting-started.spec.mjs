@@ -1,4 +1,4 @@
-/** Follows docs/GETTING-STARTED.md step by step on the IEEE 14-bus sample, using the names the guide uses, so the
+/** Follows docs/guide/get-started.md step by step on the IEEE 14-bus sample, using the names the guide uses, so the
  * guide and the app cannot drift apart unnoticed. A failure here means the guide needs the same change as the app. */
 import { test, expect } from '@playwright/test';
 
@@ -23,18 +23,23 @@ test('the getting-started guide can be followed from start to finish', async ({ 
   const ribbon = (/** @type {string} */ tab) => page.locator(`.ribbon-tab[data-tab="${tab}"]`).click();
   const pill = page.locator('.dock-toolbar .pill');
 
-  // 1. Open the sample: the Help tab offers the guide and the sample.
+  // 1. Open the sample: the Help tab offers Getting started, Guide and the sample.
   await ribbon('help');
   await expect(page.locator('.ribbon-panel [data-cmd="help.start"]')).toContainText('Getting started');
+  await expect(page.locator('.ribbon-panel [data-cmd="help.guide"]')).toContainText('Guide');
   await page.locator('.ribbon-panel [data-cmd="sample.ieee14"]').click();
   await expect(page.locator('#case-chip')).toContainText('Base case');
 
-  // 2. Run a load flow.
+  // 2. Run a load flow, then switch the result between Table and Chart.
   await ribbon('home');
   await page.locator('.ribbon-panel [data-cmd="calc.loadflow"]').click();
   await expect(pill).toContainText('Converged in 2 iterations');
   for (const view of ['Busbars', 'Branches', 'Machines and loads']) await expect(page.locator('.dock-toolbar .seg button', { hasText: view })).toBeVisible();
   for (const filter of ['Near limits', 'Outside band']) await expect(page.locator('.dock-toolbar .seg button', { hasText: filter })).toBeVisible();
+  await expect(page.locator('.dock-toolbar .seg button', { hasText: 'Table' })).toBeVisible();
+  await page.getByRole('group', { name: 'Show results as' }).getByRole('button', { name: 'Chart' }).click();
+  await expect(page.locator('.plot.chart canvas')).toBeVisible();
+  await page.getByRole('group', { name: 'Show results as' }).getByRole('button', { name: 'Table' }).click();
   await page.locator('.dock-toolbar .seg button', { hasText: /^Branches/ }).click();
   for (const filter of ['Above 90 %', 'Above 100 %']) await expect(page.locator('.dock-toolbar .seg button', { hasText: filter })).toBeVisible();
 
@@ -125,7 +130,16 @@ test('the getting-started guide can be followed from start to finish', async ({ 
   await expect(pill).toContainText('All machines stay in synchronism');
   for (const quantity of ['Rotor angle', 'Speed', 'Active power']) await expect(page.locator('.rms-quantity option', { hasText: quantity }).first()).toBeAttached();
 
-  // 8. Export a table as CSV, and compare the summer load flow with the winter one.
+  // 8. EMT: the sample's events, then waveforms on the EMT tab.
+  await page.locator('.ribbon-panel [data-cmd="emt.events"]').click();
+  for (const text of ['Fault at', 'Clear fault at', 'Bus 4']) await expect(page.locator('.dialog')).toContainText(text);
+  await page.locator('.dialog').getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('.ribbon-panel [data-cmd="calc.emt"]').click();
+  await expect(page.locator('.dock-tab[data-tab="emt"]')).toContainText('EMT');
+  await expect(page.locator('.dock-tab[data-tab="emt"]')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.emt-plot canvas, .dock .plot canvas').first()).toBeVisible();
+
+  // 9. Export a table as CSV, and compare the summer load flow with the winter one.
   await page.locator('.dock-tab[data-tab="loadflow"]').click();
   const download = page.waitForEvent('download');
   await page.locator('.dock-tabs [data-cmd="results.csv"]').click();

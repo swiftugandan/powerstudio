@@ -1,4 +1,4 @@
-//! The operator benchmark kit's comparison (docs/BENCHMARK-KIT.md): PowerStudio's results for a model against another
+//! The operator benchmark kit's comparison (docs/guide/check-against-your-tool.md): PowerStudio's results for a model against another
 //! tool's results for the same model, read from CSV tables, with a report of what differs and by how much.
 //!
 //! The tables, any of them, by name:

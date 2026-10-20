@@ -9,7 +9,7 @@ diagram is drawn with WebGPU, with a Canvas 2D fallback.
 **Open the app: https://swiftugandan.github.io/powerstudio/app/** · Website: https://swiftugandan.github.io/powerstudio/ ·
 Offline copy: download `PowerStudio.html` from the [latest release](https://github.com/swiftugandan/powerstudio/releases/latest)
 
-New to PowerStudio? [Get started](docs/GETTING-STARTED.md) with a 30-minute walkthrough on the IEEE 14-bus sample.
+New to PowerStudio? [Get started](docs/guide/get-started.md) with a 30-minute walkthrough on the IEEE 14-bus sample, or read the full [guide](docs/guide/README.md).
 
 ![PowerStudio after a load flow on the IEEE 14-bus system](docs/screenshots/01-load-flow.png)
 
@@ -115,10 +115,8 @@ component in a CycloneDX bill of materials.
 
 | Document | For |
 | --- | --- |
-| [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | A first session: load flow, study cases, short circuit, contingency, stability, export |
-| [docs/USER-GUIDE.md](docs/USER-GUIDE.md) | Using the app: drawing, data, study cases, calculations, import and export |
+| [docs/guide/](docs/guide/README.md) | Task-based guide: get started, build a network, and run each study |
 | [docs/ENGINE.md](docs/ENGINE.md) | What every calculation computes, its conventions and how it is checked |
-| [docs/BENCHMARK-KIT.md](docs/BENCHMARK-KIT.md) | Comparing PowerStudio with your own tool on your own model |
 | [docs/SECURITY.md](docs/SECURITY.md) | What is protected, how, and where protection ends |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the code is organised |
 | [docs/TESTING.md](docs/TESTING.md) and [docs/TEST-REPORT.md](docs/TEST-REPORT.md) | How it is tested, and the results |

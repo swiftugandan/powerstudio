@@ -15,7 +15,7 @@
 //!                                                             the engine's load flow by RAW bus number
 //! ps compare <input>... --reference <folder> [--study <document.json>] [--qlim] [--out <report.md>] [--json]
 //!                                                             compare the engine's results with another tool's, read
-//!                                                             from CSV tables (docs/BENCHMARK-KIT.md); exit status 1
+//!                                                             from CSV tables (docs/guide/check-against-your-tool.md); exit status 1
 //!                                                             when anything differs
 //! ```
 //!
@@ -252,7 +252,7 @@ fn compare(args: &[String]) -> Result<(String, bool), String> {
     }
     if tables.is_empty() {
         return Err(format!(
-            "{folder} has no .csv tables (docs/BENCHMARK-KIT.md lists them)"
+            "{folder} has no .csv tables (docs/guide/check-against-your-tool.md lists them)"
         ));
     }
     // The study case of a PowerStudio document, or a plain Newton-Raphson to 1e-6 MVA.

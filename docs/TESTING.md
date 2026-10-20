@@ -38,9 +38,11 @@ the short-circuit results, the data sheet, the study case dialog, the command pa
 layout, in both themes, and tabs through the workspace to check that every keyboard stop shows a focus mark. It runs
 in all four projects.
 
-`tests/browser/getting-started.spec.mjs` follows docs/GETTING-STARTED.md step by step on the IEEE 14-bus sample, with
-the guide's names and figures, so a change to the app that the guide does not follow fails; `tests/docs.test.mjs`
-checks that the guide's links reach their files and headings.
+`tests/browser/getting-started.spec.mjs` follows docs/guide/get-started.md step by step on the IEEE 14-bus sample, with
+the guide's names and figures, so a change to the app that the guide does not follow fails.
+`tests/browser/guide-studies.spec.mjs` follows the study chapters the same way.
+`tests/docs.test.mjs` checks that every link and heading in docs/guide/ resolves, and that nothing still points at the
+old single-file guides.
 
 Label placement has its own checks. `tests/labels.test.mjs` builds both samples' diagrams with load-flow,
 short-circuit and contingency results and requires that no name or result box overlaps another, that labels take

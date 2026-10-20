@@ -325,7 +325,8 @@ WebAssembly and nothing else, and which requires Trusted Types: HTML reaches the
 written next to it.
 
 `build-pages.mjs` builds the GitHub Pages site into `_site/`: the website from `site/index.html` at `/`, the app at
-`/app/` and the same file as the download `PowerStudio.html`. The website's figures (the IEEE 14-bus studies and the
+`/app/`, the task-based guide from `docs/guide/` at `/guide/`, and the same file as the download `PowerStudio.html`.
+The website's figures (the IEEE 14-bus studies and the
 agreement with the oracles) and its diagram are computed by the engine during the build (`scripts/site-data.mjs`),
 the diagram drawn as SVG from the app's own display list with the colours read from `style.css`. The Pages workflow
 compares the published `/app/` and `PowerStudio.html` against the build's SHA-256.
