@@ -27,7 +27,7 @@ If you are new to PowerStudio, start with chapter 1. It takes about 30 minutes a
 
 - Names in **bold** are labels exactly as the app shows them. You select them.
 - Keyboard shortcuts are for Windows and Linux. On a Mac, use ⌘ for Ctrl and ⌥ for Alt.
-- Each chapter explains a technical term the first time it appears. The [glossary](reference.md) lists them all.
+- Each chapter explains a technical term the first time it appears. The [glossary](reference.md#look-up-a-term) lists them all.
 - Everything happens on your device. PowerStudio does not upload your networks or results.
 - The short circuit calculation is IEC 60909-style. It follows the method of IEC 60909-0 but is not certified against the standard.
 - The EMT simulation shows the first cycles of a disturbance. It is not a grid code compliance tool.
