@@ -30,6 +30,53 @@ async function loadFlow(page) {
 // Ubuntu runners: Chromium's WebGPU instance does not survive there; see docs/TEST-REPORT.md).
 const webgpuRequired = process.env.PS_WEBGPU !== 'optional';
 
+test('the canvas texture is only ever copied into, never rendered or resolved into', async ({ page }, info) => {
+  test.skip(info.project.name !== 'webgpu' || !webgpuRequired, 'needs a real WebGPU device');
+  // Some drivers (AMD GCN 3 on Metal) return solid red from a multisample resolve into a canvas texture.
+  await page.addInitScript(() => {
+    const canvasTextures = new WeakSet(), counts = { fetched: 0, viewed: 0 };
+    /** @type {any} */ (window).canvasTextureUse = counts;
+    const fetch = GPUCanvasContext.prototype.getCurrentTexture, view = GPUTexture.prototype.createView;
+    GPUCanvasContext.prototype.getCurrentTexture = function () {
+      const texture = fetch.call(this);
+      canvasTextures.add(texture);
+      counts.fetched++;
+      return texture;
+    };
+    GPUTexture.prototype.createView = function (/** @type {any} */ ...args) {
+      if (canvasTextures.has(this)) counts.viewed++;
+      return view.apply(this, args);
+    };
+  });
+  await open(page);
+  await page.waitForFunction(() => /** @type {any} */ (window).powerstudio.frames > 0);
+  const counts = await page.evaluate(() => /** @type {any} */ (window).canvasTextureUse);
+  expect(counts.fetched).toBeGreaterThan(0);
+  expect(counts.viewed).toBe(0);
+});
+
+test('a GPU that fails the self-test falls back to Canvas 2D and says why', async ({ page }, info) => {
+  test.skip(info.project.name !== 'webgpu' || !webgpuRequired, 'needs a real WebGPU device');
+  // The read-back is the self-test's only use of a mapped buffer during start-up; blacken it as a faulty GPU would.
+  await page.addInitScript(() => {
+    const read = GPUBuffer.prototype.getMappedRange;
+    GPUBuffer.prototype.getMappedRange = function (/** @type {any} */ ...args) {
+      const range = read.apply(this, args);
+      new Uint8Array(range).fill(0);
+      return range;
+    };
+  });
+  await open(page);
+  const facts = await page.evaluate(() => ({ backend: /** @type {any} */ (window).powerstudio.backend, reason: /** @type {any} */ (window).powerstudio.fallbackReason }));
+  expect(facts.backend).toBe('canvas2d');
+  expect(facts.reason).toContain('self-test');
+  await expect(page.locator('.vp-badge')).toHaveAttribute('data-backend', 'canvas2d');
+  await expect.poll(async () => {
+    const img = decodePNG(await page.locator('#viewport').screenshot());
+    return Math.min(share(img, [31, 92, 192]), share(img, [23, 128, 74]));
+  }).toBeGreaterThan(0.0008);
+});
+
 test('draws the diagram with the backend it reports, and that backend is the expected one', async ({ page }, info) => {
   await open(page);
   await page.waitForFunction(() => /** @type {any} */ (window).powerstudio.frames > 0);

@@ -143,8 +143,11 @@ Three backends draw the same lists:
 - `webgpu.js` renders shapes as instanced quads whose edges come from signed distance functions in WGSL, triangles
   as plain geometry, and text from a signed-distance-field glyph atlas (`glyphs.js`) built on demand from the
   browser's own fonts, all into a 4× multisampled target. A dot grid is drawn by a full-screen fragment shader.
-- `canvas2d.js` is the fallback. `renderer.js` tries WebGPU (adapter, device and context) and falls back with a
-  reason when any step fails; if the GPU device is lost later, the viewport swaps in a fresh canvas with Canvas 2D.
+  The target resolves into a texture of the renderer's own, which is copied to the canvas and read for snapshots:
+  on some drivers (AMD GCN 3 on Metal) a resolve straight into a canvas texture comes back solid red, with no error.
+- `canvas2d.js` is the fallback. `renderer.js` tries WebGPU (adapter, device, context and a self-test that sends a
+  known colour through the frame's whole path on a throwaway canvas) and falls back with a reason when any step
+  fails; if the GPU device is lost later, the viewport swaps in a fresh canvas with Canvas 2D.
   The backend badge reports the renderer that was actually created.
 - `svg.js` exports the list as vector graphics. PNG export draws it with Canvas 2D off screen.
 
