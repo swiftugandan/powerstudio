@@ -1,12 +1,13 @@
-/** Opening other tools' files: the engine reads CGMES models, PSS/E RAW files and MATPOWER cases into its model,
- * checks it, and converts it into a PowerStudio document. The worker, the main-thread fallback and the Node tests all
+/** Exchanging files with other tools: the engine reads CGMES models, PSS/E RAW files and MATPOWER cases into its
+ * model, checks it, and converts it into a PowerStudio document; and it writes a document as a PSS/E RAW file. The worker, the main-thread fallback and the Node tests all
  * go through here (engine/crates/ps-study/src/exchange.rs does the work; docs/ENGINE.md describes it). */
 
-import { jsonPayload } from './host.js';
+import { jsonPayload, textPayload } from './host.js';
 
 /**
  * @typedef {import('./host.js').EngineHost} EngineHost
  * @typedef {import('./reports.js').ImportSummary} ImportSummary
+ * @typedef {import('./reports.js').RawExportSummary} RawExportSummary
  * @typedef {{ name: string, bytes: Uint8Array }} NamedBytes
  */
 
@@ -26,4 +27,36 @@ export function importFiles(engine, files) {
   const reply = engine.call({ op: 'import', files: files.map(f => ({ name: f.name, size: f.bytes.length })) }, payload);
   const { ok: _ok, ...summary } = /** @type {Record<string, unknown>} */ (reply.header);
   return { summary: /** @type {ImportSummary} */ (/** @type {unknown} */ (summary)), doc: jsonPayload(reply.payload) };
+}
+
+/** The PSS/E RAW versions the engine writes, newest last. */
+export const RAW_VERSIONS = /** @type {const} */ ([33, 35]);
+
+/**
+ * The engine request that writes a document as a PSS/E RAW file. The document is its JSON text, as the active study
+ * case composes it.
+ * @param {string} docJson @param {33 | 35} rev
+ * @returns {{ header: Record<string, unknown>, payload: Uint8Array }}
+ */
+export function rawExportRequest(docJson, rev) {
+  return { header: { op: 'export_raw', rev }, payload: textPayload(docJson) };
+}
+
+/**
+ * The engine's reply to {@link rawExportRequest}: what it wrote and checked, and the file.
+ * @param {{ header: Record<string, unknown>, payload: Uint8Array }} reply
+ * @returns {{ summary: RawExportSummary, text: string }}
+ */
+export function rawExportReply(reply) {
+  const { ok: _ok, ...summary } = reply.header;
+  return { summary: /** @type {RawExportSummary} */ (/** @type {unknown} */ (summary)), text: new TextDecoder().decode(reply.payload) };
+}
+
+/**
+ * Writes a document as a PSS/E RAW file on this thread (the app sends the same request to a worker).
+ * @param {EngineHost} engine @param {string} docJson @param {33 | 35} rev
+ */
+export function exportRaw(engine, docJson, rev) {
+  const { header, payload } = rawExportRequest(docJson, rev);
+  return rawExportReply(engine.call(header, payload));
 }

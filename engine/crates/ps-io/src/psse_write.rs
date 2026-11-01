@@ -38,6 +38,8 @@ pub struct Written {
     pub text: String,
     /// RAW bus number of every node (`None` for removed nodes).
     pub bus_of_node: Vec<Option<i64>>,
+    /// Bus records written, including the buses added for branches' open ends.
+    pub buses: usize,
     /// What the export approximated or left out, in plain words.
     pub notes: Vec<String>,
 }
@@ -355,6 +357,7 @@ pub fn write(m: &Model, opt: &Options) -> Result<Written, String> {
     Ok(Written {
         text: out,
         bus_of_node,
+        buses: w.buses.len(),
         notes,
     })
 }

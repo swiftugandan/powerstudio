@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { read, golden, engine } from './helpers.mjs';
-import { importFiles } from '../src/engine/exchange.js';
+import { importFiles, exportRaw, RAW_VERSIONS } from '../src/engine/exchange.js';
 import { normalizeDocument } from '../src/core/document.js';
 import { VECTOR_GROUPS } from '../src/core/catalog.js';
 import { autoLayout } from '../src/core/layout.js';
@@ -33,6 +33,43 @@ test('a PSS/E RAW file opens through the engine and solves to the MATPOWER solut
     assert.ok(Math.abs(start.vm[i] - g.vm[k]) < 1e-8 && Math.abs(start.va[i] - g.va[k]) < 1e-6, `bus ${b}`);
   });
   assert.deepEqual(normalizeDocument(JSON.parse(JSON.stringify(doc))).issues, []);
+});
+
+test('a document exports as PSS/E RAW with its load flow, and the file reads back to the same solution', () => {
+  const doc = read('tests/oracle/inputs/riverside.json');
+  for (const rev of RAW_VERSIONS) {
+    const { summary, text } = exportRaw(engine, doc, rev);
+    assert.equal(summary.rev, rev);
+    assert.ok(summary.solved, summary.message);
+    assert.ok(text.startsWith(`0, 100, ${rev},`), text.slice(0, 60));
+    const c = summary.check;
+    assert.ok(c.read && c.solved && c.missing === 0 && c.compared > 0, JSON.stringify(c));
+    assert.ok(c.maxDv < 1e-9 && c.maxDa < 1e-7, JSON.stringify(c));
+    // Read by the app's own import: the same file the user would open again.
+    const back = importFiles(engine, [{ name: `riverside-v${rev}.raw`, bytes: new TextEncoder().encode(text) }]);
+    assert.equal(back.summary.format, 'psse');
+    assert.ok(back.summary.report.files[0].profiles[0].includes(String(rev)), back.summary.report.files[0].profiles[0]);
+    assert.ok(back.summary.fidelity.solved && back.summary.fidelity.maxDv < 1e-9, JSON.stringify(back.summary.fidelity));
+  }
+});
+
+test('an imported MATPOWER case exports as RAW that keeps its bus numbers and solves to the MATPOWER solution', () => {
+  const { doc } = importFiles(engine, [file('case30.m')]);
+  const { summary, text } = exportRaw(engine, JSON.stringify(doc), 33);
+  assert.equal(summary.buses, 30);
+  assert.ok(summary.check.maxDv < 1e-9, JSON.stringify(summary.check));
+  const back = importFiles(engine, [{ name: 'case30.raw', bytes: new TextEncoder().encode(text) }]);
+  const g = golden('matpower-case30');
+  const start = back.summary.fidelity.start;
+  g.bus.forEach((/** @type {number} */ b, /** @type {number} */ k) => {
+    const i = start.busIds.indexOf(`B${b}`);
+    assert.ok(i >= 0, `bus ${b} keeps its number`);
+    assert.ok(Math.abs(start.vm[i] - g.vm[k]) < 1e-8 && Math.abs(start.va[i] - g.va[k]) < 1e-6, `bus ${b}`);
+  });
+});
+
+test('the engine refuses a RAW version it does not write', () => {
+  assert.throws(() => exportRaw(engine, read('tests/oracle/inputs/ieee14.json'), /** @type {any} */ (34)), /versions 33 and 35/);
 });
 
 test('the imported diagram is laid out on the grid without overlaps, the same way every time', () => {

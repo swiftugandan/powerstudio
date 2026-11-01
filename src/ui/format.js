@@ -41,3 +41,24 @@ export function relative(t) {
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return new Date(t).toLocaleDateString();
 }
+
+/** A count with its noun, grouped: "1,234 busbars". @param {number} n @param {string} one @param {string} [many] */
+export function count(n, one, many = `${one}s`) {
+  return `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`;
+}
+
+const SUPER = '⁻⁰¹²³⁴⁵⁶⁷⁸⁹';
+
+/** A small difference in scientific notation: "3.2 × 10⁻¹⁴". @param {number} x */
+export function scientific(x) {
+  if (x === 0) return '0';
+  const [m, e] = x.toExponential(1).split('e');
+  return `${m} × 10${[...String(Number(e))].map(c => SUPER['-0123456789'.indexOf(c)]).join('')}`;
+}
+
+/** A file size: "512 bytes", "2.4 KB", "18.1 MB". @param {number} bytes */
+export function fileSize(bytes) {
+  if (bytes < 1000) return `${bytes} bytes`;
+  if (bytes < 1e6) return `${(bytes / 1e3).toFixed(1)} KB`;
+  return `${(bytes / 1e6).toFixed(1)} MB`;
+}

@@ -688,3 +688,178 @@ fn suffixed(name: &str, suffix: &str) -> String {
         None => format!("{name}_{suffix}"),
     }
 }
+
+/// A document written as a PSS/E RAW file, with the check that the file reads back to the same load flow.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RawExport {
+    /// The file.
+    #[serde(skip)]
+    pub text: String,
+    /// Format version written: 33 or 35.
+    pub rev: u32,
+    /// Bus records written.
+    pub buses: usize,
+    /// Whether the document's load flow converged, so the file carries its solved voltages (a flat start otherwise).
+    pub solved: bool,
+    /// Its iterations.
+    pub iterations: usize,
+    /// Why it did not converge, when it did not.
+    pub message: String,
+    /// The file read back by the engine's own RAW importer and solved again.
+    pub check: RawCheck,
+    /// What the export approximated or left out, in plain words.
+    pub notes: Vec<String>,
+    /// What reading the document found (fields out of range, references to missing elements).
+    pub issues: Vec<String>,
+}
+
+/// A RAW file read back and solved, compared node by node with the load flow it was written from.
+#[derive(Debug, Clone, Default, serde::Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RawCheck {
+    /// Whether the file read back.
+    pub read: bool,
+    /// Whether its load flow converged.
+    pub solved: bool,
+    /// Nodes compared.
+    pub compared: usize,
+    /// Energised nodes whose bus has no solution after the round trip.
+    pub missing: usize,
+    /// Largest voltage difference, p.u.
+    pub max_dv: f64,
+    /// Largest angle difference, degrees.
+    pub max_da: f64,
+    /// The node where the voltage or angle differs most, or the first missing one.
+    pub worst: String,
+    /// Why the file did not read back or solve, when it did not.
+    pub message: String,
+}
+
+/// The load flow a RAW export writes and checks: the network as the file states it, with taps, shunt sections and
+/// reactive outputs where they are, at the tolerance the largest cases reach in double precision. It is the solution
+/// `ps export --solution` writes and the one PowSyBl's reading of the exported files is compared with.
+fn raw_solve(model: &Model) -> (Vec<Option<(f64, f64)>>, LoadFlowReport) {
+    let settings = ps_model::study::LoadFlowSettings {
+        tolerance: 1e-8,
+        max_iter: 50,
+        ..ps_model::study::LoadFlowSettings::plain()
+    };
+    let (calc, sol, report) = crate::loadflow::solve(
+        model,
+        &crate::LoadFlowRun {
+            settings,
+            ..Default::default()
+        },
+    );
+    let v = (0..model.nodes.len())
+        .map(|k| match (report.converged, calc.topo.bus_of(NodeRef(k as u32))) {
+            (true, Some(b)) => Some((sol.vm[b], sol.va[b].to_degrees())),
+            _ => None,
+        })
+        .collect();
+    (v, report)
+}
+
+/// Reads `written` back with the engine's RAW importer, solves it and compares every node of `model` that has a
+/// voltage in `before` (p.u., degrees) with the bus the writer put it on.
+pub fn raw_read_back(model: &Model, written: &ps_io::psse_write::Written, before: &[Option<(f64, f64)>]) -> RawCheck {
+    let mut check = RawCheck::default();
+    let back = match ps_io::psse_model::import(&written.text, "export.raw") {
+        Ok(b) => b.model,
+        Err(e) => {
+            check.message = format!("the written file does not read back: {e}");
+            return check;
+        }
+    };
+    check.read = true;
+    let (after, report) = raw_solve(&back);
+    if !report.converged {
+        check.message = format!("the written file does not solve: {}", report.message);
+        return check;
+    }
+    check.solved = true;
+    let node_of: HashMap<&str, usize> = back.nodes.iter().enumerate().map(|(k, n)| (n.id.as_str(), k)).collect();
+    let (mut worst_dv, mut worst_da) = (String::new(), String::new());
+    for (k, v) in before.iter().enumerate() {
+        let (Some((vm, va)), Some(Some(bus))) = (v, written.bus_of_node.get(k)) else {
+            continue;
+        };
+        let id = model.nodes.get(k).map_or("", |n| n.id.as_str());
+        match node_of
+            .get(format!("B{bus}").as_str())
+            .and_then(|&j| after.get(j).copied().flatten())
+        {
+            Some((vm2, va2)) => {
+                check.compared += 1;
+                // A non-finite result counts as an infinite difference.
+                let finite = |d: f64| if d.is_finite() { d } else { f64::INFINITY };
+                let (dv, da) = (finite((vm2 - vm).abs()), finite((va2 - va).abs()));
+                if dv > check.max_dv {
+                    check.max_dv = dv;
+                    worst_dv = id.to_string();
+                }
+                if da > check.max_da {
+                    check.max_da = da;
+                    worst_da = id.to_string();
+                }
+            }
+            None => {
+                if check.missing == 0 {
+                    check.worst = id.to_string();
+                }
+                check.missing += 1;
+            }
+        }
+    }
+    if check.missing == 0 {
+        // Voltage first: an angle difference without one is rarely what a reader looks for.
+        check.worst = if check.max_dv > 0.0 || worst_da.is_empty() {
+            worst_dv
+        } else {
+            worst_da
+        };
+    }
+    check
+}
+
+/// Writes `doc`, a PowerStudio document as the active study case composes it, as a PSS/E RAW file of version `rev`
+/// (33 or 35; 0 for 35) with the voltages of its load flow, and reads the file back to check it.
+pub fn export_raw(doc: &serde_json::Value, rev: u32) -> Result<RawExport, String> {
+    let imported = ps_io::powerstudio::from_value(doc).map_err(|e| e.to_string())?;
+    let model = imported.model;
+    let (before, report) = raw_solve(&model);
+    let written = ps_io::psse_write::write(
+        &model,
+        &ps_io::psse_write::Options {
+            rev,
+            voltages: report.converged.then(|| before.clone()),
+        },
+    )?;
+    let check = if report.converged {
+        raw_read_back(&model, &written, &before)
+    } else {
+        // Nothing to compare with: the file is still read back, so a reader knows it parses.
+        let mut check = RawCheck::default();
+        match ps_io::psse_model::import(&written.text, "export.raw") {
+            Ok(_) => check.read = true,
+            Err(e) => check.message = format!("the written file does not read back: {e}"),
+        }
+        check
+    };
+    Ok(RawExport {
+        rev: if rev == 0 { 35 } else { rev },
+        buses: written.buses,
+        solved: report.converged,
+        iterations: report.iterations,
+        message: if report.converged {
+            String::new()
+        } else {
+            report.message
+        },
+        check,
+        notes: written.notes,
+        issues: imported.issues,
+        text: written.text,
+    })
+}

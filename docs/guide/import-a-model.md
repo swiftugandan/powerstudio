@@ -85,6 +85,7 @@ The dialog's status tells you how closely the simplified network matches the sou
 
 - A DYR file sets the dynamic models of the machines. PowerStudio reads the machine, exciter, governor and stabiliser models of its library. A model outside the library is listed as not used, and the machine keeps its classical model.
 - PowerStudio does not model multi-terminal DC lines, series FACTS devices, induction machines or impedance correction tables. The import report counts what it left out.
+- You can send a network back as a RAW file. See [Open the network in another tool](save-share-protect.md#open-the-network-in-another-tool).
 
 **MATPOWER.**
 

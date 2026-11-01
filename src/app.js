@@ -28,13 +28,14 @@ import { openStudyDialog } from './ui/study.js';
 import { printReport } from './ui/report.js';
 import { openContingencyDialog } from './ui/contingency-editor.js';
 import { importDialog } from './ui/import-dialog.js';
-import { IMPORT_TYPES } from './engine/exchange.js';
+import { IMPORT_TYPES, rawExportRequest, rawExportReply } from './engine/exchange.js';
 import { toast, contextMenu, askPassphrase } from './ui/feedback.js';
+import { exportRawDialog, rawCheckLine } from './ui/export-raw-dialog.js';
 import { seal, unseal, isSealed, MIN_PASSPHRASE } from './core/sealed.js';
 import { h, esc, byId, download, fileName, setHtml, yieldToBrowser } from './ui/dom.js';
 import { icon, logo } from './ui/icons.js';
 import { kbd, isMac } from './ui/keys.js';
-import { fixed, duration } from './ui/format.js';
+import { fixed, duration, scientific } from './ui/format.js';
 import { enumLabel } from './ui/fields.js';
 import { REPO_URL, SITE_URL } from './core/version.js';
 
@@ -558,6 +559,30 @@ export class App {
       this.log('error', `The CGMES export failed: ${error instanceof Error ? error.message : error}`);
       toast('error', error instanceof Error ? error.message : String(error), { title: 'CGMES export failed' });
     }
+  }
+
+  /** Exports the network as the active study case composes it as a PSS/E RAW file, with the voltages of its load flow,
+   * after the dialog shows how the written file reads back. */
+  async exportRaw() {
+    const busy = () => this.running || this.arranging;
+    if (busy()) { toast('info', 'Wait for the calculation to finish, then export again.', { title: 'Engine busy' }); return; }
+    const name = this.store.doc.name, studyCase = activeCase(this.project).name;
+    const json = await serialise(this.store.doc, () => true, yieldToBrowser);
+    if (json === null) return;
+    const chosen = await exportRawDialog({ name, write: async rev => {
+      // The first worker does one thing at a time.
+      if (busy()) throw new Error('a calculation started meanwhile; choose the version again when it finishes.');
+      const { header, payload } = rawExportRequest(json, rev);
+      return rawExportReply(await this.engine.call(header, payload));
+    } });
+    if (!chosen) return;
+    const s = chosen.summary;
+    download(new Blob([chosen.text], { type: 'text/plain' }), fileName(name, '.raw'));
+    const check = !s.solved ? 'its load flow does not converge, so it starts from flat voltages'
+      : s.check.solved && s.check.missing === 0 ? `it reads back to the same voltages, within ${scientific(Math.max(s.check.maxDv, 1e-15))} p.u. of its load flow`
+        : `it reads back with differences: ${s.check.message || `up to ${fixed(s.check.maxDv, 4)} p.u. at ${s.check.worst}`}`;
+    this.log(rawCheckLine(s).kind === 'ok' ? 'ok' : 'warn', `Exported “${name}” (${studyCase}) as PSS/E RAW version ${s.rev}: ${s.buses.toLocaleString('en-GB')} buses; ${check}.`);
+    for (const n of s.notes) this.log('info', `RAW export: ${n}`);
   }
 
   exportJSON() {
@@ -1388,6 +1413,7 @@ export class App {
     c.add({ id: 'file.save', label: 'Save now', icon: 'save', keys: ['Mod+S'], global: true, group: 'File', hint: 'Networks save automatically; this saves immediately', run: async () => { await this.save(); toast('ok', this.library.persistent ? 'Saved in this browser.' : 'Kept for this session. Export to keep a copy.'); } });
     c.add({ id: 'file.import', label: 'Import file', icon: 'import', keys: ['Mod+Shift+O'], global: true, group: 'File', hint: 'Import a PowerStudio file, a CGMES model, a PSS/E RAW file or a MATPOWER case', run: () => this.importFile(`.json,${IMPORT_TYPES}`) });
     c.add({ id: 'file.exportCgmes', label: 'Export CGMES SSH and SV', keywords: 'steady state hypothesis state variables operating point', icon: 'export', group: 'File', hint: 'The operating point of the active study case, in the CGMES files the project came from', enabled: () => this.project.source?.format === 'cgmes', run: () => { void this.exportCgmes(); } });
+    c.add({ id: 'file.exportRaw', label: 'Export PSS/E RAW file', keywords: 'psse raw powerfactory etap powsybl bus-branch interchange', icon: 'export', group: 'File', hint: 'The network as a bus-branch RAW file, checked by reading it back, for PSS/E, PowerFactory and other tools that read RAW', run: () => { void this.exportRaw(); } });
     c.add({ id: 'file.report', label: 'Print study report', keywords: 'pdf print report results summary', icon: 'results', group: 'File', hint: 'The study case\u2019s results and run records, for print or saving as PDF',
       run: () => { void printReport(this).catch(e => this.log('error', `The report could not be built: ${e instanceof Error ? e.message : e}`)); } });
     c.add({ id: 'file.exportEncrypted', label: 'Export encrypted project', keywords: 'passphrase password secure lock aes', icon: 'layers', group: 'File', hint: 'The whole project, locked with a passphrase', run: () => { void this.exportEncrypted(); } });

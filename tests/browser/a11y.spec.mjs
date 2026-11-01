@@ -108,6 +108,14 @@ for (const theme of /** @type {const} */ (['light', 'dark'])) {
       await audit(page, 'EMT peaks');
     });
 
+    test('the PSS/E RAW export dialog with its check and notes', async ({ page }) => {
+      await open(page, 'sample=riverside');
+      await palette(page, 'Export PSS/E RAW');
+      await expect(page.locator('.dialog .import-status .pill')).toHaveText('Verified');
+      await page.locator('.dialog details summary').first().click();
+      await audit(page, 'RAW export dialog');
+    });
+
     test('the File page', async ({ page }) => {
       await open(page);
       await page.locator('.ribbon-tab.file-tab').click();

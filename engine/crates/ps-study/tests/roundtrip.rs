@@ -53,47 +53,28 @@ fn round_trip(name: &str, m: &Model, failures: &mut Vec<String>) {
     };
     for rev in [33, 35] {
         let written = ps_io::psse_write::write(m, &ps_io::psse_write::Options { rev, voltages: None }).unwrap();
-        let back = match ps_io::psse_model::import(&written.text, "export.raw") {
-            Ok(b) => b.model,
-            Err(e) => {
-                failures.push(format!("{name} v{rev}: the written file does not read back: {e}"));
-                continue;
-            }
-        };
-        let after = match solve(&back) {
-            Ok(v) => v,
-            Err(e) => {
-                failures.push(format!("{name} v{rev}: the written file does not solve: {e}"));
-                continue;
-            }
-        };
-        let node_of: std::collections::HashMap<&str, usize> =
-            back.nodes.iter().enumerate().map(|(k, n)| (n.id.as_str(), k)).collect();
-        let mut w = Worst::default();
-        for (k, v) in before.iter().enumerate() {
-            let (Some((vm, va)), Some(bus)) = (v, written.bus_of_node[k]) else {
-                continue;
-            };
-            let id = &m.nodes[k].id;
-            match node_of.get(format!("B{bus}").as_str()).and_then(|&j| after[j]) {
-                Some((vm2, va2)) => {
-                    w.check("V", id, vm2, *vm);
-                    w.check("angle", id, va2, *va);
-                }
-                None => w.check("bus missing after the round trip", id, 1.0, 0.0),
-            }
+        let check = ps_study::exchange::raw_read_back(m, &written, &before);
+        if !check.solved {
+            failures.push(format!("{name} v{rev}: {}", check.message));
+            continue;
         }
-        let (dv, da) = (w.max("V"), w.max("angle"));
+        let (dv, da) = (check.max_dv, check.max_da);
         eprintln!("SUMMARY {name} v{rev}: V {dv:.1e} p.u., angle {da:.1e}°");
         if dv > V_TOL || da > ANGLE_TOL {
             for note in &written.notes {
                 eprintln!("  export note: {note}");
             }
         }
-        for (what, d, at, _) in w.rows.iter().filter(|r| r.1 > 0.0) {
-            if (what == "V" && *d > V_TOL) || (what == "angle" && *d > ANGLE_TOL) || what.starts_with("bus") {
-                failures.push(format!("{name} v{rev}: {what} {d:.1e} at {at}"));
-            }
+        if check.missing > 0 {
+            failures.push(format!(
+                "{name} v{rev}: {} bus(es) missing after the round trip, first at {}",
+                check.missing, check.worst
+            ));
+        } else if dv > V_TOL || da > ANGLE_TOL {
+            failures.push(format!(
+                "{name} v{rev}: V {dv:.1e} p.u., angle {da:.1e}° at {}",
+                check.worst
+            ));
         }
     }
 }
@@ -141,4 +122,51 @@ fn raw_export_reads_back_to_the_same_solution() {
         round_trip(case["name"].as_str().unwrap(), &psse_import(case).model, &mut failures);
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The app's export: a PowerStudio document written with the voltages of its load flow, read back and checked.
+#[test]
+fn documents_export_as_raw_with_their_solution() {
+    for name in ["ieee14", "riverside", "riverside-converters"] {
+        let doc = json(&format!("tests/oracle/inputs/{name}.json"));
+        for rev in [33, 35] {
+            let export = ps_study::exchange::export_raw(&doc, rev).unwrap();
+            assert_eq!(export.rev, rev);
+            assert!(export.solved, "{name} v{rev}: {}", export.message);
+            assert!(
+                export
+                    .text
+                    .starts_with(&format!("0, {}, {rev},", input(name).model.meta.base_mva)),
+                "{name} v{rev}: {}",
+                export.text.lines().next().unwrap_or("")
+            );
+            let c = &export.check;
+            assert!(c.read && c.solved, "{name} v{rev}: {}", c.message);
+            assert_eq!(c.missing, 0, "{name} v{rev}: missing at {}", c.worst);
+            assert!(c.compared > 0 && export.buses >= c.compared.min(export.buses));
+            assert!(
+                c.max_dv <= V_TOL && c.max_da <= ANGLE_TOL,
+                "{name} v{rev}: V {:.1e}, angle {:.1e} at {}",
+                c.max_dv,
+                c.max_da,
+                c.worst
+            );
+            // The file carries the solution: its bus records (VM and VA are fields 8 and 9) are not a flat start.
+            let angles: Vec<f64> = export
+                .text
+                .lines()
+                .skip(3)
+                .skip_while(|l| l.starts_with("0 /"))
+                .take_while(|l| !l.starts_with("0 / END OF BUS"))
+                .filter_map(|l| l.split(',').nth(8)?.trim().parse().ok())
+                .collect();
+            assert!(
+                angles.iter().any(|a: &f64| a.abs() > 1e-3),
+                "{name} v{rev}: flat start written"
+            );
+        }
+    }
+    let doc = json("tests/oracle/inputs/ieee14.json");
+    assert!(ps_study::exchange::export_raw(&doc, 34).is_err());
+    assert_eq!(ps_study::exchange::export_raw(&doc, 0).unwrap().rev, 35);
 }

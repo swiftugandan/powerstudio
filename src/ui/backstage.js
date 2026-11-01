@@ -85,6 +85,7 @@ async function render(app, page, close) {
         card('Project', 'Every study case, scenario and variant with the run log, in one file. Imports back as a new project.', 'layers', () => app.commands.run('file.exportProject')),
         card('Encrypted project', 'The same file locked with a passphrase, for moving a model between machines. Only PowerStudio with the passphrase can open it.', 'layers', () => app.commands.run('file.exportEncrypted')),
         card('PowerStudio file', 'The network as the active study case composes it, with its settings, as JSON. Opens in PowerStudio on any machine.', 'save', () => app.commands.run('file.export')),
+        card('PSS/E RAW file', 'The network as a bus-branch RAW file of version 33 or 35, with load flow voltages, checked by reading it back. For PSS/E, PowerFactory and other tools that read RAW.', 'export', () => app.commands.run('file.exportRaw')),
         ...(app.project.source?.format === 'cgmes' ? [card('CGMES SSH and SV', 'The active study case\u2019s operating point in the CGMES files the project came from: their SSH with the values you changed, and the SV of its load flow, in a ZIP.', 'export', () => app.commands.run('file.exportCgmes'))] : []),
         card('Diagram as SVG', 'Vector drawing of the single-line diagram with the current annotations.', 'image', () => app.commands.run('file.exportSvg')),
         card('Diagram as PNG', 'Bitmap of the whole diagram at twice screen resolution.', 'image', () => app.commands.run('file.exportPng')),
