@@ -168,7 +168,7 @@ footer a:hover { text-decoration: underline; }
       <ul class="facts">
         <li>Drawn with WebGPU, with a Canvas 2D fallback</li>
         <li>Checked against MATPOWER, pandapower, PowSyBl, ANDES and ngspice</li>
-        <li>Opens CGMES, PSS/E and MATPOWER files</li>
+        <li>Opens CGMES, PSS/E and MATPOWER files, and writes PSS/E RAW</li>
       </ul>
       <figure class="stage">
         <div class="stage-bar"><strong>IEEE 14-bus system</strong><span>Newton-Raphson load flow</span><span class="pill">Converged in {{lfIterations}} iterations</span></div>
@@ -235,7 +235,7 @@ footer a:hover { text-decoration: underline; }
         <li><strong>Results where you look.</strong> Loading and voltage colours, result boxes, sortable tables and charts of voltage profiles, loadings and fault currents, CSV export, and results marked stale after an edit.</li>
         <li><strong>Fast to drive.</strong> A command palette, keyboard shortcuts for every study, undo and redo for every change, light and dark themes, and a getting-started guide that walks through every study in 30 minutes.</li>
         <li><strong>Projects.</strong> Study cases, scenarios and variants, a run log with the hashes of every result, and a spreadsheet for every element class.</li>
-        <li><strong>Your files.</strong> Open CGMES, PSS/E RAW with DYR, and MATPOWER files; export projects (encrypted if you like), the operating point as CGMES, a study report, SVG, PNG and CSV.</li>
+        <li><strong>Your files.</strong> Open CGMES, PSS/E RAW with DYR, and MATPOWER files; export the network as PSS/E RAW for PSS/E, PowerFactory and other tools, checked by reading it back; export projects (encrypted if you like), the operating point as CGMES, a study report, SVG, PNG and CSV.</li>
       </ul>
     </div>
   </div>
@@ -255,6 +255,7 @@ footer a:hover { text-decoration: underline; }
         <tr><td>Short circuit, line-to-earth, maximum and minimum<small>Ik″ at every busbar</small></td><td>pandapower's IEC 60909</td><td class="num">{{agreeScEarth}} relative</td></tr>
         <tr><td>Short circuit on the IEC TR 60909-4 example network<small>Ik″, ip and Sk″, power station units and earth faults included</small></td><td>The report's values</td><td class="num">within 0.001 kA</td></tr>
         <tr><td>CGMES and PSS/E imports and their load flows<small>12 CGMES configurations, 23 RAW files</small></td><td>PowSyBl</td><td class="num">within 1e-6 p.u.</td></tr>
+        <tr><td>PSS/E RAW export, read by another tool<small>The CGMES and PSS/E reference models both tools solve, written as versions 33 and 35</small></td><td>PowSyBl</td><td class="num">within 1e-6 p.u.</td></tr>
         <tr><td>Stability with machine controls<small>Rotor angles on ANDES's published cases</small></td><td>ANDES</td><td class="num">within 2e-3 rad</td></tr>
         <tr><td>EMT on five fault and switching cases<small>Phase voltages, and branch, source and fault currents, on both samples and a 100 km line</small></td><td>ngspice</td><td class="num">within 5e-3 of crest</td></tr>
       </tbody>
