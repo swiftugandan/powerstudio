@@ -4,6 +4,22 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## Release 1.3.0 (2026-11-01, local, branch `claude/epic-curie-q3b2im`)
+
+| Check | Result |
+| --- | --- |
+| Documents saved by 1.2.0 (its samples at commit 8de1e4c, with the voltages pandapower gave them) | Open with nothing to report, keep every value and solve to those voltages (1e-8 p.u.) |
+| `npm test`, including the RAW export through WebAssembly and the site build | 165 passed, 2 skipped |
+| `cargo test -p ps-study --test roundtrip` on the samples, MATPOWER case14, case30, case118, ACTIVSg2000 and case2869pegase, and every PSS/E reference file (the CGMES archive could not be downloaded in this environment; CI runs it) | Every node keeps its voltage to 1e-9 p.u. and 1e-7° in both versions; the sample documents export with their solution and every busbar compared |
+| Playwright `app.spec` and `a11y.spec`, Chromium with Canvas 2D | 55 passed, 3 skipped (reference archives); the export dialog has no axe violations in either theme |
+| The export dialog at 1280 px in both themes and at 390 px; the marketing page's verification table at 1280 and 390 px | No clipping or sideways scrolling |
+
+The RAW export's review before release found a non-finite difference that reached the page as JSON null and read as
+"Verified", a version switch during a write that left the engine client's request unsettled, a recalculation on edit
+that could start on the worker during an export, the focus lost on a version switch, no way to retry the chosen
+version after a failure, and an output log line that called differing voltages the same; all are fixed, the first
+with a test.
+
 ## Release 1.2.0 (2026-10-19, local, branch `claude/epic-curie-q3b2im`)
 
 | Check | Result |
