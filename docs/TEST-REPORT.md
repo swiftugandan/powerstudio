@@ -4,6 +4,19 @@ Numbers are copied from the runs; nothing here is estimated. Re-run the commands
 reproduce them. The first sections cover phases 7 and 6, phase 5's wave D1 and phases 4, 3, 2 and 1 (local runs only:
 they have not been pushed, so CI has not run them). The sections after it record release v0.1.0 (commit `6e803ce`), locally and in CI.
 
+## Release 1.3.1 (2026-11-01, local, Intel iMac with AMD Radeon R9 M395, branch `release/v1.3.1`)
+
+| Check | Result |
+| --- | --- |
+| The solid red diagram, in headed Chrome 156 and Chromium on `amd · gcn-3` | Reproduced before the fix; the diagram draws on WebGPU after it (run on the 1.2.0 source, where the bug was found) |
+| Documents saved by 1.3.0 (its samples at commit b575aca, with the voltages pandapower gave them) | Open with nothing to report, keep every value and solve to those voltages (1e-8 p.u.) |
+| `npm test` | 166 passed, 1 failed, 2 skipped. The failure is the native-versus-WebAssembly comparison on this Intel Mac: 3.2e-9 against a tolerance of 1e-9. It fails the same way on b575aca, which passes in CI |
+| Playwright `app.spec`, `webgpu` and `canvas` projects | 80 passed, 8 skipped |
+
+The two browser tests added for the fix need a real WebGPU device, so they skip where `PS_WEBGPU=optional` (GitHub's
+Ubuntu runners). Safari's WebGPU was not exercised: Playwright's WebKit times out creating a page on this macOS, before
+any app code loads. Firefox exposes no WebGPU here and draws with Canvas 2D.
+
 ## Release 1.3.0 (2026-11-01, local, branch `claude/epic-curie-q3b2im`)
 
 | Check | Result |
