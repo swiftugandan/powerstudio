@@ -409,6 +409,21 @@ impl Engine {
                 header["files"] = json!(names);
                 Ok(ok(header, ps_io::zip::write(&entries)))
             }
+            "export_raw" => {
+                // The document as the active study case composes it; the reply's payload is the RAW file.
+                let doc: Value =
+                    serde_json::from_slice(&req.payload).map_err(|e| format!("the document is not valid JSON: {e}"))?;
+                let rev = match req.header.get("rev") {
+                    None | Some(Value::Null) => 0,
+                    Some(v) => v
+                        .as_u64()
+                        .and_then(|r| u32::try_from(r).ok())
+                        .ok_or("the RAW version is not a whole number")?,
+                };
+                let export = ps_study::exchange::export_raw(&doc, rev)?;
+                let header = serde_json::to_value(&export).map_err(|e| e.to_string())?;
+                Ok(ok(header, export.text.into_bytes()))
+            }
             other => Err(format!("unknown op \"{other}\"")),
         }
     }

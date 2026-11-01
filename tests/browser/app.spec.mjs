@@ -883,6 +883,37 @@ test('imports a CGMES model, edits its operating point and exports it as SSH and
   await expect(page.locator('.log')).toContainText('1 changed value in SSH');
 });
 
+test('exports the network as PSS/E RAW, checked by reading it back, and the file imports again', async ({ page }) => {
+  await open(page);
+  await page.locator('.ribbon-tab[data-tab="file"]').click();
+  await page.locator('.backstage nav [data-page="export"]').click();
+  await page.locator('.backstage .card', { hasText: 'PSS/E RAW file' }).click();
+  const dialog = page.getByRole('dialog');
+  const version = dialog.getByRole('group', { name: 'Version' });
+  await expect(version.getByRole('button', { name: '33' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(dialog.locator('.import-status .pill')).toHaveText('Verified');
+  await expect(dialog).toContainText('PSS/E 33 · 14 buses');
+  // Another version writes the file again, and the check is the new file's.
+  await version.getByRole('button', { name: '35' }).click();
+  await expect(version.getByRole('button', { name: '35' })).toBeFocused();
+  await expect(dialog.locator('.import-lead')).toContainText('PSS/E 35');
+  await expect(dialog.locator('.import-status .pill')).toHaveText('Verified');
+  const download = page.waitForEvent('download');
+  await dialog.getByRole('button', { name: 'Save file' }).click();
+  const saved = await download;
+  expect(saved.suggestedFilename()).toMatch(/\.raw$/);
+  const text = readFileSync(/** @type {string} */ (await saved.path()), 'latin1');
+  expect(text.startsWith('0, 100, 35,')).toBe(true);
+  await page.locator('.dock-tab[data-tab="output"]').click();
+  await expect(page.locator('.log')).toContainText('as PSS/E RAW version 35, 14 buses. Read back and solved again, the file reproduces');
+  // The file opens in PowerStudio again, through the import dialog.
+  const chooser = page.waitForEvent('filechooser');
+  await page.keyboard.press('ControlOrMeta+Shift+O');
+  await (await chooser).setFiles({ name: 'ieee14.raw', mimeType: 'text/plain', buffer: Buffer.from(text, 'latin1') });
+  await expect(page.getByRole('dialog')).toContainText('PSS/E RAW version 35');
+  await expect(page.getByRole('dialog').locator('.import-status .pill')).toHaveText('Exact');
+});
+
 /** ANDES's published IEEE 14-bus RAW and DYR files from `.cache/reference`, or null when they have not been fetched. */
 function ieee14Dynamic() {
   const cases = JSON.parse(readFileSync(new URL('../oracle/dyn-cases.json', import.meta.url), 'utf8'));

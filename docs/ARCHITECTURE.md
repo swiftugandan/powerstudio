@@ -308,6 +308,19 @@ limit.
    document through `normalizeDocument` like any file, and its load flows start from the imported voltages, then
    from their own last solution.
 
+## Data flow of a RAW export
+
+1. `App.exportRaw` serialises the document as the active study case composes it and opens `ui/export-raw-dialog.js`,
+   which asks for version 33 or 35. The dialog sends the request built by `engine/exchange.js`
+   (`rawExportRequest`: `{ op: 'export_raw', rev }`, the document as payload) through the engine client's `call` to the
+   first worker. It sends it again when the version changes and shows only the newest reply.
+2. The engine (`ps-study`'s `exchange::export_raw`) converts the document into its model, solves it, writes RAW with
+   those voltages (`ps-io`'s `psse_write`), reads the file back with its RAW importer, solves that and compares every
+   busbar (`exchange::raw_read_back`). The reply's header is the summary (`RawExportSummary` in `engine/reports.js`)
+   and its payload the file.
+3. The dialog shows the check and the writer's notes; **Save file** downloads exactly the file it checked, and the
+   output log records the export.
+
 ## Build
 
 `scripts/build-engine.mjs` compiles the engine for `wasm32-unknown-unknown` with SIMD128, using the toolchain pinned

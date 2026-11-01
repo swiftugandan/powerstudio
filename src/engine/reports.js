@@ -79,6 +79,12 @@
  * @typedef {{ nodes: number, branches: number, sources: number, loads: number, switches: number }} ImportSize
  * @typedef {{ format: 'cgmes' | 'psse' | 'matpower', report: ImportReport, validation: ModelIssue[], conversion: string[],
  *   study: string[], fidelity: Fidelity, size: ImportSize, ms: number }} ImportSummary
+ * @typedef {{ read: boolean, solved: boolean, compared: number, missing: number, firstMissing: string, maxDv: number,
+ *   maxDa: number, worst: string, worstAngle: string, message: string }} RawCheck
+ *   A written RAW file read back by the engine's RAW importer and solved, compared node by node with its source
+ * @typedef {{ rev: 33 | 35, buses: number, solved: boolean, iterations: number, message: string, check: RawCheck,
+ *   notes: string[], issues: string[] }} RawExportSummary
+ *   `solved`: whether the network's load flow converged, so the file carries its voltages (a flat start otherwise)
  */
 
 /** @param {number | null | undefined} v */

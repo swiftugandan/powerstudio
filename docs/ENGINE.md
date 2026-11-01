@@ -716,8 +716,23 @@ three-winding transformers, asymmetric static var compensator ranges, controls w
 
 **Checked by** `engine/crates/ps-study/tests/roundtrip.rs`, which writes every reference model (the samples, MATPOWER
 cases up to 2,869 buses, the CGMES configurations and the PSS/E files) in both versions, reads the files back and
-solves them: every node keeps its voltage to 1e-14 p.u. And by `scripts/oracle/export_check.py`, which has PowSyBl
+solves them: every node keeps its voltage to 1e-14 p.u. The same file checks the app's export of the sample
+documents (`documents_export_as_raw_with_their_solution`): both versions carry the solution and read back to it, and
+`tests/import.test.mjs` exports through the WebAssembly engine, opens the file through the app's import and finds
+MATPOWER case30's solution and bus numbers again. And by `scripts/oracle/export_check.py`, which has PowSyBl
 read the same files: its load flow agrees with PowerStudio's on all 64 files to 4.2e-11 p.u. or better.
+
+**In the app** (File, Export, PSS/E RAW file) the engine's `export_raw` request (`ps-study/src/exchange.rs`,
+`export_raw`) takes the document as the active study case composes it and a version, 33 or 35. It solves the network
+as the file states it, with taps, shunt sections and reactive outputs where they are and no study case controls
+(`LoadFlowSettings::plain()` at 1e-8 MVA, the solution `ps export --solution` writes), and writes those voltages into
+the bus records (VM, VA), so the file starts PSS/E or PowerFactory from the solution rather than flat. It then reads
+the file back with the engine's own RAW importer, solves it again and compares every busbar through the bus the writer
+put it on (`raw_read_back`, the same check the round-trip test makes). The reply carries the file and a summary: the
+version, bus count, whether the load flow converged and in how many iterations, the read-back check (busbars
+compared, any missing, the largest voltage and angle differences and where), the writer's notes and what reading the
+document found. A network whose load flow does not converge is still written, from flat voltages, and the dialog says
+so. The export does not write DYR files or sequence data.
 
 On the command line, `ps cgmes <files> [--lf]` and `ps psse <file.raw> [--lf]` import and print the report, the
 validation and a load flow; `ps export <input>... --raw 33|35` writes RAW and `ps cgmes <files> --sv <out.xml>`

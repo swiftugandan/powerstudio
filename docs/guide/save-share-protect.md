@@ -26,12 +26,33 @@ The page cannot send your work anywhere. Its security policy forbids every netwo
 | **Project** | Every study case, scenario and variant, with the run log, in one file |
 | **Encrypted project** | The same file, locked with a passphrase |
 | **PowerStudio file** | The network as the active study case composes it, with its settings, as JSON |
+| **PSS/E RAW file** | The network as a bus-branch RAW file of version 33 or 35, with the voltages of a load flow, for PSS/E, PowerFactory and other tools that read RAW. See [Open the network in another tool](#open-the-network-in-another-tool) |
 | **CGMES SSH and SV** | The operating point, for a project imported from CGMES (the card only appears for those projects) |
 | **Diagram as SVG** | A vector drawing of the diagram |
 | **Diagram as PNG** | A bitmap of the whole diagram |
 | **Results table as CSV** | The table shown in the results panel |
 
 To open a **Project** or **PowerStudio file** again, select **File**, then **Import**, then **PowerStudio file or project**. You can also drop the file on the window. It opens as a new network. Nothing is overwritten.
+
+## Open the network in another tool
+
+Export the network as a PSS/E RAW file. PSS/E, PowerFactory, PowSyBl and other tools that read RAW can open it.
+
+1. Select the study case whose network you want to send. The file holds the network as that study case composes it.
+2. Select **File**, then **Export**, then **PSS/E RAW file**.
+3. Under **Version**, select **33** or **35**. Version 33 is the one most tools read. Choose 35 for PSS/E 35 and later.
+4. Wait for the check. PowerStudio writes the file, reads it back, solves it again and compares every busbar.
+5. Read the status. **Verified** means every busbar keeps its voltage. **Check** or **Differs** says what differs and why, and names the busbar that differs most when there is one. If the file could not be written, select the version again to retry.
+6. Open **What the file approximates** to see what RAW could not hold exactly.
+7. Select **Save file**.
+
+The command palette has the same export: press Ctrl+K and type **RAW**.
+
+**What the file holds.** RAW is a bus-branch format. Closed switches join their busbars. External grids become generators that hold their busbar voltage. An admittance that a RAW record has no place for becomes a fixed shunt at the same busbar. These keep the load flow the same.
+
+The bus records carry the voltages of a load flow with taps, shunt sections and reactive outputs where they are. The study case's controls, such as reactive power limits and tap control, are not applied to them. The other tool starts from these voltages and solves with its own settings. If the network's load flow does not converge, the file starts from flat voltages and the dialog says so.
+
+The file does not hold dynamic models (DYR), short-circuit sequence data, the diagram or the study case settings.
 
 ## Print or save a study report
 

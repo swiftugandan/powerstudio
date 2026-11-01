@@ -4,7 +4,7 @@
 
 import { h } from './dom.js';
 import { modal } from './feedback.js';
-import { fixed } from './format.js';
+import { fixed, count, scientific as sci } from './format.js';
 
 /** @typedef {import('../engine/reports.js').ImportSummary} ImportSummary */
 
@@ -16,14 +16,6 @@ function formatName(s) {
   if (s.format === 'cgmes') return profiles.some(p => p.includes('/3.0') || p.includes('-EU')) ? 'CGMES 3.0' : 'CGMES 2.4.15';
   return profiles[0] ?? FORMAT[s.format];
 }
-
-/** @param {number} n @param {string} one @param {string} [many] */
-const count = (n, one, many = `${one}s`) => `${n.toLocaleString('en-GB')} ${n === 1 ? one : many}`;
-
-/** A number in scientific notation for differences. @param {number} x */
-const sci = x => (x === 0 ? '0' : x.toExponential(1).replace('e', ' × 10^').replace('^+', '^').replace(/\^(-?\d+)/, (_, e) => toSuper(e)));
-/** @param {string} e */
-const toSuper = e => [...e].map(c => '⁻⁰¹²³⁴⁵⁶⁷⁸⁹'['-0123456789'.indexOf(c)]).join('');
 
 /** How closely the editor's network reproduces the model, as a status line. @param {ImportSummary['fidelity']} f */
 function fidelityLine(f) {
