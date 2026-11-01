@@ -724,14 +724,18 @@ pub struct RawCheck {
     pub solved: bool,
     /// Nodes compared.
     pub compared: usize,
-    /// Energised nodes whose bus has no solution after the round trip.
+    /// Energised nodes whose bus has no solution (or a non-finite one) after the round trip.
     pub missing: usize,
-    /// Largest voltage difference, p.u.
+    /// The first of them.
+    pub first_missing: String,
+    /// Largest voltage difference over the nodes compared, p.u. (always finite).
     pub max_dv: f64,
-    /// Largest angle difference, degrees.
+    /// Largest angle difference over the nodes compared, degrees (always finite).
     pub max_da: f64,
-    /// The node where the voltage or angle differs most, or the first missing one.
+    /// The node where the voltage differs most.
     pub worst: String,
+    /// The node where the angle differs most.
+    pub worst_angle: String,
     /// Why the file did not read back or solve, when it did not.
     pub message: String,
 }
@@ -780,45 +784,35 @@ pub fn raw_read_back(model: &Model, written: &ps_io::psse_write::Written, before
     }
     check.solved = true;
     let node_of: HashMap<&str, usize> = back.nodes.iter().enumerate().map(|(k, n)| (n.id.as_str(), k)).collect();
-    let (mut worst_dv, mut worst_da) = (String::new(), String::new());
     for (k, v) in before.iter().enumerate() {
         let (Some((vm, va)), Some(Some(bus))) = (v, written.bus_of_node.get(k)) else {
             continue;
         };
         let id = model.nodes.get(k).map_or("", |n| n.id.as_str());
-        match node_of
+        let solved = node_of
             .get(format!("B{bus}").as_str())
-            .and_then(|&j| after.get(j).copied().flatten())
-        {
-            Some((vm2, va2)) => {
+            .and_then(|&j| after.get(j).copied().flatten());
+        match solved {
+            // A non-finite voltage is no solution: counted as missing, so the differences stay finite numbers.
+            Some((vm2, va2)) if vm2.is_finite() && va2.is_finite() && vm.is_finite() && va.is_finite() => {
                 check.compared += 1;
-                // A non-finite result counts as an infinite difference.
-                let finite = |d: f64| if d.is_finite() { d } else { f64::INFINITY };
-                let (dv, da) = (finite((vm2 - vm).abs()), finite((va2 - va).abs()));
-                if dv > check.max_dv {
-                    check.max_dv = dv;
-                    worst_dv = id.to_string();
+                let (dv, da) = ((vm2 - vm).abs(), (va2 - va).abs());
+                if dv > check.max_dv || check.worst.is_empty() {
+                    check.max_dv = check.max_dv.max(dv);
+                    check.worst = id.to_string();
                 }
-                if da > check.max_da {
-                    check.max_da = da;
-                    worst_da = id.to_string();
+                if da > check.max_da || check.worst_angle.is_empty() {
+                    check.max_da = check.max_da.max(da);
+                    check.worst_angle = id.to_string();
                 }
             }
-            None => {
+            _ => {
                 if check.missing == 0 {
-                    check.worst = id.to_string();
+                    check.first_missing = id.to_string();
                 }
                 check.missing += 1;
             }
         }
-    }
-    if check.missing == 0 {
-        // Voltage first: an angle difference without one is rarely what a reader looks for.
-        check.worst = if check.max_dv > 0.0 || worst_da.is_empty() {
-            worst_dv
-        } else {
-            worst_da
-        };
     }
     check
 }

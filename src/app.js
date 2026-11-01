@@ -35,7 +35,7 @@ import { seal, unseal, isSealed, MIN_PASSPHRASE } from './core/sealed.js';
 import { h, esc, byId, download, fileName, setHtml, yieldToBrowser } from './ui/dom.js';
 import { icon, logo } from './ui/icons.js';
 import { kbd, isMac } from './ui/keys.js';
-import { fixed, duration, scientific } from './ui/format.js';
+import { fixed, duration } from './ui/format.js';
 import { enumLabel } from './ui/fields.js';
 import { REPO_URL, SITE_URL } from './core/version.js';
 
@@ -566,22 +566,22 @@ export class App {
   async exportRaw() {
     const busy = () => this.running || this.arranging;
     if (busy()) { toast('info', 'Wait for the calculation to finish, then export again.', { title: 'Engine busy' }); return; }
+    // A recalculation on edit still waiting to start would share the worker with the export.
+    clearTimeout(this.autoTimer);
     const name = this.store.doc.name, studyCase = activeCase(this.project).name;
     const json = await serialise(this.store.doc, () => true, yieldToBrowser);
     if (json === null) return;
     const chosen = await exportRawDialog({ name, write: async rev => {
       // The first worker does one thing at a time.
-      if (busy()) throw new Error('a calculation started meanwhile; choose the version again when it finishes.');
+      if (busy()) throw new Error('a calculation is running.');
       const { header, payload } = rawExportRequest(json, rev);
       return rawExportReply(await this.engine.call(header, payload));
     } });
     if (!chosen) return;
     const s = chosen.summary;
     download(new Blob([chosen.text], { type: 'text/plain' }), fileName(name, '.raw'));
-    const check = !s.solved ? 'its load flow does not converge, so it starts from flat voltages'
-      : s.check.solved && s.check.missing === 0 ? `it reads back to the same voltages, within ${scientific(Math.max(s.check.maxDv, 1e-15))} p.u. of its load flow`
-        : `it reads back with differences: ${s.check.message || `up to ${fixed(s.check.maxDv, 4)} p.u. at ${s.check.worst}`}`;
-    this.log(rawCheckLine(s).kind === 'ok' ? 'ok' : 'warn', `Exported “${name}” (${studyCase}) as PSS/E RAW version ${s.rev}: ${s.buses.toLocaleString('en-GB')} buses; ${check}.`);
+    const line = rawCheckLine(s);
+    this.log(line.kind === 'ok' ? 'ok' : 'warn', `Exported “${name}” (${studyCase}) as PSS/E RAW version ${s.rev}, ${s.buses.toLocaleString('en-GB')} buses. ${line.text}`);
     for (const n of s.notes) this.log('info', `RAW export: ${n}`);
   }
 

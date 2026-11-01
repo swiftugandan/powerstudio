@@ -895,6 +895,7 @@ test('exports the network as PSS/E RAW, checked by reading it back, and the file
   await expect(dialog).toContainText('PSS/E 33 · 14 buses');
   // Another version writes the file again, and the check is the new file's.
   await version.getByRole('button', { name: '35' }).click();
+  await expect(version.getByRole('button', { name: '35' })).toBeFocused();
   await expect(dialog.locator('.import-lead')).toContainText('PSS/E 35');
   await expect(dialog.locator('.import-status .pill')).toHaveText('Verified');
   const download = page.waitForEvent('download');
@@ -904,7 +905,7 @@ test('exports the network as PSS/E RAW, checked by reading it back, and the file
   const text = readFileSync(/** @type {string} */ (await saved.path()), 'latin1');
   expect(text.startsWith('0, 100, 35,')).toBe(true);
   await page.locator('.dock-tab[data-tab="output"]').click();
-  await expect(page.locator('.log')).toContainText('as PSS/E RAW version 35: 14 buses; it reads back to the same voltages');
+  await expect(page.locator('.log')).toContainText('as PSS/E RAW version 35, 14 buses. Read back and solved again, the file reproduces');
   // The file opens in PowerStudio again, through the import dialog.
   const chooser = page.waitForEvent('filechooser');
   await page.keyboard.press('ControlOrMeta+Shift+O');

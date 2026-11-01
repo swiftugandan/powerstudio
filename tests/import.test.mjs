@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { read, golden, engine } from './helpers.mjs';
-import { importFiles, exportRaw, RAW_VERSIONS } from '../src/engine/exchange.js';
+import { importFiles, exportRaw, rawExportReply, RAW_VERSIONS } from '../src/engine/exchange.js';
 import { normalizeDocument } from '../src/core/document.js';
 import { VECTOR_GROUPS } from '../src/core/catalog.js';
 import { autoLayout } from '../src/core/layout.js';
@@ -66,6 +66,14 @@ test('an imported MATPOWER case exports as RAW that keeps its bus numbers and so
     assert.ok(i >= 0, `bus ${b} keeps its number`);
     assert.ok(Math.abs(start.vm[i] - g.vm[k]) < 1e-8 && Math.abs(start.va[i] - g.va[k]) < 1e-6, `bus ${b}`);
   });
+});
+
+test('a difference JSON cannot hold arrives as infinite, never as zero', () => {
+  const header = { ok: true, rev: 33, buses: 1, solved: true, iterations: 1, message: '', notes: [], issues: [],
+    check: { read: true, solved: true, compared: 1, missing: 0, firstMissing: '', maxDv: null, maxDa: 0, worst: 'B1', worstAngle: 'B1', message: '' } };
+  const { summary } = rawExportReply({ header, payload: new Uint8Array() });
+  assert.equal(summary.check.maxDv, Infinity);
+  assert.equal(summary.check.maxDa, 0);
 });
 
 test('the engine refuses a RAW version it does not write', () => {

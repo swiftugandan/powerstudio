@@ -68,13 +68,14 @@ fn round_trip(name: &str, m: &Model, failures: &mut Vec<String>) {
         if check.missing > 0 {
             failures.push(format!(
                 "{name} v{rev}: {} bus(es) missing after the round trip, first at {}",
-                check.missing, check.worst
+                check.missing, check.first_missing
             ));
-        } else if dv > V_TOL || da > ANGLE_TOL {
-            failures.push(format!(
-                "{name} v{rev}: V {dv:.1e} p.u., angle {da:.1e}° at {}",
-                check.worst
-            ));
+        }
+        if dv > V_TOL {
+            failures.push(format!("{name} v{rev}: V {dv:.1e} p.u. at {}", check.worst));
+        }
+        if da > ANGLE_TOL {
+            failures.push(format!("{name} v{rev}: angle {da:.1e}° at {}", check.worst_angle));
         }
     }
 }
@@ -142,8 +143,16 @@ fn documents_export_as_raw_with_their_solution() {
             );
             let c = &export.check;
             assert!(c.read && c.solved, "{name} v{rev}: {}", c.message);
-            assert_eq!(c.missing, 0, "{name} v{rev}: missing at {}", c.worst);
-            assert!(c.compared > 0 && export.buses >= c.compared.min(export.buses));
+            assert_eq!(c.missing, 0, "{name} v{rev}: missing at {}", c.first_missing);
+            // Every busbar of the document is compared, and has a bus record of its own (the samples have no switches).
+            let busbars = doc["elements"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["cls"] == "bus")
+                .count();
+            assert_eq!(c.compared, busbars, "{name} v{rev}");
+            assert!(export.buses >= busbars, "{name} v{rev}: {} buses", export.buses);
             assert!(
                 c.max_dv <= V_TOL && c.max_da <= ANGLE_TOL,
                 "{name} v{rev}: V {:.1e}, angle {:.1e} at {}",

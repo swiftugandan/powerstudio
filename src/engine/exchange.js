@@ -48,8 +48,12 @@ export function rawExportRequest(docJson, rev) {
  * @returns {{ summary: RawExportSummary, text: string }}
  */
 export function rawExportReply(reply) {
-  const { ok: _ok, ...summary } = reply.header;
-  return { summary: /** @type {RawExportSummary} */ (/** @type {unknown} */ (summary)), text: new TextDecoder().decode(reply.payload) };
+  const { ok: _ok, ...rest } = reply.header;
+  const summary = /** @type {RawExportSummary} */ (/** @type {unknown} */ (rest));
+  // JSON has no infinity: a difference the engine could not express arrives as null, and must not read as zero.
+  const finite = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) ? v : Infinity);
+  summary.check = { ...summary.check, maxDv: finite(summary.check.maxDv), maxDa: finite(summary.check.maxDa) };
+  return { summary, text: new TextDecoder().decode(reply.payload) };
 }
 
 /**

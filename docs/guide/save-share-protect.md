@@ -42,7 +42,7 @@ Export the network as a PSS/E RAW file. PSS/E, PowerFactory, PowSyBl and other t
 2. Select **File**, then **Export**, then **PSS/E RAW file**.
 3. Under **Version**, select **33** or **35**. Version 33 is the one most tools read. Choose 35 for PSS/E 35 and later.
 4. Wait for the check. PowerStudio writes the file, reads it back, solves it again and compares every busbar.
-5. Read the status. **Verified** means every busbar keeps its voltage. **Check** or **Differs** gives the busbar that differs most and why.
+5. Read the status. **Verified** means every busbar keeps its voltage. **Check** or **Differs** says what differs and why, and names the busbar that differs most when there is one. If the file could not be written, select the version again to retry.
 6. Open **What the file approximates** to see what RAW could not hold exactly.
 7. Select **Save file**.
 

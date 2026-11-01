@@ -27,13 +27,16 @@ export function rawCheckLine(s) {
     return { kind: 'warn', pill: 'Check', text: `The network’s load flow does not converge (${s.message}), so the file starts from flat voltages and its solution could not be checked. It reads back as a RAW file.` };
   }
   if (!c.solved) return { kind: 'bad', pill: 'Differs', text: `The file reads back but ${c.message.replace(/^the written file /, 'it ')}.` };
-  if (c.missing > 0) return { kind: 'bad', pill: 'Differs', text: `${count(c.missing, 'busbar')} of the network ${c.missing === 1 ? 'has' : 'have'} no voltage when the file is solved, first at ${c.worst}.` };
+  if (c.missing > 0) return { kind: 'bad', pill: 'Differs', text: `${count(c.missing, 'busbar')} of the network ${c.missing === 1 ? 'has' : 'have'} no voltage when the file is solved, first at ${c.firstMissing}.` };
+  if (!Number.isFinite(c.maxDv) || !Number.isFinite(c.maxDa)) return { kind: 'bad', pill: 'Differs', text: 'The file’s load flow gives a voltage that cannot be compared with the network’s.' };
   if (c.maxDv <= 1e-6 && c.maxDa <= 1e-4) {
     const all = c.compared === 1 ? 'its busbar keeps its voltage' : `all ${count(c.compared, 'busbar')} keep their voltage`;
     const within = c.maxDv === 0 && c.maxDa === 0 ? 'exactly' : `within ${scientific(Math.max(c.maxDv, 1e-15))} p.u.`;
     return { kind: 'ok', pill: 'Verified', text: `Read back and solved again, the file reproduces the network’s load flow: ${all} ${within}` };
   }
-  return { kind: 'warn', pill: 'Check', text: `Read back and solved again, the file differs from the network’s load flow by up to ${fixed(c.maxDv, 4)} p.u. (${fixed(c.maxDa, 2)}°), at ${c.worst}. The notes below say what the file approximates.` };
+  // Name the busbar of whichever difference is out of bounds: the voltage's, or the angle's when voltages agree.
+  const at = c.maxDv > 1e-6 ? c.worst : c.worstAngle;
+  return { kind: 'warn', pill: 'Check', text: `Read back and solved again, the file differs from the network’s load flow by up to ${fixed(c.maxDv, 4)} p.u. and ${fixed(c.maxDa, 2)}°, most at ${at}. The notes below say what the file approximates.` };
 }
 
 /**
@@ -47,7 +50,10 @@ export function exportRawDialog(spec) {
   let rev = RAW_VERSIONS[0];
   /** @type {RawExport | null} */
   let current = null;
-  let token = 0;
+  let token = 0, failed = false;
+  // The engine client's worker does one request at a time: a write waits for the one before it.
+  /** @type {Promise<unknown>} */
+  let queue = Promise.resolve();
 
   const seg = h('div', { class: 'seg', role: 'group', 'aria-labelledby': 'raw-version-label' });
   const hint = h('p', { class: 'export-hint', id: 'raw-version-hint' });
@@ -64,9 +70,12 @@ export function exportRawDialog(spec) {
     if (save) save.disabled = !on;
   };
 
+  // The buttons stay put (the focus with them); a click on the chosen version writes it again after a failure.
+  const buttons = RAW_VERSIONS.map(v => h('button', { type: 'button', 'aria-describedby': 'raw-version-hint', text: String(v),
+    onclick: () => { if (v !== rev || failed) { rev = v; showVersion(); void run(); } } }));
+  seg.append(...buttons);
   const showVersion = () => {
-    seg.replaceChildren(...RAW_VERSIONS.map(v => h('button', { type: 'button', 'aria-pressed': String(v === rev), 'aria-describedby': 'raw-version-hint', text: String(v),
-      onclick: () => { if (v !== rev) { rev = v; showVersion(); void run(); } } })));
+    buttons.forEach((b, k) => b.setAttribute('aria-pressed', String(RAW_VERSIONS[k] === rev)));
     hint.textContent = VERSION_HINT[rev];
   };
 
@@ -84,19 +93,25 @@ export function exportRawDialog(spec) {
   };
 
   const run = async () => {
-    const mine = ++token;
+    const mine = ++token, r = rev;
     current = null;
+    failed = false;
     ready(false);
-    result.replaceChildren(h('div', { class: 'import-status', role: 'status' }, h('span', { class: 'pill neutral', text: 'Writing' }), h('span', { text: `Writing version ${rev} and reading it back…` })));
+    result.replaceChildren(h('div', { class: 'import-status', role: 'status' }, h('span', { class: 'pill neutral', text: 'Writing' }), h('span', { text: `Writing version ${r} and reading it back…` })));
+    // A write that a newer one has replaced while it waited is not sent.
+    const job = queue.then(() => (mine === token ? spec.write(r) : null));
+    queue = job.catch(() => {});
     try {
-      const x = await spec.write(rev);
-      if (mine !== token) return;
+      const x = await job;
+      if (mine !== token || !x) return;
       current = x;
       showResult(x);
       ready(x.summary.check.read);
     } catch (error) {
       if (mine !== token) return;
-      result.replaceChildren(h('div', { class: 'import-status bad', role: 'alert' }, h('span', { class: 'pill bad', text: 'Failed' }), h('span', { text: `The RAW file could not be written: ${error instanceof Error ? error.message : error}` })));
+      failed = true;
+      result.replaceChildren(h('div', { class: 'import-status bad', role: 'alert' }, h('span', { class: 'pill bad', text: 'Failed' }),
+        h('span', { text: `The RAW file could not be written: ${error instanceof Error ? error.message : error} Select version ${r} to try again.` })));
     }
   };
 

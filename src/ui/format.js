@@ -51,6 +51,7 @@ const SUPER = '⁻⁰¹²³⁴⁵⁶⁷⁸⁹';
 
 /** A small difference in scientific notation: "3.2 × 10⁻¹⁴". @param {number} x */
 export function scientific(x) {
+  if (!Number.isFinite(x)) return '—';
   if (x === 0) return '0';
   const [m, e] = x.toExponential(1).split('e');
   return `${m} × 10${[...String(Number(e))].map(c => SUPER['-0123456789'.indexOf(c)]).join('')}`;
